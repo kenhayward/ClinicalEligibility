@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 5, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 6, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.6",
+      "releaseDate": "2026-07-15",
+      "enhancements": [
+        "Owner: a new 'Create database seed' item on the owner account menu dumps the six seed tables (via pg_dump) into a loader-compatible archive, shows per-table progress as it runs, and offers the result for download - so new seed releases can be produced from the running app as coverage grows, then tested with the quickstart stack. The web image now bundles the postgresql client to provide pg_dump."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.5",
       "releaseDate": "2026-07-15",

@@ -48,6 +48,7 @@
             @if (isOwner)
             {
                 <li><button class="dropdown-item" type="button" id="runtime-parameters-btn">Runtime Parameters</button></li>
+                <li><button class="dropdown-item" type="button" id="create-seed-btn">Create database seed</button></li>
                 <li><hr class="dropdown-divider" /></li>
             }
             @* Theme flyout. Bootstrap 5 dropped native nested dropdowns, so this
@@ -87,5 +88,6 @@
     @if (isOwner)
     {
         @await Html.PartialAsync("_RuntimeParametersModal")
+        @await Html.PartialAsync("_CreateSeedModal")
     }
 }

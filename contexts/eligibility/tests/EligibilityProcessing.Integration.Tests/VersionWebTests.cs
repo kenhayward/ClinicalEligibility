@@ -23,7 +23,7 @@ public class VersionWebTests : IClassFixture<WebTests.Factory>
     }
 
     [Fact]
-    public async Task Version_endpoint_reports_0_1_5_with_schema_count()
+    public async Task Version_endpoint_reports_0_1_6_with_schema_count()
     {
         var client = _factory.CreateClient();
         var response = await client.GetAsync("/Version");
@@ -31,7 +31,7 @@ public class VersionWebTests : IClassFixture<WebTests.Factory>
 
         var info = await response.Content.ReadFromJsonAsync<VersionDto>();
         Assert.NotNull(info);
-        Assert.Equal("0.1.5", info!.Version);
+        Assert.Equal("0.1.6", info!.Version);
         Assert.Equal("2026-07-15", info.ReleaseDate);
         Assert.Equal(PostgresGateway.MigrationNames.Count, info.SchemaVersion);
     }
@@ -45,7 +45,7 @@ public class VersionWebTests : IClassFixture<WebTests.Factory>
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("Release notes", body);
-        Assert.Contains("0.1.5", body);
+        Assert.Contains("0.1.6", body);
         Assert.Contains("Enhancements", body);
     }
 
@@ -55,7 +55,7 @@ public class VersionWebTests : IClassFixture<WebTests.Factory>
         var client = _factory.CreateClient();
         var response = await client.GetAsync("/");
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("v0.1.5", body);
+        Assert.Contains("v0.1.6", body);
         Assert.Contains("/ReleaseNotes", body);
     }
 
@@ -77,7 +77,7 @@ public class VersionWebTests : IClassFixture<WebTests.Factory>
     public void AppVersion_GetInfo_formats_version_and_passes_schema_version_through()
     {
         var info = AppVersion.GetInfo(schemaVersion: 7);
-        Assert.Equal("0.1.5", info.Version);
+        Assert.Equal("0.1.6", info.Version);
         Assert.Equal(7, info.SchemaVersion);
         Assert.Equal("Eligibility Pipeline", info.App);
     }
