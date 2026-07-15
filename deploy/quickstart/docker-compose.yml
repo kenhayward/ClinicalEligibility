@@ -111,15 +111,23 @@ services:
     # etc.) placed there reaches the app. Compose's top-level .env only does
     # ${VAR} substitution in this file - it is NOT passed to containers - so
     # without this an app setting in .env would be silently ignored. Optional so
-    # the zero-config `docker compose up` (no .env) still works. The explicit
-    # `environment:` below wins over .env for the keys it sets.
+    # the zero-config `docker compose up` (no .env) still works. NOTE: a value in
+    # `environment:` below OVERRIDES the same key from env_file, so the connection
+    # strings there are written as ${VAR:-default} - the default keeps zero-config
+    # working while still letting a .env value win (compose expands ${VAR} from
+    # .env before applying env_file).
     env_file:
       - path: .env
         required: false
     environment:
       ASPNETCORE_URLS: http://+:8080
       TZ: ${TZ:-UTC}
-      Postgres__ConnectionStringOutput: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
+      # Output DB. Defaults to the embedded Postgres, but an operator can point it
+      # elsewhere - e.g. at a production DB to export its embeddings - by setting
+      # Postgres__ConnectionStringOutput in deploy/quickstart/.env; that value wins
+      # via the ${...} default below. The embedded default still tracks the
+      # POSTGRES_* vars so a customized embedded db/user/password stays in sync.
+      Postgres__ConnectionStringOutput: "${Postgres__ConnectionStringOutput:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}}"
       # Source (AACT) is only needed to run NEW inference from the quickstart. It
       # defaults to the embedded DB - which has no ctgov schema, but that is
       # harmless: browsing the seed and "Create database seed" never query the

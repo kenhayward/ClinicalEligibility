@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 9, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 10, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.10",
+      "releaseDate": "2026-07-15",
+      "enhancements": [],
+      "fixes": [
+        "Quickstart: the web service's output database connection (Postgres__ConnectionStringOutput) can now be overridden from deploy/quickstart/.env, matching how the AACT source already works. Previously it was hard-coded in the compose file's environment block, which silently overrode any .env value - so pointing the dashboard at a different database (for example, to export/import a production instance's embeddings) did not take effect. The embedded default is unchanged and still tracks the POSTGRES_* variables, so zero-config `docker compose up` is unaffected."
+      ]
+    },
     {
       "version": "0.1.9",
       "releaseDate": "2026-07-15",
