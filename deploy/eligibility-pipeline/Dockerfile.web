@@ -18,7 +18,10 @@ WORKDIR /app
 # without it every DB connection fails with "Cannot load library libgssapi_krb5.so.2".
 # tzdata: real timezone data so DateTime.Now and log timestamps honor the TZ env
 # var (e.g. TZ=Europe/London) instead of defaulting to UTC.
-RUN apk add --no-cache krb5-libs tzdata
+# postgresql18-client: the owner-only "Create database seed" feature shells out to
+# pg_dump to produce a loader-compatible seed. Pinned to major 18 to match the
+# pg18 server (an older pg_dump refuses to dump a newer server).
+RUN apk add --no-cache krb5-libs tzdata postgresql18-client
 EXPOSE 8080
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "EligibilityProcessing.Web.dll"]

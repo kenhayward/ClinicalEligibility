@@ -1,0 +1,200 @@
+@*
+    Create Database Seed modal (Owner only). Runs pg_dump (server-side, in the
+    SeedJobRunner background service) to produce a loader-compatible seed of the six
+    seed tables, shows live progress by polling /Seed/State, and offers the result
+    for download. The dump is read-only; nothing in the database is modified.
+*@
+<div class="modal fade" id="createSeedModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create database seed</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @Html.AntiForgeryToken()
+                <div id="cs-error" class="alert alert-danger d-none py-2"></div>
+
+                <p class="small text-muted mb-2">
+                    Dumps the six seed tables (<code>eligibility</code>, <code>eligibility_study</code>,
+                    <code>eligibility_study_detail</code>, <code>eligibility_run</code>,
+                    <code>eligibility_failed</code>, <code>eligibility_umls_retry</code>) into a
+                    single compressed archive, in the exact format the quickstart seed loader
+                    restores. This is a read-only dump - nothing in the database changes. Use it
+                    to publish a new seed release as coverage grows.
+                </p>
+
+                @* Idle / confirm *@
+                <div id="cs-confirm">
+                    <p class="small mb-0">This can take a few minutes for the full corpus. Start now?</p>
+                </div>
+
+                @* Progress *@
+                <div id="cs-progress" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-secondary" id="cs-status">running</span>
+                        <span class="small text-muted"><span id="cs-elapsed">0</span>s</span>
+                    </div>
+                    <div class="progress mb-1" style="height:1rem;">
+                        <div id="cs-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                             role="progressbar" style="width:0%;">0%</div>
+                    </div>
+                    <div class="small text-muted" id="cs-detail">Preparing...</div>
+                </div>
+
+                @* Result *@
+                <div id="cs-result" class="d-none">
+                    <div class="alert alert-success py-2 mb-0">
+                        Seed created: <strong id="cs-file"></strong> (<span id="cs-size"></span>).
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-danger btn-sm d-none" id="cs-cancel">Cancel dump</button>
+                <button type="button" class="btn btn-success btn-sm d-none" id="cs-download">Download</button>
+                <button type="button" class="btn btn-primary btn-sm" id="cs-start">Create seed</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const modalEl = document.getElementById("createSeedModal");
+        if (!modalEl || typeof bootstrap === "undefined") return;
+        if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
+        const modal = new bootstrap.Modal(modalEl);
+
+        const errorBox = document.getElementById("cs-error");
+        const confirmEl = document.getElementById("cs-confirm");
+        const progressEl = document.getElementById("cs-progress");
+        const resultEl = document.getElementById("cs-result");
+        const statusEl = document.getElementById("cs-status");
+        const elapsedEl = document.getElementById("cs-elapsed");
+        const barEl = document.getElementById("cs-bar");
+        const detailEl = document.getElementById("cs-detail");
+        const fileEl = document.getElementById("cs-file");
+        const sizeEl = document.getElementById("cs-size");
+        const startBtn = document.getElementById("cs-start");
+        const cancelBtn = document.getElementById("cs-cancel");
+        const downloadBtn = document.getElementById("cs-download");
+
+        let poll = null;
+        let lastFileName = "seed.dump";
+
+        function token() {
+            const el = modalEl.querySelector('input[name="__RequestVerificationToken"]');
+            return el ? el.value : "";
+        }
+        function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("d-none"); }
+        function clearError() { errorBox.classList.add("d-none"); }
+        function show(el, on) { el.classList.toggle("d-none", !on); }
+
+        function humanSize(bytes) {
+            if (bytes == null) return "";
+            const u = ["B", "KB", "MB", "GB"];
+            let i = 0, n = bytes;
+            while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+            return n.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+        }
+
+        function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
+
+        function render(v) {
+            // v is null (never run) or a SeedJobView.
+            const running = v && v.status === "running";
+            const completed = v && v.status === "completed";
+            const failed = v && (v.status === "failed" || v.status === "cancelled");
+
+            show(confirmEl, !v || (!running && !completed));
+            show(progressEl, running);
+            show(resultEl, completed);
+            show(startBtn, !running);
+            startBtn.disabled = !!running;
+            startBtn.textContent = (completed || failed) ? "Create again" : "Create seed";
+            show(cancelBtn, running);
+            show(downloadBtn, completed);
+
+            if (v) {
+                statusEl.textContent = v.status;
+                const total = v.totalTables || 6;
+                const pct = Math.min(100, Math.round((v.tablesDumped / total) * 100));
+                barEl.style.width = pct + "%";
+                barEl.textContent = pct + "%";
+                elapsedEl.textContent = Math.round(v.elapsedSeconds || 0);
+                detailEl.textContent = v.currentTable
+                    ? `Dumping ${v.currentTable} (table ${v.tablesDumped} of ${total})`
+                    : `Dumped ${v.tablesDumped} of ${total} tables`;
+                if (completed) {
+                    lastFileName = v.fileName || "seed.dump";
+                    fileEl.textContent = v.fileName || "";
+                    sizeEl.textContent = humanSize(v.fileSizeBytes);
+                }
+                if (failed && v.error) showError(v.error);
+            }
+
+            if (running && !poll) poll = setInterval(refresh, 1000);
+            if (!running) stopPoll();
+        }
+
+        async function refresh() {
+            try {
+                const resp = await fetch("/Seed/State", { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                if (!resp.ok) return;
+                render(await resp.json());
+            } catch (e) { /* transient; next tick retries */ }
+        }
+
+        startBtn.addEventListener("click", async function () {
+            clearError();
+            startBtn.disabled = true;
+            try {
+                const body = new URLSearchParams();
+                body.set("__RequestVerificationToken", token());
+                const resp = await fetch("/Seed/Run", {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" },
+                    body: body
+                });
+                if (resp.status === 409) {
+                    const j = await resp.json().catch(() => null);
+                    showError("Busy: " + ((j && j.activity) || "another job") + " is running. Try again when it finishes.");
+                    startBtn.disabled = false;
+                    return;
+                }
+                if (!resp.ok) { showError("Failed to start (" + resp.status + ")"); startBtn.disabled = false; return; }
+                await refresh();
+            } catch (err) {
+                showError(err.message);
+                startBtn.disabled = false;
+            }
+        });
+
+        cancelBtn.addEventListener("click", async function () {
+            clearError();
+            try {
+                const body = new URLSearchParams();
+                body.set("__RequestVerificationToken", token());
+                await fetch("/Seed/Cancel", {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" },
+                    body: body
+                });
+                await refresh();
+            } catch (err) { showError(err.message); }
+        });
+
+        downloadBtn.addEventListener("click", async function () {
+            clearError();
+            try {
+                await window.downloadFile("/Seed/Download", lastFileName);
+            } catch (err) { showError(err.message); }
+        });
+
+        const openBtn = document.getElementById("create-seed-btn");
+        if (openBtn) openBtn.addEventListener("click", function () { clearError(); modal.show(); refresh(); });
+
+        modalEl.addEventListener("hidden.bs.modal", stopPoll);
+    });
+</script>

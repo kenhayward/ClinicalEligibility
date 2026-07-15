@@ -120,7 +120,14 @@ services:
       ASPNETCORE_URLS: http://+:8080
       TZ: ${TZ:-UTC}
       Postgres__ConnectionStringOutput: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
-      Postgres__ConnectionStringSource: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
+      # Source (AACT) is only needed to run NEW inference from the quickstart. It
+      # defaults to the embedded DB - which has no ctgov schema, but that is
+      # harmless: browsing the seed and "Create database seed" never query the
+      # source, and the app still needs a valid connection string to start. To run
+      # new inference, point it at your AACT cloud database by setting
+      # Postgres__ConnectionStringSource in deploy/quickstart/.env - that value
+      # flows in here via the ${...} default below (and takes precedence).
+      Postgres__ConnectionStringSource: "${Postgres__ConnectionStringSource:-Host=postgres;Port=5432;Database=clinical;Username=postgres;Password=eligibility}"
     volumes:
       # Persist DataProtection keys so the auth cookie survives container recreate.
       - quickstart-dpkeys:/root/.aspnet/DataProtection-Keys

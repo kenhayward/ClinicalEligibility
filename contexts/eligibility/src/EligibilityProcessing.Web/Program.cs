@@ -6,6 +6,7 @@ using EligibilityProcessing.Data;      // PostgresGateway (startup perf-index en
 using EligibilityProcessing.Hosting;   // AddEligibilityPipeline (VB extension)
 using EligibilityProcessing.Web;
 using EligibilityProcessing.Web.Auth;
+using EligibilityProcessing.Web.Seeding;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
@@ -58,6 +59,18 @@ builder.Services.AddSingleton(_ => Channel.CreateBounded<ToolJobRequest>(new Bou
     SingleWriter = false
 }));
 builder.Services.AddHostedService<ToolJobRunner>();
+
+// Owner-only "Create database seed" job: its own single-slot channel + background
+// runner + state, sharing the RunGate above so it is mutually exclusive with the
+// pipeline and the maintenance tools. The runner shells out to pg_dump.
+builder.Services.AddSingleton<SeedJobState>();
+builder.Services.AddSingleton(_ => Channel.CreateBounded<SeedJobRequest>(new BoundedChannelOptions(1)
+{
+    FullMode = BoundedChannelFullMode.DropWrite,
+    SingleReader = true,
+    SingleWriter = false
+}));
+builder.Services.AddHostedService<SeedJobRunner>();
 
 // Rate limit: 1 trigger per 60 seconds in production. Values are read from
 // WebhookOptions via Options.Configure<TDep> so they resolve LAZILY — at the
