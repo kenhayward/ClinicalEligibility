@@ -6,9 +6,11 @@
       "version": "0.1.6",
       "releaseDate": "2026-07-15",
       "enhancements": [
-        "Owner: a new 'Create database seed' item on the owner account menu dumps the six seed tables (via pg_dump) into a loader-compatible archive, shows per-table progress as it runs, and offers the result for download - so new seed releases can be produced from the running app as coverage grows, then tested with the quickstart stack. The web image now bundles the postgresql client to provide pg_dump."
+        "Create database seed (Owners): generate a fresh, shareable database seed straight from the dashboard. The 'Create database seed' item on the owner account menu exports the six processed tables into a ready-to-load archive, shows live per-table progress as it runs, and offers the result as a download - so you can cut a new seed release as coverage grows and load it with the quick-start stack, no local database tools required."
       ],
-      "fixes": []
+      "fixes": [
+        "Quick start: you can now run new inference from the quick-start stack against your own AACT database by setting the source connection string in .env; the bundled database stays the default, so browsing the seed and creating a seed keep working with no configuration."
+      ]
     },
     {
       "version": "0.1.5",
@@ -23,7 +25,7 @@
       "version": "0.1.4",
       "releaseDate": "2026-07-15",
       "enhancements": [
-        "Quickstart: a new all-in-one Docker stack (deploy/quickstart) brings up embedded Postgres, the schema, the pre-inferenced seed corpus, and the dashboard with a single 'docker compose up' - so you can browse an already-processed dataset without re-running the LLM pipeline. Includes a first-run seed loader (downloads the published seed from a GitHub Release or a local file, verifies its sha256, is idempotent, and resets identity sequences) and a make-seed.sh producer for maintainers."
+        "Quick start with seed data: bring up the whole application - database, a large pre-inferenced dataset, and the dashboard - with a single 'docker compose up', and explore already-processed clinical-trial eligibility data immediately, without re-running the extraction pipeline. The dataset is downloaded and loaded automatically on first run, so there is nothing to set up."
       ],
       "fixes": [
         "Startup no longer logs a Postgres exception and stack trace when the co-located source database has no ctgov (AACT) schema - the expected case when running against the seeded standalone database. The source trial-selection performance index is now skipped with a clean informational message instead."
