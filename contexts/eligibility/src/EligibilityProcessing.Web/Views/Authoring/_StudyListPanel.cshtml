@@ -1,8 +1,11 @@
 @*
-    Left-panel partial for the Authoring page. Same partial on Index and Edit;
-    Edit passes a SelectedId so the active row highlights. The Create button
-    opens #createStudyModal, which is rendered inline at the bottom so the
-    modal is in the DOM on every Authoring view that includes this partial.
+    Left panel for the Authoring dashboard tab. Same partial on Index and Edit;
+    Edit passes a SelectedId so the active row highlights. It renders as the
+    collapsible sidebar of the .authoring-shell master-detail: the toggle button
+    (rendered right after the <aside>) collapses the panel so the editor pane
+    uses the full page width, and the collapsed state persists in localStorage
+    across navigations. The Create button opens #createStudyModal, rendered
+    inline so the modal is in the DOM on every Authoring view.
 *@
 @model EligibilityProcessing.Web.Models.AuthoringListPanelModel
 
@@ -12,7 +15,21 @@
     var canWrite = (await AuthorizationService.AuthorizeAsync(User, "AuthorWrite")).Succeeded;
 }
 
-<aside id="study-list-panel" class="authoring-aside collapse collapse-horizontal show">
+@* Pre-paint: apply the persisted collapsed state to the shell BEFORE the aside
+   renders, so a collapsed panel never flashes open on load. #authoring-shell's
+   opening tag is already parsed at this point (this partial is its first child). *@
+<script>
+    (function () {
+        try {
+            if (localStorage.getItem("authoring.asideCollapsed") === "1") {
+                var shell = document.getElementById("authoring-shell");
+                if (shell) { shell.classList.add("aside-collapsed"); }
+            }
+        } catch (e) { }
+    })();
+</script>
+
+<aside id="study-list-panel" class="authoring-aside">
     <div class="aside-inner">
         <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
             <h2 class="h6 mb-0">Studies</h2>
@@ -42,7 +59,7 @@
                                 <span class="fw-semibold text-truncate" title="@s.Label">
                                     @if (!string.IsNullOrEmpty(s.StudyId))
                                     {
-                                        <span class="text-muted">@s.StudyId</span><span class="text-muted mx-1">·</span>
+                                        <span class="text-muted">@s.StudyId</span><span class="text-muted mx-1">&middot;</span>
                                     }
                                     @s.Label
                                 </span>
@@ -63,17 +80,36 @@
     </div>
 </aside>
 
-<button class="aside-toggle btn btn-sm btn-outline-secondary"
+@* Sits at the seam between aside and main (a separate flex child), so it stays
+   visible when the aside is collapsed. Chevron points left to collapse; CSS
+   rotates it 180deg when aria-expanded="false" so it points right to expand. *@
+<button id="aside-toggle" class="aside-toggle btn btn-sm btn-outline-secondary"
         type="button"
-        data-bs-toggle="collapse"
-        data-bs-target="#study-list-panel"
-        aria-controls="study-list-panel"
         aria-expanded="true"
+        aria-controls="study-list-panel"
         aria-label="Toggle study list">
-    <span class="aside-toggle-icon">‹</span>
+    <span class="aside-toggle-icon">&lsaquo;</span>
 </button>
 
 @if (canWrite)
 {
     <partial name="_CreateStudyModal" />
 }
+
+<script>
+    (function () {
+        var shell = document.getElementById("authoring-shell");
+        var btn = document.getElementById("aside-toggle");
+        if (!shell || !btn) { return; }
+        function syncButton() {
+            var collapsed = shell.classList.contains("aside-collapsed");
+            btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        }
+        syncButton(); // reflect the persisted state applied pre-paint above
+        btn.addEventListener("click", function () {
+            var collapsed = shell.classList.toggle("aside-collapsed");
+            try { localStorage.setItem("authoring.asideCollapsed", collapsed ? "1" : "0"); } catch (e) { }
+            syncButton();
+        });
+    })();
+</script>

@@ -80,10 +80,10 @@ public class AuthoringControllerTests
             await Get("/Authoring/ExportCriteria?id=" + Guid.NewGuid(), "Viewer"));
     }
 
-    // ===== menu visibility: the nav link is present for authenticated users =====
+    // ===== dashboard integration: nav tab + master-detail shell =====
 
     [Fact]
-    public async Task Dashboard_shows_the_authoring_nav_link()
+    public async Task Dashboard_shows_the_authoring_nav_tab()
     {
         using var factory = new AuthedFactory();
         var client = factory.CreateClient();
@@ -94,9 +94,32 @@ public class AuthoringControllerTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Authoring <span", body);                // the button label + new-tab glyph span
-        Assert.Contains("&#x2197;", body);                       // the "opens in new tab" cue
+        Assert.Contains(">Authoring</a>", body);                 // a normal in-dashboard nav tab
         Assert.Matches("href=\"/Authoring(/Index)?\"", body);    // routed to the Authoring controller
+        Assert.DoesNotContain("&#x2197;", body);                 // no longer an "opens in new tab" button
+    }
+
+    [Fact]
+    public async Task Authoring_index_renders_master_detail_shell_inside_the_dashboard()
+    {
+        using var factory = new AuthedFactory();
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/Authoring");
+        request.Headers.Add(TestAuthHandler.RoleHeader, "Author");
+
+        var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // The collapsible master-detail: shell wrapper, study-list sidebar, and
+        // the collapse toggle that frees full page width.
+        Assert.Contains("id=\"authoring-shell\"", body);
+        Assert.Contains("id=\"study-list-panel\"", body);
+        Assert.Contains("id=\"aside-toggle\"", body);
+        Assert.Contains(">Studies<", body);
+        // Rendered inside the dashboard layout (nav chrome present), not the old
+        // standalone _AuthoringLayout page.
+        Assert.Contains(">Dashboard</a>", body);
     }
 
     // ===== helpers =====

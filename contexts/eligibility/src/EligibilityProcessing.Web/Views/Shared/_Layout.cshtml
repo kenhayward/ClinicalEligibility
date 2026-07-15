@@ -73,6 +73,12 @@
                             && string.Equals(currentAction, action, StringComparison.OrdinalIgnoreCase)
                             ? activeNav
                             : "");
+                    // Non-Home tabs (e.g. Authoring) light up on controller match,
+                    // across all their actions (Index, Edit, ...).
+                    string NavClassController(string controller) =>
+                        "nav-link " + (string.Equals(currentController, controller, StringComparison.OrdinalIgnoreCase)
+                            ? activeNav
+                            : "");
                 }
                 <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
                     <ul class="navbar-nav flex-grow-1">
@@ -98,17 +104,12 @@
                         <li class="nav-item">
                             <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools">Tools</a>
                         </li>
-                        <li class="nav-item d-flex align-items-center ms-2">
-                            @* Authoring uses its own focused layout - opening it in a
-                               new tab keeps the user's dashboard state (run filters,
-                               scroll position) intact in the original window. Styled
-                               as a button (not a tab) so users can see it changes
-                               page rather than switching dashboard views. The trailing
-                               arrow glyph is the conventional "opens in new tab" cue. *@
-                            <a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener"
-                               asp-area="" asp-controller="Authoring" asp-action="Index">
-                                Authoring <span aria-hidden="true">&#x2197;</span>
-                            </a>
+                        <li class="nav-item">
+                            @* Authoring is a first-class dashboard tab. It renders a
+                               master-detail shell (study list + editor) inside the
+                               dashboard layout, so it highlights on the Authoring
+                               controller across all its actions (Index / Edit). *@
+                            <a class="@NavClassController("Authoring")" asp-area="" asp-controller="Authoring" asp-action="Index">Authoring</a>
                         </li>
                     </ul>
                     @* User chip (signed-in only). The theme picker
@@ -123,7 +124,10 @@
             </div>
         </nav>
     </header>
-    <div class="container">
+    @* Authoring is a full-width master-detail tab (its own collapsible sidebar
+       manages horizontal space), so it uses container-fluid; every other view
+       keeps the centered fixed-width container. *@
+    <div class="@(string.Equals(currentController, "Authoring", StringComparison.OrdinalIgnoreCase) ? "container-fluid" : "container")">
         <main role="main" class="pb-3">
             @RenderBody()
         </main>

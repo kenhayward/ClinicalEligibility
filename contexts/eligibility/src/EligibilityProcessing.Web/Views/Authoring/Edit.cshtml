@@ -2,8 +2,8 @@
 @using System.Linq
 @using System.Text.Json
 @{
-    Layout = "_AuthoringLayout";
-    ViewData["Title"] = "Eligibility Authoring";
+    Layout = "_Layout";
+    ViewData["Title"] = "Authoring";
     var canWrite = (await AuthorizationService.AuthorizeAsync(User, "AuthorWrite")).Succeeded;
     System.Guid? selectedId = Model.Aggregate is null ? null : Model.Study.AuthoringStudyId;
     var listModel = new EligibilityProcessing.Web.Models.AuthoringListPanelModel
@@ -34,6 +34,7 @@
                 }));
 }
 
+<div class="authoring-shell" id="authoring-shell">
 <partial name="_StudyListPanel" model="listModel" />
 
 <main class="authoring-main">
@@ -424,6 +425,7 @@
         }
     }
 </main>
+</div>
 
 @section Scripts {
     <script>
