@@ -449,4 +449,10 @@ deploy/eligibility-pipeline/pgvector.cmd
 /deploy/eligibility-pipeline/llamacpp_services/llama-normalize.exe
 # Ignore environment files
 Production.env
-FlowDev.env 
+FlowDev.env
+
+# Local-only scratch for large database dumps / seed artifacts (multi-GB).
+# Never commit these - the shipped seed is a GitHub Release asset, not a repo blob.
+untracked/
+_untracked/
+*.dump

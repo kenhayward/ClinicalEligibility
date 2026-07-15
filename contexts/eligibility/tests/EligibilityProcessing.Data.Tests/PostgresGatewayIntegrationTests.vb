@@ -603,6 +603,64 @@ Public Class PostgresGatewayIntegrationTests
         Await otherSource.DisposeAsync()
     End Function
 
+    <SkippableFact>
+    Public Async Function SourceHasCtgovEligibilities_true_when_present() As Task
+        ' The fixture DB carries the ctgov.eligibilities table, so the probe
+        ' reports it present.
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+
+        Assert.True(Await _fixture.Gateway.SourceHasCtgovEligibilitiesAsync(CancellationToken.None))
+    End Function
+
+    <SkippableFact>
+    Public Async Function EnsureSourcePerformanceIndexes_skips_cleanly_when_ctgov_absent() As Task
+        ' The seeded-quickstart shape: source co-located with output, but the
+        ' database has no ctgov schema at all. The probe must report absent, and
+        ' the ensure step must skip WITHOUT attempting the DDL (previously this
+        ' raised "schema ctgov does not exist", caught and logged as a scary
+        ' warning + stack trace). We verify against a throwaway database that has
+        ' no ctgov, standing in for the standalone output-only seed DB.
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+
+        ' Cleanup is linear (not try/finally) because VB forbids Await in a Finally
+        ' block; a failed assertion leaves the throwaway DB behind, which the
+        ' ephemeral test container drops on fixture teardown anyway.
+        Dim dbName = "elig_no_ctgov_" & Guid.NewGuid().ToString("N").Substring(0, 12)
+        Await ExecuteOnFixtureAsync($"CREATE DATABASE ""{dbName}""")
+
+        Dim builder As New NpgsqlConnectionStringBuilder(_fixture.ConnectionString) With {
+                .Database = dbName}
+        Dim noCtgov = NpgsqlDataSource.Create(builder.ConnectionString)
+
+        ' Source == output == the ctgov-less DB, so the co-location gate opens but
+        ' the schema probe reports absent.
+        Dim gw As New PostgresGateway(
+                outputDataSource:=noCtgov,
+                sourceDataSource:=noCtgov,
+                logger:=Nothing)
+
+        Assert.False(Await gw.SourceHasCtgovEligibilitiesAsync(CancellationToken.None),
+                "Probe must report ctgov.eligibilities absent on a DB without the schema.")
+
+        ' Must complete cleanly - no throw, no DDL attempted against ctgov.
+        Await gw.EnsureSourcePerformanceIndexesAsync(CancellationToken.None)
+
+        Await noCtgov.DisposeAsync()
+        ' FORCE terminates any lingering pooled connection so the drop succeeds.
+        Await ExecuteOnFixtureAsync($"DROP DATABASE IF EXISTS ""{dbName}"" WITH (FORCE)")
+    End Function
+
+    ' Runs a single autocommit statement (e.g. CREATE/DROP DATABASE, which cannot
+    ' run inside a transaction) against the fixture's default database.
+    Private Async Function ExecuteOnFixtureAsync(sql As String) As Task
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = sql
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
     Private Async Function DropSelectionIndexAsync() As Task
         Using conn = Await _fixture.DataSource.OpenConnectionAsync()
             Using cmd = conn.CreateCommand()

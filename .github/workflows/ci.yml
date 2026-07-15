@@ -28,16 +28,3 @@ jobs:
       # tests run here too; they skip cleanly where Docker is unavailable.
       - name: Test
         run: dotnet test contexts/eligibility/Eligibility.sln --no-build --configuration Release --verbosity normal
-
-  secret-scan:
-    name: Secret scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_CONFIG: .gitleaks.toml

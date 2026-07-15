@@ -1,0 +1,121 @@
+# All-in-one quickstart: try ClinicalEligibility with ONE `docker compose up`.
+#
+# Brings up a self-contained stack - embedded Postgres, schema, the pre-inferenced
+# seed data, AND the dashboard - so you can browse an already-processed corpus
+# with zero external dependencies (no separate DB, no LLM/UMLS endpoints needed
+# just to look at the data).
+#
+# Startup order (enforced by depends_on conditions):
+#   postgres (healthy)
+#     -> migrate     (elig migrate: applies the schema)      one-shot
+#       -> seed-loader (restores the pre-inferenced seed)    one-shot
+#         -> web       (the dashboard, on http://localhost:8091)
+#
+# This is the "kick the tyres" topology. For a real deployment against your own
+# external database, use ../eligibility-pipeline/docker-compose.yml instead.
+#
+# Seed source: set SEED_URL (GitHub Release asset) or SEED_FILE (local dump) in
+# .env - see .env.example.
+name: eligibility-quickstart
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: eligibility-quickstart-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eligibility}
+      POSTGRES_DB: ${POSTGRES_DB:-clinical}
+    ports:
+      # Host 5433 by default so this never fights a local Postgres on 5432.
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      # PG18+ images store data in a major-version subdir and want the whole
+      # /var/lib/postgresql mounted (NOT .../data, which 18+ rejects as an
+      # "unused mount"). See docker-library/postgres#1259.
+      - quickstart-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-clinical}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: applies every embedded migration. Idempotent (CREATE ... IF NOT
+  # EXISTS), so re-running `compose up` is harmless. The ctgov-absent warning it
+  # logs is expected - there is no AACT source here.
+  migrate:
+    image: eligibility/cli:${ELIGIBILITY_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: deploy/eligibility-pipeline/Dockerfile.cli
+    container_name: eligibility-quickstart-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Postgres__ConnectionStringOutput: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
+      Postgres__ConnectionStringSource: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
+    command: ["migrate"]
+    restart: "no"
+
+  # One-shot: downloads (or reads a bind-mounted) seed archive and restores the
+  # data into the freshly migrated tables. Skips if data is already present.
+  seed-loader:
+    build:
+      context: ../..
+      dockerfile: deploy/quickstart/Dockerfile.loader
+    image: eligibility/seed-loader:${ELIGIBILITY_VERSION:-dev}
+    container_name: eligibility-quickstart-loader
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-eligibility}
+      PGDATABASE: ${POSTGRES_DB:-clinical}
+      # Seed source. Defaults to the published GitHub Release asset so a bare
+      # `docker compose up` just works; override in .env (SEED_FILE takes
+      # precedence over SEED_URL). NOTE: anonymous download works once the repo
+      # is public - while it is private, use SEED_FILE with a local dump.
+      SEED_URL: ${SEED_URL:-https://github.com/kenhayward/ClinicalEligibility/releases/download/V0.1/seed.dump}
+      SEED_FILE: ${SEED_FILE:-}
+      SEED_SHA256: ${SEED_SHA256:-db5de405d089ff5968ed8b23e4de7642622c7d1c896a50e0b34971424277efad}
+      SEED_FORCE: ${SEED_FORCE:-0}
+    # To load from a LOCAL dump instead of downloading, set SEED_FILE=/seed/seed.dump
+    # in .env and uncomment this bind mount (point it at the dir holding your dump):
+    # volumes:
+    #   - ${SEED_LOCAL_DIR:-./seed-data}:/seed:ro
+    restart: "no"
+
+  # The dashboard. Boots once the seed is loaded so the UI has data to show.
+  # It needs only the Postgres connection to run (LLM/UMLS are validated lazily,
+  # on first pipeline use - not needed for browsing). On first visit you bootstrap
+  # an Owner account. To actually RUN new extractions you'd add Llm__/Umls__ config
+  # and a Postgres__ConnectionStringSource pointing at a real AACT database.
+  web:
+    image: eligibility/web:${ELIGIBILITY_VERSION:-dev}
+    build:
+      context: ../..
+      dockerfile: deploy/eligibility-pipeline/Dockerfile.web
+    container_name: eligibility-quickstart-web
+    restart: unless-stopped
+    depends_on:
+      seed-loader:
+        condition: service_completed_successfully
+    ports:
+      - "${WEB_PORT:-8091}:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      TZ: ${TZ:-UTC}
+      Postgres__ConnectionStringOutput: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
+      Postgres__ConnectionStringSource: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-clinical};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-eligibility}"
+    volumes:
+      # Persist DataProtection keys so the auth cookie survives container recreate.
+      - quickstart-dpkeys:/root/.aspnet/DataProtection-Keys
+
+volumes:
+  quickstart-pgdata:
+  quickstart-dpkeys:
