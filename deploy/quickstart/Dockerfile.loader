@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+# Seed loader image: Postgres client tools (pg_restore, psql, pg_isready) plus
+# curl for fetching the seed asset. Based on the same pgvector image the DB uses,
+# so the client-tool major version always matches the server (a newer server can
+# reject an older pg_restore's archive; keeping them equal avoids that class of
+# surprise). It carries no seed data itself - the archive is downloaded on first
+# run (SEED_URL) or bind-mounted (SEED_FILE).
+FROM pgvector/pgvector:pg18
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY deploy/quickstart/load-seed.sh /usr/local/bin/load-seed.sh
+RUN chmod +x /usr/local/bin/load-seed.sh
+
+ENTRYPOINT ["/usr/local/bin/load-seed.sh"]

@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers (e.g. deploy/seed/load-seed.sh). A
+# CRLF line ending on the shebang breaks them with "bad interpreter". With
+# core.autocrlf=true on Windows, checkout would otherwise rewrite them to CRLF,
+# so pin them to LF regardless of platform or user config.
+*.sh text eol=lf

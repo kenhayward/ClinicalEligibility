@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 3, "releaseDate": "2026-06-17" },
+  "current": { "major": 0, "minor": 1, "build": 4, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.4",
+      "releaseDate": "2026-07-15",
+      "enhancements": [
+        "Quickstart: a new all-in-one Docker stack (deploy/quickstart) brings up embedded Postgres, the schema, the pre-inferenced seed corpus, and the dashboard with a single 'docker compose up' - so you can browse an already-processed dataset without re-running the LLM pipeline. Includes a first-run seed loader (downloads the published seed from a GitHub Release or a local file, verifies its sha256, is idempotent, and resets identity sequences) and a make-seed.sh producer for maintainers."
+      ],
+      "fixes": [
+        "Startup no longer logs a Postgres exception and stack trace when the co-located source database has no ctgov (AACT) schema - the expected case when running against the seeded standalone database. The source trial-selection performance index is now skipped with a clean informational message instead."
+      ]
+    },
     {
       "version": "0.1.3",
       "releaseDate": "2026-06-17",

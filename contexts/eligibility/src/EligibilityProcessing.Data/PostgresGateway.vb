@@ -168,6 +168,19 @@ Public NotInheritable Class PostgresGateway
             Return
         End If
 
+        ' Co-located with our output DB does not guarantee AACT is present: the
+        ' seeded quickstart runs against a standalone database that holds only the
+        ' public.* output tables and no ctgov schema at all. Probe for the source
+        ' table first (to_regclass returns NULL rather than raising when the schema
+        ' or table is absent) so that expected case logs one clean line instead of
+        ' a "schema ctgov does not exist" exception + stack trace.
+        If Not Await SourceHasCtgovEligibilitiesAsync(cancellationToken).ConfigureAwait(False) Then
+            _logger.LogInformation(
+                    "Source database has no ctgov.eligibilities table; skipping the selection index ({Index}). This is expected when running without an AACT source (e.g. the seeded quickstart).",
+                    SelectableSourceIndexName)
+            Return
+        End If
+
         ' Partial index predicate kept aligned with SelectNextTrialsAsync's WHERE so
         ' the planner uses it to satisfy the filter without a heap recheck.
         Dim sql = $"CREATE INDEX IF NOT EXISTS {SelectableSourceIndexName}
@@ -197,6 +210,25 @@ WHERE criteria IS NOT NULL
                     "Could not ensure the ctgov.eligibilities selection index ({Index}); trial selection will still work but may be slower.",
                     SelectableSourceIndexName)
         End Try
+    End Function
+
+    ''' <summary>
+    ''' True when the source database exposes the AACT <c>ctgov.eligibilities</c>
+    ''' table. Uses <c>to_regclass</c>, which returns NULL (rather than raising
+    ''' 3F000 "schema does not exist" / 42P01 "table does not exist") when the
+    ''' schema or table is absent - so callers branch on a boolean instead of
+    ''' catching an exception. Used by EnsureSourcePerformanceIndexesAsync to skip
+    ''' cleanly when a co-located source has no AACT data (e.g. the seeded
+    ''' quickstart's standalone output-only database).
+    ''' </summary>
+    Friend Async Function SourceHasCtgovEligibilitiesAsync(cancellationToken As CancellationToken) As Task(Of Boolean)
+        Using conn = Await _sourceDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT to_regclass('ctgov.eligibilities') IS NOT NULL"
+                Dim result = Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False)
+                Return result IsNot Nothing AndAlso Not Convert.IsDBNull(result) AndAlso CBool(result)
+            End Using
+        End Using
     End Function
 
     ''' <summary>

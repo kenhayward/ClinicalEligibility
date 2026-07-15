@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+ClinicalEligibility is the open-source, standalone extraction pipeline that turns raw clinical-trial eligibility criteria into structured, UMLS-coded records (Apache 2.0). It was split out of a larger private platform monorepo; this repo is self-contained and depends on none of that.
+
 ## Repository status
 
 **Fully implemented.** All 13 projects (8 `src`, 5 `tests`) build, and the extraction pipeline runs end-to-end - trial selection -> LLM extraction -> UMLS resolution -> per-trial persistence - behind a SignalR dashboard and a CLI, with ~650 passing unit tests (plus Postgres integration tests behind Docker). **Authentication, role-based authorization, and auditing** ship (cookie + Google sign-in with account linking; Owner / Administrator / Author / Viewer roles; first-run Owner bootstrap; Manage Accounts; and an audit trail with CSV export - see spec section 11). Not yet validated against the Run 75 production benchmark.
