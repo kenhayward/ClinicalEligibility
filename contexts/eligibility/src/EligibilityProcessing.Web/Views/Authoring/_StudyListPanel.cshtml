@@ -1,0 +1,79 @@
+@*
+    Left-panel partial for the Authoring page. Same partial on Index and Edit;
+    Edit passes a SelectedId so the active row highlights. The Create button
+    opens #createStudyModal, which is rendered inline at the bottom so the
+    modal is in the DOM on every Authoring view that includes this partial.
+*@
+@model EligibilityProcessing.Web.Models.AuthoringListPanelModel
+
+@{
+    var studies = Model.Studies;
+    var selectedId = Model.SelectedId;
+    var canWrite = (await AuthorizationService.AuthorizeAsync(User, "AuthorWrite")).Succeeded;
+}
+
+<aside id="study-list-panel" class="authoring-aside collapse collapse-horizontal show">
+    <div class="aside-inner">
+        <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
+            <h2 class="h6 mb-0">Studies</h2>
+            @if (canWrite)
+            {
+                <button type="button" class="btn btn-sm btn-primary"
+                        data-bs-toggle="modal" data-bs-target="#createStudyModal">
+                    + Create
+                </button>
+            }
+        </div>
+
+        @if (studies.Count == 0)
+        {
+            <p class="text-muted small mb-0">No authored studies yet.</p>
+        }
+        else
+        {
+            <ul class="list-group list-group-flush study-list">
+                @foreach (var s in studies)
+                {
+                    var isActive = selectedId.HasValue && s.AuthoringStudyId == selectedId.Value;
+                    <li class="list-group-item p-0">
+                        <a asp-controller="Authoring" asp-action="Edit" asp-route-id="@s.AuthoringStudyId"
+                           class="study-list-link d-block px-2 py-2 text-decoration-none @(isActive ? "active" : "")">
+                            <div class="d-flex align-items-baseline justify-content-between gap-2">
+                                <span class="fw-semibold text-truncate" title="@s.Label">
+                                    @if (!string.IsNullOrEmpty(s.StudyId))
+                                    {
+                                        <span class="text-muted">@s.StudyId</span><span class="text-muted mx-1">·</span>
+                                    }
+                                    @s.Label
+                                </span>
+                                <small class="text-muted flex-shrink-0">@s.CriterionCount</small>
+                            </div>
+                            <div class="small text-muted text-truncate">
+                                <span class="badge bg-secondary">@s.SourceKind</span>
+                                @if (!string.IsNullOrEmpty(s.SourceRef))
+                                {
+                                    <span class="ms-1">@s.SourceRef</span>
+                                }
+                            </div>
+                        </a>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</aside>
+
+<button class="aside-toggle btn btn-sm btn-outline-secondary"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#study-list-panel"
+        aria-controls="study-list-panel"
+        aria-expanded="true"
+        aria-label="Toggle study list">
+    <span class="aside-toggle-icon">‹</span>
+</button>
+
+@if (canWrite)
+{
+    <partial name="_CreateStudyModal" />
+}

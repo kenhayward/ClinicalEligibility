@@ -67,9 +67,11 @@ These are known issues in the reference workflow that the .NET design addresses 
 
 When you implement against the spec, prefer the architecture doc's resolved version over the spec's "as-is" reference.
 
-## Legacy dead code
+## Authoring feature (demo / prototype)
 
-The pipeline still contains code from a since-removed study-authoring feature: the `public.authoring_*` tables (created by migrations V6/V10/V12/V13/V14) and their now-unreachable gateway methods + DTOs. This is dead code pending a cleanup that drops the tables and the code. Do not build new features on it.
+The `/Authoring` area is a reinstated demo of how the processed corpus can be used: a user designs a new, not-yet-registered study - optionally seeded from an existing AACT trial's snapshot - hand-builds/reorders its eligibility criteria, and (on the Analysis tab) mines the corpus of processed trials for similar studies, clusters their common criteria, and LLM-normalizes them into canonical statements. Backed by the `public.authoring_*` tables (migrations V6/V10/V12/V13/V14) and the authoring CRUD + similarity/cluster gateway methods; the web UI lives in `EligibilityProcessing.Web` (`Controllers/AuthoringController.cs`, `Views/Authoring/`, `Export/AuthoringCriteria*Csv.cs`). Write actions are gated by the `AuthorWrite` policy (Owner / Administrator / Author).
+
+The Analysis tab's "Find Similar" needs the `eligibility_study_embedding` corpus index populated (Tools -> `embed-studies`, or the CLI backfill) plus an embedding + LLM endpoint (`Embedding`/`Llm` config); the plain CRUD authoring (create study, edit criteria, export CSV) works with no external dependencies. The shipped seed does not include embeddings - see [docs/specs/configuration.md](docs/specs/configuration.md).
 
 ## Testing discipline (project rule)
 

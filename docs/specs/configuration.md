@@ -141,8 +141,14 @@ the matching `Llm` value, so an absent section preserves current behaviour.
 ### `Embedding` — similarity index (`embed-studies`) · (section absent from JSON → all code defaults)
 [`EmbeddingOptions.vb`](../../contexts/eligibility/src/EligibilityProcessing.Llm/EmbeddingOptions.vb)
 
-Only needed for the CLI `embed-studies` backfill that builds the corpus
-similarity index; the core extraction pipeline does not use it.
+Only needed for the corpus similarity index: the CLI / Tools-tab `embed-studies`
+backfill that builds it, and the Authoring Analysis tab's "Find Similar" (which
+embeds the authored study at query time to rank the corpus). The core extraction
+pipeline does not use it, and the plain CRUD authoring workflow (create study,
+edit criteria, export CSV) works without it. Normalize on the Analysis tab uses
+the `Llm` endpoint. The shipped seed does not include the embedding index, so a
+fresh quickstart must run Tools -> embed-studies (with these keys set) before
+Find Similar returns results.
 
 | Key | Default | Notes |
 |-----|---------|-------|

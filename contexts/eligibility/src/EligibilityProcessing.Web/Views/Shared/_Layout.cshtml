@@ -98,6 +98,18 @@
                         <li class="nav-item">
                             <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools">Tools</a>
                         </li>
+                        <li class="nav-item d-flex align-items-center ms-2">
+                            @* Authoring uses its own focused layout - opening it in a
+                               new tab keeps the user's dashboard state (run filters,
+                               scroll position) intact in the original window. Styled
+                               as a button (not a tab) so users can see it changes
+                               page rather than switching dashboard views. The trailing
+                               arrow glyph is the conventional "opens in new tab" cue. *@
+                            <a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener"
+                               asp-area="" asp-controller="Authoring" asp-action="Index">
+                                Authoring <span aria-hidden="true">&#x2197;</span>
+                            </a>
+                        </li>
                     </ul>
                     @* User chip (signed-in only). The theme picker
                        (Light / Dark / Auto) now lives inside that menu as

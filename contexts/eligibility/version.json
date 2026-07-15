@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 6, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 7, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.7",
+      "releaseDate": "2026-07-15",
+      "enhancements": [
+        "Authoring (demo): a new 'Authoring' area lets you design a study that has not been registered yet and see how the processed data supports it. Start blank, from an existing trial, or from another authored study; fill in the study details and eligibility; then build the criteria list - either by hand or by mining the processed corpus. The Analysis tab finds similar trials, groups their common inclusion/exclusion criteria, and turns each group into a single clean criterion you can add, keeping a record of every source it came from. Export the finished criteria, or a full source-by-source audit, as CSV. Designing, editing, and exporting work with no extra setup; the corpus-mining Find Similar and Normalize steps need an embedding and language-model endpoint configured, and the similarity index built via Tools -> embed-studies."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.6",
       "releaseDate": "2026-07-15",
