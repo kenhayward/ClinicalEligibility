@@ -1,0 +1,343 @@
+@model EligibilityProcessing.Web.Models.ToolsViewModel
+@{
+    ViewData["Title"] = "Tools";
+    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
+    // A job (batch or tool) is in flight when the shared gate is busy.
+    var busy = !string.IsNullOrEmpty(Model.BusyActivity);
+}
+
+<h1 class="h3 mb-1">Tools</h1>
+<p class="text-muted">
+    Web versions of the maintenance CLI commands. Each runs as a background job that
+    survives closing this tab or browser. Only one job runs at a time and never while
+    the extraction pipeline is running - they share a single lock.
+</p>
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+
+<div id="tools-busy-banner" class="alert alert-info @(busy ? "" : "d-none")" role="alert">
+    A job is currently running (<span id="tools-busy-activity">@Model.BusyActivity</span>).
+    Other tools and the extraction pipeline are blocked until it finishes.
+</div>
+
+<div class="row g-4">
+    @* ---------------- normalize-umls ---------------- *@
+    <div class="col-12 col-lg-6">
+        <div class="card h-100" data-tool="normalize-umls">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h2 class="h5 mb-1">Normalize UMLS</h2>
+                        <p class="text-muted small mb-0">
+                            LLM-normalize each distinct unresolved concept, re-resolve it,
+                            and update matching eligibility rows in place.
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <div class="display-6 lh-1" data-remaining>@Model.NormalizeRemaining.ToString("N0")</div>
+                        <div class="text-muted small">unresolved concepts</div>
+                    </div>
+                </div>
+
+                @if (canRunPipeline)
+                {
+                    <form id="normalize-form" asp-action="RunNormalizeUmls" method="post"
+                          class="row g-2 align-items-end mt-2 tool-run-form">
+                        <div class="col-auto">
+                            <label for="normalize-count" class="form-label small text-muted mb-1">Count</label>
+                            <input id="normalize-count" name="count" type="number" min="1" value="50"
+                                   class="form-control form-control-sm" style="width: 6rem;" />
+                        </div>
+                        <div class="col-auto">
+                            <label for="normalize-concurrency" class="form-label small text-muted mb-1">Concurrency</label>
+                            <input id="normalize-concurrency" name="concurrency" type="number" min="1"
+                                   value="@Model.DefaultConcurrency" class="form-control form-control-sm" style="width: 6rem;" />
+                        </div>
+                        <div class="col-12 d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="dryRun" value="true" id="normalize-dryrun" />
+                                <label class="form-check-label small" for="normalize-dryrun">Dry run (no writes)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="force" value="true" id="normalize-force" />
+                                <label class="form-check-label small" for="normalize-force">Force (re-do already-normalized)</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary btn-sm tool-run-btn"
+                                    disabled="@(busy ? "disabled" : null)">Run normalize</button>
+                        </div>
+                    </form>
+                }
+
+                @await Html.PartialAsync("_ToolJobPanel", "normalize-umls")
+            </div>
+        </div>
+    </div>
+
+    @* ---------------- embed-studies ---------------- *@
+    <div class="col-12 col-lg-6">
+        <div class="card h-100" data-tool="embed-studies">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h2 class="h5 mb-1">Embed studies</h2>
+                        <p class="text-muted small mb-0">
+                            Build the topic-embedding similarity index for processed studies
+                            that don't yet have one
+                            <span class="text-muted">(model: <code>@(string.IsNullOrEmpty(Model.EmbeddingModel) ? "(default)" : Model.EmbeddingModel)</code>)</span>.
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <div class="display-6 lh-1" data-remaining>@Model.EmbedRemaining.ToString("N0")</div>
+                        <div class="text-muted small">unembedded studies</div>
+                    </div>
+                </div>
+
+                @if (canRunPipeline)
+                {
+                    <form id="embed-form" asp-action="RunEmbedStudies" method="post"
+                          class="row g-2 align-items-end mt-2 tool-run-form">
+                        <div class="col-auto">
+                            <label for="embed-concurrency" class="form-label small text-muted mb-1">Concurrency</label>
+                            <input id="embed-concurrency" name="concurrency" type="number" min="1"
+                                   value="@Model.DefaultConcurrency" class="form-control form-control-sm" style="width: 6rem;" />
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary btn-sm tool-run-btn"
+                                    disabled="@(busy ? "disabled" : null)">Run embed</button>
+                        </div>
+                    </form>
+                }
+
+                @await Html.PartialAsync("_ToolJobPanel", "embed-studies")
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/lib/microsoft-signalr/signalr.min.js" asp-append-version="true"></script>
+    <script>
+        (function () {
+            const canCancel = @(canRunPipeline ? "true" : "false");
+
+            function fmtHms(totalSeconds) {
+                const s = Math.max(0, Math.floor(totalSeconds));
+                const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+                const p = (n) => String(n).padStart(2, "0");
+                return h + ":" + p(m) + ":" + p(sec);
+            }
+
+            function panel(kind) { return document.querySelector(`[data-panel="${kind}"]`); }
+
+            // The job currently being rendered as running, so a 1s ticker can keep its
+            // elapsed + estimated-finish advancing between server snapshots. anchorMs is
+            // the run's start in client-clock terms (re-anchored on each server tick).
+            let live = null;
+
+            // Render the elapsed line + the projected clock finish (to the right of the
+            // bar). Shared by renderJob (server snapshot) and the per-second ticker.
+            function renderTiming(p, elapsedSeconds, processed, total, running, status) {
+                let timing = fmtHms(elapsedSeconds) + " elapsed";
+                const etaEl = p.querySelector(".tool-eta");
+                if (running && processed > 0 && processed < total) {
+                    const remain = (elapsedSeconds / processed) * (total - processed);
+                    timing += ", ETA " + fmtHms(remain);
+                    const finish = new Date(Date.now() + remain * 1000);
+                    const pad = (n) => String(n).padStart(2, "0");
+                    etaEl.textContent = "est. finish " + pad(finish.getHours()) + ":" + pad(finish.getMinutes());
+                } else if (!running) {
+                    etaEl.textContent = status === "completed" ? "done" : "";
+                } else {
+                    etaEl.textContent = "estimating...";
+                }
+                p.querySelector(".tool-timing").textContent = timing;
+            }
+
+            // Tick elapsed + ETA every second so they advance smoothly during the run
+            // even between the (slower) server progress snapshots.
+            setInterval(function () {
+                if (!live) { return; }
+                const p = panel(live.kind);
+                if (!p) { return; }
+                const elapsed = (Date.now() - live.anchorMs) / 1000;
+                renderTiming(p, elapsed, live.processed, live.total, true, "running");
+            }, 1000);
+
+            // Reflect a job view in its tool's card. Shows the panel, fills the progress
+            // bar + stat tiles, status, elapsed + ETA, and toggles the Cancel button.
+            function renderJob(v) {
+                if (!v || !v.kind) { return; }
+                const p = panel(v.kind);
+                if (!p) { return; }
+                p.classList.remove("d-none");
+
+                const total = v.total || 0, processed = v.processed || 0;
+                const pct = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : 0;
+                const bar = p.querySelector(".tool-progress-bar");
+                bar.style.width = pct + "%";
+                bar.textContent = pct + "%";
+                const running = v.status === "running";
+                bar.classList.toggle("progress-bar-animated", running);
+                bar.classList.toggle("progress-bar-striped", running);
+
+                p.querySelector(".tool-count").textContent = processed.toLocaleString() + " / " + total.toLocaleString();
+
+                // Status badge.
+                const badgeMap = { running: "bg-info", completed: "bg-success", cancelled: "bg-warning", failed: "bg-danger" };
+                const badge = p.querySelector(".tool-status");
+                badge.textContent = v.status;
+                badge.className = "tool-status badge " + (badgeMap[v.status] || "bg-secondary");
+
+                // Elapsed + rate-based ETA + projected clock finish (right of the bar).
+                renderTiming(p, v.elapsedSeconds || 0, processed, total, running, v.status);
+                // Anchor (or stop) the per-second ticker so timing keeps advancing
+                // between server snapshots while the job runs.
+                live = running
+                    ? { kind: v.kind, anchorMs: Date.now() - (v.elapsedSeconds || 0) * 1000, processed: processed, total: total }
+                    : null;
+
+                // Stat tiles, one per metric the job reports.
+                const tiles = p.querySelector(".tool-metrics");
+                tiles.innerHTML = "";
+                (v.metrics || []).forEach(function (mtr) {
+                    const tile = document.createElement("div");
+                    tile.className = "border rounded px-3 py-2 text-center";
+                    const val = document.createElement("div");
+                    val.className = "h5 mb-0";
+                    val.textContent = Number(mtr.value).toLocaleString();
+                    const lab = document.createElement("div");
+                    lab.className = "text-muted small";
+                    lab.textContent = mtr.label;
+                    tile.append(val, lab);
+                    tiles.append(tile);
+                });
+
+                // Cancel only while running and only for operators.
+                const cancelForm = p.querySelector(".tool-cancel-form");
+                if (cancelForm) { cancelForm.classList.toggle("d-none", !(running && canCancel)); }
+            }
+
+            // Reset every Cancel button to its default, enabled state (called when a
+            // fresh run starts so a prior "Cancelling..." state doesn't carry over).
+            function resetCancelButtons() {
+                document.querySelectorAll(".tool-cancel").forEach((b) => {
+                    b.disabled = false;
+                    b.textContent = "Cancel run";
+                });
+            }
+
+            function setRunDisabled(disabled) {
+                document.querySelectorAll(".tool-run-btn").forEach((b) => { b.disabled = disabled; });
+            }
+            function setBanner(activity) {
+                const banner = document.getElementById("tools-busy-banner");
+                if (activity) {
+                    document.getElementById("tools-busy-activity").textContent = activity;
+                    banner.classList.remove("d-none");
+                } else {
+                    banner.classList.add("d-none");
+                }
+            }
+
+            // On load (and reconnect), re-sync from the authoritative server state so a
+            // tab opened mid-run shows the live job - it survives browser close.
+            async function syncFromServer() {
+                try {
+                    const r = await fetch("@Url.Action("ToolState", "Home")", { headers: { "Accept": "application/json" } });
+                    if (!r.ok) { return; }
+                    const v = await r.json();
+                    if (v && v.kind) {
+                        renderJob(v);
+                        const running = v.status === "running";
+                        setRunDisabled(running);
+                        setBanner(running ? v.kind : null);
+                    }
+                } catch { /* leave the server-rendered state as-is */ }
+            }
+
+            const connection = new signalR.HubConnectionBuilder()
+                .withUrl("/hubs/progress")
+                .withAutomaticReconnect()
+                .build();
+
+            // Re-read the "remaining work" counts (the card headline numbers) from the
+            // server. The page-load values go stale once a job resolves/embeds rows, so
+            // refresh them whenever a job or a pipeline batch finishes.
+            async function refreshCounts() {
+                try {
+                    const r = await fetch("@Url.Action("ToolCounts", "Home")", { headers: { "Accept": "application/json" } });
+                    if (!r.ok) { return; }
+                    const c = await r.json();
+                    const set = (tool, val) => {
+                        if (typeof val !== "number") { return; }
+                        const el = document.querySelector(`[data-tool="${tool}"] [data-remaining]`);
+                        if (el) { el.textContent = Number(val).toLocaleString(); }
+                    };
+                    set("normalize-umls", c.normalizeRemaining);
+                    set("embed-studies", c.embedRemaining);
+                } catch { /* leave the current numbers */ }
+            }
+
+            connection.on("ToolJobStarted", (e) => { setRunDisabled(true); setBanner(e.kind); resetCancelButtons(); });
+            connection.on("ToolJobProgress", (e) => renderJob(e));
+            connection.on("ToolJobCompleted", (e) => {
+                renderJob(e);
+                setRunDisabled(false);
+                setBanner(null);
+                refreshCounts();
+            });
+            // A main-pipeline batch also blocks the tools (shared gate) and changes the
+            // backlog, so refresh the counts when it ends too.
+            connection.on("BatchStarted", () => { setRunDisabled(true); setBanner("batch"); });
+            connection.on("BatchCompleted", () => { setRunDisabled(false); setBanner(null); refreshCounts(); });
+            connection.on("BatchCancelled", () => { setRunDisabled(false); setBanner(null); refreshCounts(); });
+
+            connection.start().then(syncFromServer).catch((err) => { console.error("SignalR connect failed:", err); syncFromServer(); });
+
+            async function postForm(form) {
+                const response = await fetch(form.action, {
+                    method: "POST", body: new FormData(form), headers: { "Accept": "application/json" }
+                });
+                let body = {};
+                try { body = await response.json(); } catch { /* empty body ok */ }
+                return { ok: response.ok, status: response.status, body };
+            }
+            function bindRun(id) {
+                const f = document.getElementById(id);
+                if (!f) { return; }
+                f.addEventListener("submit", async (ev) => {
+                    ev.preventDefault();
+                    const r = await postForm(ev.currentTarget);
+                    if (r.ok) {
+                        setRunDisabled(true);
+                    } else if (r.status === 409) {
+                        setBanner(r.body.activity || "another job");
+                        alert("A job is already running (" + (r.body.activity || "?") + "). Only one runs at a time.");
+                    } else {
+                        alert("Could not start the job (HTTP " + r.status + ").");
+                    }
+                });
+            }
+            bindRun("normalize-form");
+            bindRun("embed-form");
+
+            document.querySelectorAll(".tool-cancel-form").forEach((f) => {
+                f.addEventListener("submit", async (ev) => {
+                    ev.preventDefault();
+                    const btn = ev.currentTarget.querySelector(".tool-cancel");
+                    if (btn) { btn.disabled = true; btn.textContent = "Cancelling..."; }
+                    await postForm(ev.currentTarget);
+                    // The run drains its in-flight item(s), then a ToolJobCompleted with
+                    // status "cancelled" arrives and renderJob hides this form.
+                });
+            });
+        })();
+    </script>
+}

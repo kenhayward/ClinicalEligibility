@@ -1,0 +1,917 @@
+@model EligibilityProcessing.Web.Models.StudiesViewModel
+@{
+    ViewData["Title"] = "History";
+    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
+
+    string StatusBadge(string s) => s switch
+    {
+        EligibilityProcessing.Core.StudyExecution.StatusSuccess => "bg-success",
+        EligibilityProcessing.Core.StudyExecution.StatusRunning => "bg-info",
+        EligibilityProcessing.Core.StudyExecution.StatusLlmFailed
+            or EligibilityProcessing.Core.StudyExecution.StatusPersistFailed
+            or EligibilityProcessing.Core.StudyExecution.StatusParseInvalidJson
+            or EligibilityProcessing.Core.StudyExecution.StatusFailed => "bg-danger",
+        EligibilityProcessing.Core.StudyExecution.StatusParseEmpty => "bg-warning text-dark",
+        EligibilityProcessing.Core.StudyExecution.StatusCancelled => "bg-secondary",
+        _ => "text-bg-light"
+    };
+    string FormatDuration(System.TimeSpan? d) =>
+        d.HasValue ? $"{d.Value.TotalSeconds:F1}s" : "—";
+
+    // Emits "true" / "false" for a nullable bool, "" when Nothing. Used as
+    // data-* attribute values on study rows so the response-panel JS can
+    // tell "field not provided by the server" (empty) from
+    // "field was false" (the literal text "false").
+    string FormatBoolAttr(bool? b) =>
+        b.HasValue ? (b.Value ? "true" : "false") : "";
+}
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+else
+{
+    <form method="get" asp-action="History" class="card mb-3">
+        <div class="card-body">
+            @* Preserve the user's current page-size choice across filter
+               applies — the pageSize select lives in its own form above, so
+               without this hidden field the filter form would reset rows
+               per page to the controller's default on every Apply. *@
+            <input type="hidden" name="pageSize" value="@Model.PageSize" />
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label for="f-nctId" class="form-label small text-muted mb-1">NCT ID</label>
+                    <input id="f-nctId" name="nctId" value="@Model.Filter.NctId" type="text"
+                           class="form-control form-control-sm" placeholder="NCT12345678" />
+                </div>
+                <div class="col-md-3">
+                    <label for="f-status" class="form-label small text-muted mb-1">Status</label>
+                    <select id="f-status" name="status" class="form-select form-select-sm">
+                        <option value="">(any)</option>
+                        @foreach (var s in EligibilityProcessing.Web.Models.StudiesViewModel.StatusChoices.All)
+                        {
+                            <option value="@s" selected="@(s == Model.Filter.Status)">@s</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="f-runId" class="form-label small text-muted mb-1">Run ID</label>
+                    <input id="f-runId" name="runId"
+                           value="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")"
+                           type="text" class="form-control form-control-sm" placeholder="uuid" />
+                </div>
+                <div class="col-md-2">
+                    <label for="f-sortBy" class="form-label small text-muted mb-1">Sort by</label>
+                    <select id="f-sortBy" name="sortBy" class="form-select form-select-sm">
+                        @foreach (var c in EligibilityProcessing.Web.Models.StudiesViewModel.SortChoices.All)
+                        {
+                            <option value="@c.Value" selected="@(c.Value == Model.SortBy)">@c.Label</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="d-flex gap-3 mt-3 align-items-center">
+                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                <a asp-action="History" asp-route-sortBy="@EligibilityProcessing.Web.Models.StudiesViewModel.SortChoices.Default"
+                   class="btn btn-outline-secondary btn-sm">Clear</a>
+                @* Checkbox-then-hidden order is load-bearing: ASP.NET Core's
+                   model binder takes the FIRST value when both inputs share a
+                   name, so the checkbox's "true" must precede the hidden
+                   fallback "false". When the box is checked the form posts
+                   `hideSuperseded=true&hideSuperseded=false` → binder picks
+                   true; when unchecked only the hidden fires → binder picks
+                   false. Reversing the order silently breaks the checked
+                   state on form submit. *@
+                <div class="form-check mb-0">
+                    <input type="checkbox" id="f-hideSuperseded" name="hideSuperseded" value="true"
+                           class="form-check-input"
+                           @(Model.Filter.HideSuperseded ? "checked" : "") />
+                    <input type="hidden" name="hideSuperseded" value="false" />
+                    <label for="f-hideSuperseded" class="form-check-label small">
+                        Hide superseded attempts
+                        <span class="text-muted">(show only the latest run per NCT&nbsp;ID)</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    @* Feedback target for the inline Re-run forms below; updated by the
+       fetch-based submit handler in the Scripts section so the browser
+       does not navigate to the controller's raw JSON response. *@
+    <div id="rerun-status" class="alert py-2 px-3 small d-none" role="alert"></div>
+
+    @* Selection-mode toggle + page-size selector + selection action bar.
+       Selection state is JS-only — the checkbox column and action bar are
+       hidden via .d-none until the user enters selection mode, and
+       selections do NOT survive pagination / filter / page-size changes
+       (each render starts blank). The page-size dropdown is its own GET
+       form so changing the value re-applies whatever filters are active
+       (carried via hidden inputs); page resets to 1 since old page numbers
+       no longer line up under a new size. *@
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        @if (canRunPipeline)
+        {
+            <button type="button" id="selection-mode-toggle" class="btn btn-outline-secondary btn-sm">
+                Selection mode
+            </button>
+        }
+        <form method="get" asp-action="History" class="d-flex gap-2 align-items-center mb-0">
+            <input type="hidden" name="nctId" value="@Model.Filter.NctId" />
+            <input type="hidden" name="status" value="@Model.Filter.Status" />
+            <input type="hidden" name="runId" value="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")" />
+            <input type="hidden" name="sortBy" value="@Model.SortBy" />
+            <input type="hidden" name="hideSuperseded" value="@(Model.Filter.HideSuperseded ? "true" : "false")" />
+            <label for="f-pageSize" class="form-label small text-muted mb-0">Rows per page</label>
+            <select id="f-pageSize" name="pageSize" class="form-select form-select-sm"
+                    style="width: auto;" onchange="this.form.submit()">
+                @foreach (var n in EligibilityProcessing.Web.Models.StudiesViewModel.PageSizeChoices.All)
+                {
+                    <option value="@n" selected="@(n == Model.PageSize)">@n</option>
+                }
+            </select>
+        </form>
+        @if (canRunPipeline)
+        {
+            <div id="selection-bar" class="d-none d-flex gap-2 align-items-center">
+                <span class="badge bg-secondary" id="selection-count">0 selected</span>
+                <button type="submit" form="rerun-selection-form" class="btn btn-sm btn-primary">
+                    Rerun selection
+                </button>
+                <button type="button" id="selection-clear" class="btn btn-sm btn-outline-secondary">
+                    Clear
+                </button>
+            </div>
+        }
+        @* Pagination lifted into the top toolbar so it's always visible
+           without scrolling past the table. Renders only when there's more
+           than one page; otherwise the slot collapses cleanly. mb-0 on the
+           nav AND the inner <ul> overrides Bootstrap's defaults so it
+           aligns vertically with the other controls in this flex row. *@
+        @if (Model.TotalPages > 1)
+        {
+            <nav aria-label="History pages" class="mb-0 ms-auto">
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item @(Model.HasPrev ? "" : "disabled")">
+                        <a class="page-link"
+                           asp-action="History"
+                           asp-route-nctId="@Model.Filter.NctId"
+                           asp-route-status="@Model.Filter.Status"
+                           asp-route-runId="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")"
+                           asp-route-sortBy="@Model.SortBy"
+                           asp-route-pageSize="@Model.PageSize"
+                           asp-route-hideSuperseded="@(Model.Filter.HideSuperseded ? "true" : "false")"
+                           asp-route-page="1">First</a>
+                    </li>
+                    <li class="page-item @(Model.HasPrev ? "" : "disabled")">
+                        <a class="page-link"
+                           asp-action="History"
+                           asp-route-nctId="@Model.Filter.NctId"
+                           asp-route-status="@Model.Filter.Status"
+                           asp-route-runId="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")"
+                           asp-route-sortBy="@Model.SortBy"
+                           asp-route-pageSize="@Model.PageSize"
+                           asp-route-hideSuperseded="@(Model.Filter.HideSuperseded ? "true" : "false")"
+                           asp-route-page="@(Model.CurrentPage - 1)">Prev</a>
+                    </li>
+                    <li class="page-item disabled">
+                        <span class="page-link">Page @Model.CurrentPage of @Model.TotalPages</span>
+                    </li>
+                    <li class="page-item @(Model.HasNext ? "" : "disabled")">
+                        <a class="page-link"
+                           asp-action="History"
+                           asp-route-nctId="@Model.Filter.NctId"
+                           asp-route-status="@Model.Filter.Status"
+                           asp-route-runId="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")"
+                           asp-route-sortBy="@Model.SortBy"
+                           asp-route-pageSize="@Model.PageSize"
+                           asp-route-hideSuperseded="@(Model.Filter.HideSuperseded ? "true" : "false")"
+                           asp-route-page="@(Model.CurrentPage + 1)">Next</a>
+                    </li>
+                    <li class="page-item @(Model.HasNext ? "" : "disabled")">
+                        <a class="page-link"
+                           asp-action="History"
+                           asp-route-nctId="@Model.Filter.NctId"
+                           asp-route-status="@Model.Filter.Status"
+                           asp-route-runId="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")"
+                           asp-route-sortBy="@Model.SortBy"
+                           asp-route-pageSize="@Model.PageSize"
+                           asp-route-hideSuperseded="@(Model.Filter.HideSuperseded ? "true" : "false")"
+                           asp-route-page="@Model.TotalPages">Last</a>
+                    </li>
+                </ul>
+            </nav>
+        }
+    </div>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="text-muted">No audit rows match the current filter.</p>
+    }
+    else
+    {
+        <p class="text-muted small">
+            Showing @Model.FirstRowOnPage–@Model.LastRowOnPage of @Model.TotalRows row@(Model.TotalRows == 1 ? "" : "s") from <code>public.eligibility_study</code>.
+        </p>
+        @* Empty form that the row checkboxes attach to via HTML5 form="..."
+           on each <input>. We can't wrap the <table> in a form because the
+           inline Re-run / Delete forms inside <td> would become nested,
+           which the HTML parser silently breaks. The form tag helper still
+           injects the anti-forgery token here, and submitting via the
+           selection-bar button gathers every checkbox tagged with
+           form="rerun-selection-form". *@
+        @if (canRunPipeline)
+        {
+            <form asp-action="RerunBatch" method="post" id="rerun-selection-form"
+                  data-rerun-selection-form class="d-none"></form>
+        }
+        <div class="table-responsive">
+            <table class="table table-sm table-striped table-hover small">
+                <thead>
+                    <tr>
+                        <th class="selection-col d-none" style="width: 2rem;">
+                            <input type="checkbox" id="select-all" class="form-check-input"
+                                   title="Toggle all on this page" />
+                        </th>
+                        <th>NCT ID</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th class="text-end">Duration</th>
+                        <th class="text-end">Parsed</th>
+                        <th class="text-end">Persisted</th>
+                        <th class="text-end">Prompt&nbsp;tok</th>
+                        <th class="text-end">Compl.&nbsp;tok</th>
+                        <th class="text-end" title="Completion tokens ÷ duration. Ignores prompt/prefill and folds reasoning into decode time — a rough overall-throughput guide.">Tok/s</th>
+                        <th>Error</th>
+                        <th>Run</th>
+                        <th></th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in Model.Rows)
+                    {
+                        <tr tabindex="0"
+                            data-nct-id="@s.NctId"
+                            data-run-id="@s.RunId"
+                            data-status="@s.Status"
+                            data-llm-response="@s.LlmRawResponse"
+                            data-error-message="@s.ErrorMessage"
+                            data-finish-reason="@s.LlmFinishReason"
+                            data-prompt-tokens="@(s.LlmPromptTokens.HasValue ? s.LlmPromptTokens.Value.ToString() : "")"
+                            data-completion-tokens="@(s.LlmCompletionTokens.HasValue ? s.LlmCompletionTokens.Value.ToString() : "")"
+                            data-stopped-eos="@FormatBoolAttr(s.LlmStoppedEos)"
+                            data-stopped-limit="@FormatBoolAttr(s.LlmStoppedLimit)"
+                            data-stopped-word="@FormatBoolAttr(s.LlmStoppedWord)"
+                            data-stopping-word="@s.LlmStoppingWord"
+                            data-truncated="@FormatBoolAttr(s.LlmTruncated)"
+                            style="cursor: pointer;">
+                            <td class="selection-col d-none">
+                                <input type="checkbox" name="nctIds" value="@s.NctId"
+                                       form="rerun-selection-form"
+                                       class="form-check-input row-selector"
+                                       onclick="event.stopPropagation();" />
+                            </td>
+                            <td><a asp-action="Analysis" asp-route-nctId="@s.NctId" class="text-decoration-none" onclick="event.stopPropagation();"><code>@s.NctId</code></a></td>
+                            <td><span class="badge @StatusBadge(s.Status)">@s.Status</span></td>
+                            <td><time datetime="@s.StartedAt.ToString("o")" data-locale-time>@s.StartedAt.ToString("u")</time></td>
+                            @if (s.Status == EligibilityProcessing.Core.StudyExecution.StatusRunning)
+                            {
+                                @* Live ticker: JS at the bottom updates this cell each
+                                   second with (now - started_at). On the next page
+                                   render after the trial completes the cell will show
+                                   the final FormatDuration() value. *@
+                                <td class="text-end" data-elapsed-since="@s.StartedAt.ToString("o")">
+                                    @(((DateTimeOffset.UtcNow - s.StartedAt).TotalSeconds).ToString("F1") + "s"
+                                )</td>
+                            }
+                            else
+                            {
+                                <td class="text-end">@FormatDuration(s.Duration)</td>
+                            }
+                            <td class="text-end">@(s.ParsedRecordCount.HasValue ? s.ParsedRecordCount.Value.ToString() : "—")</td>
+                            <td class="text-end">@(s.PersistedRowCount.HasValue ? s.PersistedRowCount.Value.ToString() : "—")</td>
+                            <td class="text-end">@(s.LlmPromptTokens.HasValue ? s.LlmPromptTokens.Value.ToString("N0") : "—")</td>
+                            <td class="text-end">@(s.LlmCompletionTokens.HasValue ? s.LlmCompletionTokens.Value.ToString("N0") : "—")</td>
+                            <td class="text-end">@(s.CompletionTokensPerSecond.HasValue ? s.CompletionTokensPerSecond.Value.ToString("F1") : "—")</td>
+                            <td class="text-truncate" style="max-width: 16rem;" title="@s.ErrorMessage">@(string.IsNullOrEmpty(s.ErrorMessage) ? "" : s.ErrorMessage)</td>
+                            <td><small><code>@s.RunId.ToString("N").Substring(0, 8)</code></small></td>
+                            @* Inline form posts the row's NCT ID to the same Rerun endpoint
+                               that the dashboard's "Run Trial" button uses. stopPropagation
+                               keeps the click from also firing the row-select handler.
+                               Pipeline-ops only (read-only roles see no Re-run / Delete). *@
+                            @if (canRunPipeline)
+                            {
+                                <td>
+                                    <form asp-action="Rerun" method="post" data-rerun-form class="d-inline m-0" onclick="event.stopPropagation();">
+                                        <input type="hidden" name="nctId" value="@s.NctId" />
+                                        <button type="submit" class="btn btn-link btn-sm p-0 text-decoration-none">Re-run</button>
+                                    </form>
+                                </td>
+                                <td>
+                                    <form asp-action="DeleteStudy" method="post" data-delete-form class="d-inline m-0" onclick="event.stopPropagation();">
+                                        <input type="hidden" name="runId" value="@s.RunId" />
+                                        <input type="hidden" name="nctId" value="@s.NctId" />
+                                        <input type="hidden" name="filterNctId" value="@Model.Filter.NctId" />
+                                        <input type="hidden" name="filterStatus" value="@Model.Filter.Status" />
+                                        <input type="hidden" name="filterRunId" value="@(Model.Filter.RunId.HasValue ? Model.Filter.RunId.Value.ToString() : "")" />
+                                        <input type="hidden" name="sortBy" value="@Model.SortBy" />
+                                        <input type="hidden" name="page" value="@Model.CurrentPage" />
+                                        <input type="hidden" name="pageSize" value="@Model.PageSize" />
+                                        <input type="hidden" name="hideSuperseded" value="@(Model.Filter.HideSuperseded.ToString().ToLowerInvariant())" />
+                                        <button type="submit" class="btn btn-link btn-sm p-0 text-decoration-none text-danger">Delete</button>
+                                    </form>
+                                </td>
+                            }
+                            else
+                            {
+                                <td></td>
+                                <td></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @* ===== Response detail panel ===== *@
+        <div class="card mt-3" id="response-panel" style="display: none;">
+            <div class="card-header small text-muted d-flex justify-content-between align-items-center">
+                <div>
+                    Raw LLM response &mdash; <code id="response-nct-id"></code>
+                    <span id="response-run-id" class="text-muted ms-2"></span>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="response-close">Close</button>
+            </div>
+            <div class="card-body small">
+                <div id="response-error" class="alert alert-danger small mb-2" style="display: none;"></div>
+
+                @* LLM response metadata — finish_reason, token counts, and
+                   llama.cpp's vendor stop diagnostics when present
+                   (stopped_eos, stopped_limit, stopped_word, stopping_word,
+                   truncated). Each <dt> is hidden when its value is empty so
+                   OpenAI-proper rows don't show empty placeholder fields. *@
+                <dl id="response-diagnostics" class="row mb-3 small" style="display: none;">
+                    <dt class="col-sm-3 text-muted" data-key="finish_reason">finish_reason</dt>
+                    <dd class="col-sm-9" data-value="finish_reason"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="prompt_tokens">prompt_tokens</dt>
+                    <dd class="col-sm-9" data-value="prompt_tokens"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="completion_tokens">completion_tokens</dt>
+                    <dd class="col-sm-9" data-value="completion_tokens"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="stopped_eos">stopped_eos</dt>
+                    <dd class="col-sm-9" data-value="stopped_eos"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="stopped_limit">stopped_limit</dt>
+                    <dd class="col-sm-9" data-value="stopped_limit"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="stopped_word">stopped_word</dt>
+                    <dd class="col-sm-9" data-value="stopped_word"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="stopping_word">stopping_word</dt>
+                    <dd class="col-sm-9" data-value="stopping_word"></dd>
+
+                    <dt class="col-sm-3 text-muted" data-key="truncated">truncated</dt>
+                    <dd class="col-sm-9" data-value="truncated"></dd>
+                </dl>
+
+                @* Copy-to-clipboard toolbar. Shown only when there's content
+                   in the editor (toggled alongside response-content by the
+                   row-click handler). Falls back to document.execCommand on
+                   non-secure contexts so the button still works over LAN HTTP. *@
+                <div id="response-toolbar" class="d-flex justify-content-end mb-2">
+                    <button type="button" id="response-copy"
+                            class="btn btn-sm btn-outline-secondary"
+                            title="Copy the formatted JSON to clipboard">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                             fill="currentColor" viewBox="0 0 16 16" class="me-1"
+                             aria-hidden="true">
+                            <path d="M15.188 5.11a.5.5 0 0 1 .752.626l-.056.084-7.5 9a.5.5 0 0 1-.738.033l-3.5-3.5-.064-.078a.501.501 0 0 1 .693-.693l.078.064 3.113 3.113 7.15-8.58z"></path>
+                        </svg>
+                        <span id="response-copy-label">Copy</span>
+                    </button>
+                </div>
+                @* CodeMirror 6 editor mounts inside this div. The bottom-of-page
+                   module script reads the raw text from `row.dataset.llmResponse`,
+                   pretty-prints it when JSON.parse succeeds, and lets the
+                   JSON linter mark syntax errors (red underline at the failure
+                   position) when it doesn't. Outer min/max heights bound the
+                   panel so a 4 KB response doesn't dominate the viewport.
+                   Background falls back to bg-body-tertiary for the moment
+                   between mount and first text. *@
+                <div id="response-content"
+                     class="bg-body-tertiary mb-0 small"
+                     style="min-height: 4rem; max-height: 32rem; overflow: hidden;"></div>
+                <p id="response-empty" class="text-muted mb-0" style="display: none;">
+                    No response captured (audit row was written before the LLM call returned, or before this column existed in the schema).
+                </p>
+            </div>
+        </div>
+    }
+}
+
+@section Scripts {
+    <script>
+        // Locale-format every started_at timestamp; ISO 8601 stays in the
+        // datetime= attribute as machine-readable fallback.
+        (function () {
+            const fmt = new Intl.DateTimeFormat(undefined, {
+                year: "numeric", month: "short", day: "2-digit",
+                hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+            document.querySelectorAll("time[data-locale-time]").forEach(el => {
+                const iso = el.getAttribute("datetime");
+                if (!iso) return;
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return;
+                el.textContent = fmt.format(d);
+            });
+        })();
+    </script>
+    <script>
+        // Live duration ticker for in-flight studies. Cells with
+        // data-elapsed-since render (now - started_at) every second; the
+        // server only stamps that attribute on rows with status=running so
+        // completed rows keep their final FormatDuration() value.
+        // When the page is reloaded after a trial completes, the row no
+        // longer carries the attribute and the static final value renders.
+        (function () {
+            const cells = document.querySelectorAll("td[data-elapsed-since]");
+            if (cells.length === 0) return;
+
+            function tick() {
+                const now = Date.now();
+                cells.forEach(cell => {
+                    const startMs = new Date(cell.dataset.elapsedSince).getTime();
+                    if (isNaN(startMs)) return;
+                    const seconds = (now - startMs) / 1000;
+                    cell.textContent = seconds.toFixed(1) + "s";
+                });
+            }
+            tick();
+            setInterval(tick, 1000);
+        })();
+    </script>
+    <script>
+        // Row selection + response-panel wiring. Click any row (or arrow-key
+        // through them) to surface that row's stored LLM response below the
+        // table. Anchor inside the NCT-ID cell carries onclick stopPropagation
+        // so navigating to Analysis doesn't also select the row.
+        (function () {
+            const rows = Array.from(document.querySelectorAll("tbody tr[data-llm-response]"));
+            if (rows.length === 0) return;
+
+            const panel    = document.getElementById("response-panel");
+            const nctEl    = document.getElementById("response-nct-id");
+            const runEl    = document.getElementById("response-run-id");
+            const errEl    = document.getElementById("response-error");
+            const diagEl   = document.getElementById("response-diagnostics");
+            const toolbarEl = document.getElementById("response-toolbar");
+            const contentEl = document.getElementById("response-content");
+            const emptyEl  = document.getElementById("response-empty");
+            const closeBtn = document.getElementById("response-close");
+
+            let selectedIdx = -1;
+
+            // Per-field render: hide each <dt>/<dd> pair when the row didn't
+            // provide that field (data-* attribute is empty / missing). Shows
+            // the parent <dl> only when at least one field is populated.
+            function fillDiagnostics(row) {
+                const fields = [
+                    ["finish_reason",     row.dataset.finishReason],
+                    ["prompt_tokens",     row.dataset.promptTokens],
+                    ["completion_tokens", row.dataset.completionTokens],
+                    ["stopped_eos",       row.dataset.stoppedEos],
+                    ["stopped_limit",     row.dataset.stoppedLimit],
+                    ["stopped_word",      row.dataset.stoppedWord],
+                    ["stopping_word",     row.dataset.stoppingWord],
+                    ["truncated",         row.dataset.truncated]
+                ];
+                let anyShown = false;
+                fields.forEach(function (pair) {
+                    const key = pair[0];
+                    const val = pair[1] == null ? "" : String(pair[1]);
+                    const dt = diagEl.querySelector('[data-key="' + key + '"]');
+                    const dd = diagEl.querySelector('[data-value="' + key + '"]');
+                    if (!dt || !dd) return;
+                    if (val === "") {
+                        dt.style.display = "none";
+                        dd.style.display = "none";
+                    } else {
+                        dt.style.display = "";
+                        dd.style.display = "";
+                        dd.textContent = val;
+                        anyShown = true;
+                    }
+                });
+                diagEl.style.display = anyShown ? "" : "none";
+            }
+
+            function show(idx) {
+                if (idx < 0 || idx >= rows.length) return;
+                if (selectedIdx >= 0) rows[selectedIdx].classList.remove("table-active");
+                selectedIdx = idx;
+                const row = rows[idx];
+                row.classList.add("table-active");
+
+                nctEl.textContent = row.dataset.nctId || "";
+                runEl.textContent = "(run " + (row.dataset.runId || "").substring(0, 8) + ", status " + (row.dataset.status || "") + ")";
+
+                const err = row.dataset.errorMessage || "";
+                if (err) {
+                    errEl.textContent = err;
+                    errEl.style.display = "";
+                } else {
+                    errEl.style.display = "none";
+                }
+
+                fillDiagnostics(row);
+
+                const resp = row.dataset.llmResponse || "";
+                if (resp) {
+                    // CodeMirror module exposes __setResponseContent on window
+                    // once loaded. If the user clicks before the module is
+                    // ready (rare — the module is deferred but usually loaded
+                    // by the time the user interacts), queue the text so the
+                    // module can flush it on init.
+                    if (window.__setResponseContent) {
+                        window.__setResponseContent(resp);
+                    } else {
+                        window.__pendingResponseText = resp;
+                    }
+                    toolbarEl.style.display = "";
+                    contentEl.style.display = "";
+                    emptyEl.style.display = "none";
+                } else {
+                    if (window.__setResponseContent) {
+                        window.__setResponseContent("");
+                    }
+                    toolbarEl.style.display = "none";
+                    contentEl.style.display = "none";
+                    emptyEl.style.display = "";
+                }
+
+                panel.style.display = "";
+                panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            }
+
+            function clearSelection() {
+                if (selectedIdx >= 0) rows[selectedIdx].classList.remove("table-active");
+                selectedIdx = -1;
+                panel.style.display = "none";
+            }
+
+            rows.forEach((row, idx) => {
+                row.addEventListener("click", () => show(idx));
+                row.addEventListener("keydown", (e) => {
+                    if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        const next = Math.min(idx + 1, rows.length - 1);
+                        rows[next].focus();
+                        show(next);
+                    } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        const prev = Math.max(idx - 1, 0);
+                        rows[prev].focus();
+                        show(prev);
+                    } else if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        show(idx);
+                    } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        clearSelection();
+                    }
+                });
+            });
+
+            closeBtn.addEventListener("click", clearSelection);
+        })();
+    </script>
+    <script>
+        // Intercept the inline Re-run form submits so the browser stays on
+        // the Studies page instead of navigating to the controller's JSON
+        // response. Mirrors the dashboard's rerun-form handler in Index.cshtml
+        // but renders feedback into the #rerun-status banner above the table.
+        (function () {
+            const forms = document.querySelectorAll("form[data-rerun-form]");
+            if (forms.length === 0) return;
+
+            const status = document.getElementById("rerun-status");
+
+            function showStatus(text, cls) {
+                if (!status) return;
+                status.className = "alert py-2 px-3 small " + cls;
+                status.textContent = text;
+                status.classList.remove("d-none");
+            }
+
+            async function postForm(form) {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form),
+                    headers: { "Accept": "application/json" }
+                });
+                let body = {};
+                try { body = await response.json(); } catch { /* empty body is fine */ }
+                return { ok: response.ok, status: response.status, body };
+            }
+
+            forms.forEach(form => {
+                form.addEventListener("submit", async (ev) => {
+                    ev.preventDefault();
+                    const r = await postForm(ev.currentTarget);
+                    if (r.ok) {
+                        showStatus(
+                            `Re-running ${r.body.nct_id ?? "?"} (run ${r.body.run_id?.substring(0, 8) ?? "?"}) — see dashboard for live progress.`,
+                            "alert-success");
+                    } else if (r.status === 409) {
+                        showStatus(
+                            `Re-run rejected: another run is already in progress (${r.body.current_run_id?.substring(0, 8) ?? "?"}).`,
+                            "alert-warning");
+                    } else if (r.status === 400) {
+                        showStatus(`Re-run rejected: ${r.body.error ?? "bad request"}.`, "alert-danger");
+                    } else {
+                        showStatus(`Re-run failed (HTTP ${r.status}).`, "alert-danger");
+                    }
+                });
+            });
+        })();
+    </script>
+    <script>
+        // Delete forms POST normally (the controller redirects back to Studies
+        // so the table refreshes). The only client-side concern is preventing
+        // accidental clicks — a confirm() dialog gates the submit.
+        (function () {
+            const forms = document.querySelectorAll("form[data-delete-form]");
+            forms.forEach(form => {
+                form.addEventListener("submit", (ev) => {
+                    const nctId = form.querySelector("input[name='nctId']")?.value || "this row";
+                    if (!window.confirm(`Delete audit row for ${nctId}? The persisted criterion rows in public.eligibility (if any) are NOT removed.`)) {
+                        ev.preventDefault();
+                    }
+                });
+            });
+        })();
+    </script>
+    <script>
+        // Selection mode + multi-trial rerun. State is JS-only — selections
+        // do NOT persist across pagination or filter changes. The .selection-col
+        // class targets the checkbox column in the header and rows; entering
+        // selection mode toggles `d-none` to reveal them. The action bar in
+        // the page header has its own .d-none toggle.
+        (function () {
+            const toggleBtn = document.getElementById("selection-mode-toggle");
+            // Selection mode is a pipeline-ops feature; its controls aren't
+            // rendered for read-only roles. Bail out so the rest of the page works.
+            if (!toggleBtn) return;
+            const bar = document.getElementById("selection-bar");
+            const countEl = document.getElementById("selection-count");
+            const clearBtn = document.getElementById("selection-clear");
+            const selectAll = document.getElementById("select-all");
+            const form = document.getElementById("rerun-selection-form");
+            const selCols = document.querySelectorAll(".selection-col");
+            const checkboxes = Array.from(document.querySelectorAll(".row-selector"));
+            const status = document.getElementById("rerun-status");
+
+            // If there are no rows on this page, selection mode is meaningless
+            // — leave the toggle button visible but make it a no-op.
+            let on = false;
+
+            function checkedCount() {
+                return checkboxes.filter(cb => cb.checked).length;
+            }
+            function updateCount() {
+                const n = checkedCount();
+                countEl.textContent = `${n} selected`;
+                // The select-all checkbox reflects "all on this page selected".
+                if (checkboxes.length > 0) {
+                    selectAll.checked = (n === checkboxes.length);
+                    selectAll.indeterminate = (n > 0 && n < checkboxes.length);
+                }
+            }
+            function setMode(next) {
+                on = next;
+                selCols.forEach(c => c.classList.toggle("d-none", !on));
+                bar.classList.toggle("d-none", !on);
+                toggleBtn.textContent = on ? "Exit selection mode" : "Selection mode";
+                toggleBtn.classList.toggle("btn-outline-secondary", !on);
+                toggleBtn.classList.toggle("btn-secondary", on);
+                if (!on) {
+                    checkboxes.forEach(cb => cb.checked = false);
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                }
+                updateCount();
+            }
+
+            toggleBtn?.addEventListener("click", () => setMode(!on));
+            clearBtn?.addEventListener("click", () => {
+                checkboxes.forEach(cb => cb.checked = false);
+                updateCount();
+            });
+            selectAll?.addEventListener("change", () => {
+                checkboxes.forEach(cb => cb.checked = selectAll.checked);
+                updateCount();
+            });
+            checkboxes.forEach(cb => cb.addEventListener("change", updateCount));
+
+            function showStatus(text, cls) {
+                if (!status) return;
+                status.className = "alert py-2 px-3 small " + cls;
+                status.textContent = text;
+                status.classList.remove("d-none");
+            }
+
+            // Intercept submit so the browser stays on Studies. Same fetch /
+            // status-banner pattern as the per-row Re-run forms.
+            form?.addEventListener("submit", async (ev) => {
+                ev.preventDefault();
+                const n = checkedCount();
+                if (n === 0) {
+                    showStatus("Select at least one row before running.", "alert-warning");
+                    return;
+                }
+                if (!window.confirm(`Re-run ${n} trial${n === 1 ? "" : "s"} as a single batch?`)) {
+                    return;
+                }
+                // FormData(form) already includes the checked nctIds checkboxes:
+                // they are form-associated via their form="rerun-selection-form"
+                // attribute, and FormData walks associated controls, not just
+                // descendants. Appending them again doubled every entry and blew
+                // past FormOptions.ValueCountLimit on large selections.
+                const fd = new FormData(form);
+
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    body: fd,
+                    headers: { "Accept": "application/json" }
+                });
+                let body = {};
+                try { body = await response.json(); } catch { /* empty body is fine */ }
+                if (response.ok) {
+                    showStatus(
+                        `Re-running ${body.nct_ids?.length ?? n} trials (run ${body.run_id?.substring(0, 8) ?? "?"}) — see dashboard for live progress.`,
+                        "alert-success");
+                    // Drop the user out of selection mode after a successful
+                    // submit so the next page interaction is back to normal.
+                    setMode(false);
+                } else if (response.status === 409) {
+                    showStatus(
+                        `Re-run rejected: another run is already in progress (${body.current_run_id?.substring(0, 8) ?? "?"}).`,
+                        "alert-warning");
+                } else if (response.status === 400) {
+                    showStatus(`Re-run rejected: ${body.error ?? "bad request"}.`, "alert-danger");
+                } else {
+                    showStatus(`Re-run failed (HTTP ${response.status}).`, "alert-danger");
+                }
+            });
+        })();
+    </script>
+    @* CodeMirror 6 editor for the raw-LLM-response panel. Loaded as an ES
+       module from esm.sh — modular CM6 doesn't ship a single pre-bundled
+       file like CM5 did, so esm.sh handles the on-the-fly bundling. The
+       editor is read-only, JSON-language-aware, and linted via
+       jsonParseLinter so syntax errors surface as a red gutter mark + an
+       underline at the exact failure position. One Dark theme is applied
+       when Bootstrap is in dark mode; default light theme otherwise.
+
+       The module exposes window.__setResponseContent so the existing
+       row-click handler (above) can update the editor's content without
+       coupling to CodeMirror imports. Text is pretty-printed when
+       JSON.parse succeeds; on parse failure the raw text is shown
+       verbatim so the linter's error positions line up with the source. *@
+    <script type="module">
+        import { EditorView, lineNumbers } from "https://esm.sh/@@codemirror/view@@6";
+        import { json, jsonParseLinter } from "https://esm.sh/@@codemirror/lang-json@@6";
+        import { linter, lintGutter } from "https://esm.sh/@@codemirror/lint@@6";
+        import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter }
+            from "https://esm.sh/@@codemirror/language@@6";
+        import { oneDark } from "https://esm.sh/@@codemirror/theme-one-dark@@6";
+
+        const container = document.getElementById("response-content");
+        if (container) {
+            const isDark = document.documentElement.getAttribute("data-bs-theme") === "dark";
+
+            const base = [
+                lineNumbers(),
+                foldGutter(),
+                lintGutter(),
+                bracketMatching(),
+                syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+                json(),
+                linter(jsonParseLinter()),
+                EditorView.lineWrapping,
+                EditorView.editable.of(false),
+                EditorView.theme({
+                    "&": { maxHeight: "32rem", fontSize: "0.8125rem" },
+                    ".cm-scroller": { overflow: "auto" }
+                })
+            ];
+
+            const editor = new EditorView({
+                doc: "",
+                extensions: isDark ? [...base, oneDark] : base,
+                parent: container
+            });
+
+            // Lenient structural formatter — inserts newlines + indentation at
+            // {, [, , (outside string context) and `:` gets a single space.
+            // Used when JSON.parse fails: a malformed LLM response is usually
+            // emitted as one long line, so reformatting it makes the linter's
+            // error position visible in the wrapped view. Tracks string +
+            // backslash-escape state so structural chars inside string values
+            // are left alone.
+            function lenientPretty(text) {
+                let out = "";
+                let depth = 0;
+                let inStr = false;
+                let esc = false;
+                const pad = () => "  ".repeat(depth);
+                for (const ch of text) {
+                    if (esc) { out += ch; esc = false; continue; }
+                    if (inStr) {
+                        out += ch;
+                        if (ch === "\\") esc = true;
+                        else if (ch === "\"") inStr = false;
+                        continue;
+                    }
+                    if (ch === "\"") { inStr = true; out += ch; continue; }
+                    if (ch === "{" || ch === "[") {
+                        depth++;
+                        out += ch + "\n" + pad();
+                        continue;
+                    }
+                    if (ch === "}" || ch === "]") {
+                        depth = Math.max(0, depth - 1);
+                        out += "\n" + pad() + ch;
+                        continue;
+                    }
+                    if (ch === ",") { out += ch + "\n" + pad(); continue; }
+                    if (ch === ":") { out += ": "; continue; }
+                    out += ch;
+                }
+                return out;
+            }
+
+            function prettyOrRaw(text) {
+                if (!text) return "";
+                try { return JSON.stringify(JSON.parse(text), null, 2); }
+                catch { return lenientPretty(text); }
+            }
+
+            window.__setResponseContent = function (text) {
+                const next = prettyOrRaw(text);
+                editor.dispatch({
+                    changes: { from: 0, to: editor.state.doc.length, insert: next }
+                });
+            };
+
+            // If a row click landed before this module finished loading, flush
+            // the queued text now.
+            if (window.__pendingResponseText !== undefined) {
+                window.__setResponseContent(window.__pendingResponseText);
+                window.__pendingResponseText = undefined;
+            }
+
+            // Copy-to-clipboard. Modern path uses navigator.clipboard.writeText
+            // which only works on secure contexts (HTTPS or localhost) — over
+            // plain HTTP from a LAN browser the API is undefined / forbidden.
+            // The textarea + execCommand fallback covers that case so the
+            // button works regardless of how the page was reached.
+            async function copyText(text) {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    return;
+                }
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                ta.setAttribute("readonly", "");
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand("copy"); }
+                finally { document.body.removeChild(ta); }
+            }
+
+            const copyBtn = document.getElementById("response-copy");
+            const copyLabel = document.getElementById("response-copy-label");
+            if (copyBtn && copyLabel) {
+                copyBtn.addEventListener("click", async () => {
+                    try {
+                        await copyText(editor.state.doc.toString());
+                        copyLabel.textContent = "Copied!";
+                    } catch {
+                        copyLabel.textContent = "Copy failed";
+                    }
+                    setTimeout(() => { copyLabel.textContent = "Copy"; }, 1500);
+                });
+            }
+        }
+    </script>
+}

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.19" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EligibilityProcessing.Core\EligibilityProcessing.Core.vbproj" />
+    <ProjectReference Include="..\..\src\EligibilityProcessing.Data\EligibilityProcessing.Data.vbproj" />
+    <ProjectReference Include="..\..\src\EligibilityProcessing.Llm\EligibilityProcessing.Llm.vbproj" />
+    <ProjectReference Include="..\..\src\EligibilityProcessing.Umls\EligibilityProcessing.Umls.vbproj" />
+    <ProjectReference Include="..\..\src\EligibilityProcessing.Notifications\EligibilityProcessing.Notifications.vbproj" />
+    <ProjectReference Include="..\..\src\EligibilityProcessing.Web\EligibilityProcessing.Web.csproj" />
+  </ItemGroup>
+
+</Project>

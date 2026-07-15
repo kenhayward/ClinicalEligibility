@@ -1,0 +1,25 @@
+@model DeniedViewModel
+@{
+    ViewData["Title"] = "Access denied";
+    Layout = "_AuthLayout";
+}
+
+<div class="card shadow-sm">
+    <div class="card-body text-center">
+        @if (Model.NoAccount)
+        {
+            <h2 class="h5 card-title">No account found</h2>
+            <p class="text-muted">
+                There is no account for <strong>@Model.Email</strong>. An administrator
+                has been notified of your request and can create an account for you.
+                Please try again later.
+            </p>
+        }
+        else
+        {
+            <h2 class="h5 card-title">Access denied</h2>
+            <p class="text-muted">You don't have permission to view that page.</p>
+        }
+        <a class="btn btn-outline-secondary mt-2" asp-controller="Account" asp-action="Login">Back to sign in</a>
+    </div>
+</div>

@@ -1,0 +1,50 @@
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+/* Focus ring: the inner halo uses --bs-body-bg (theme-aware) instead of
+   hardcoded white, so dark-mode focus state doesn't get a glaring white
+   inner ring against the dark surface. The outer ring is Bootstrap's
+   primary-blue. */
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem var(--bs-body-bg), 0 0 0 0.25rem #258cfb;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}
+
+/* ===== Dropdown submenu (flyout) =====
+   Bootstrap 5 dropped native nested dropdowns. The user menu hosts a Theme
+   flyout that opens to the LEFT — the parent uses .dropdown-menu-end so it
+   sits against the right edge of the viewport, where opening rightward would
+   clip off-screen. Two triggers: hover (this CSS) and click (JS in
+   _Layout.cshtml that toggles .show). Hover keeps it usable on desktop even
+   if the inline script fails or the page is partially loaded. */
+.dropdown-submenu {
+  position: relative;
+}
+
+.dropdown-submenu > .dropdown-menu {
+  top: 0;
+  right: 100%;
+  left: auto;
+  margin-top: -0.25rem;
+  margin-right: 0.125rem;
+}
+
+.dropdown-submenu:hover > .dropdown-menu,
+.dropdown-submenu > .dropdown-menu.show {
+  display: block;
+}

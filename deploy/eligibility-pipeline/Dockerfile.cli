@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+# Architecture spec §5: CLI image — runtime base for one-shot batch runs.
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+WORKDIR /src
+COPY . .
+RUN dotnet restore contexts/eligibility/Eligibility.sln
+RUN dotnet publish contexts/eligibility/src/EligibilityProcessing.Cli/EligibilityProcessing.Cli.vbproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine
+WORKDIR /app
+# krb5-libs: Npgsql loads libgssapi_krb5.so.2 during PostgreSQL connection
+# negotiation, but the Alpine runtime doesn't ship the Kerberos libraries -
+# without it `migrate` / `run` fail with "Cannot load library libgssapi_krb5.so.2".
+# tzdata: gives the .NET runtime real timezone data so DateTime.Now and log
+# timestamps honor the TZ env var (e.g. TZ=Europe/London) instead of UTC; the
+# normalize-umls ETA's projected finish time then reads in local wall-clock.
+RUN apk add --no-cache krb5-libs tzdata
+COPY --from=build /app/publish .
+# Convenience wrapper so commands are short when exec-ing into the long-lived
+# tools container: `docker exec -it eligibility-cli elig normalize-umls --count 500`
+# (instead of `... dotnet EligibilityProcessing.Cli.dll normalize-umls ...`).
+RUN printf '%s\n' '#!/bin/sh' 'exec dotnet /app/EligibilityProcessing.Cli.dll "$@"' > /usr/local/bin/elig \
+    && chmod +x /usr/local/bin/elig
+# Default entrypoint runs the CLI directly (e.g. `docker run eligibility/cli:1.0 migrate`).
+# The compose `eligibility-cli` service overrides this to idle so it stays up for exec.
+ENTRYPOINT ["dotnet", "EligibilityProcessing.Cli.dll"]

@@ -1,0 +1,90 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\EligibilityProcessing.Core\EligibilityProcessing.Core.vbproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.7" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EligibilityProcessing.Data.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- VB.NET strips directory segments from auto-generated resource names,
+         so set LogicalName explicitly. -->
+    <EmbeddedResource Include="Migrations\V1__schema.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V1__schema.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V2__study_table.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V2__study_table.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V3__study_raw_response.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V3__study_raw_response.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V4__drop_watermark.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V4__drop_watermark.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V5__study_detail.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V5__study_detail.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V6__authoring.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V6__authoring.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V7__study_embeddings.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V7__study_embeddings.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V8__performance_indexes.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V8__performance_indexes.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V9__llm_stop_diagnostics.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V9__llm_stop_diagnostics.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V10__authoring_criterion_source.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V10__authoring_criterion_source.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V11__auth.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V11__auth.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V12__audit.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V12__audit.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V13__authoring_study_id.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V13__authoring_study_id.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V14__authoring_criterion_manual_reason.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V14__authoring_criterion_manual_reason.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V15__run_concurrency_cap.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V15__run_concurrency_cap.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V16__study_phase_timings.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V16__study_phase_timings.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V17__umls_metathesaurus.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V17__umls_metathesaurus.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V18__umls_fts.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V18__umls_fts.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V19__umls_retry.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V19__umls_retry.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V20__umls_concept_normalization.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V20__umls_concept_normalization.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V21__signing_credentials.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V21__signing_credentials.sql</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <RootNamespace>EligibilityProcessing.Data</RootNamespace>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>

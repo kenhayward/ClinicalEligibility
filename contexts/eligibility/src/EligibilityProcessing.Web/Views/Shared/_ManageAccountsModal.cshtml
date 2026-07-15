@@ -1,0 +1,177 @@
+@*
+    Manage Accounts modal (admins only). Lists users and supports add / change-role
+    / delete via the /Users JSON endpoints. Anti-forgery token is posted as a form
+    field; protected-Owner rules are enforced server-side.
+*@
+<div class="modal fade" id="manageAccountsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Manage Accounts</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @Html.AntiForgeryToken()
+                <div id="ma-error" class="alert alert-danger d-none py-2"></div>
+
+                <form id="ma-add-form" class="row g-2 align-items-end mb-3">
+                    <div class="col-12 col-md">
+                        <label class="form-label small mb-0">User ID</label>
+                        <input class="form-control form-control-sm" name="userName" required />
+                    </div>
+                    <div class="col-12 col-md">
+                        <label class="form-label small mb-0">Email</label>
+                        <input type="email" class="form-control form-control-sm" name="email" required />
+                    </div>
+                    <div class="col-12 col-md">
+                        <label class="form-label small mb-0">Display name</label>
+                        <input class="form-control form-control-sm" name="displayName" />
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label small mb-0">Role</label>
+                        <select class="form-select form-select-sm" name="role">
+                            <option>Viewer</option>
+                            <option>Author</option>
+                            <option>Administrator</option>
+                            <option>Owner</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md">
+                        <label class="form-label small mb-0">Password <span class="text-muted">(optional)</span></label>
+                        <input type="password" class="form-control form-control-sm" name="password" autocomplete="new-password" />
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <button type="submit" class="btn btn-primary btn-sm w-100">Add</button>
+                    </div>
+                </form>
+
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>User</th><th>Email</th><th>Role</th><th>Sign-in</th><th>Last login</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ma-users">
+                        <tr><td colspan="6" class="text-muted">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Deferred to DOMContentLoaded: this partial renders in the page header, but
+    // Bootstrap's bundle loads at the end of <body>, so `bootstrap` is undefined
+    // at parse time. By DOMContentLoaded the bundle has executed.
+    document.addEventListener("DOMContentLoaded", function () {
+        const modalEl = document.getElementById("manageAccountsModal");
+        if (!modalEl || typeof bootstrap === "undefined") return;
+        // The user menu (and this modal) render inside the sticky navbar header,
+        // which establishes a stacking context (z-index 1020). Bootstrap appends
+        // its backdrop (z-index 1050) to <body>, so the backdrop would paint over
+        // the modal and grey it out / eat clicks. Re-parent the modal to <body>
+        // so it shares the backdrop's stacking context.
+        if (modalEl.parentElement !== document.body) {
+            document.body.appendChild(modalEl);
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        const errorBox = document.getElementById("ma-error");
+        const tbody = document.getElementById("ma-users");
+        const roles = ["Viewer", "Author", "Administrator", "Owner"];
+
+        function token() {
+            const el = modalEl.querySelector('input[name="__RequestVerificationToken"]');
+            return el ? el.value : "";
+        }
+        function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("d-none"); }
+        function clearError() { errorBox.classList.add("d-none"); }
+        function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
+
+        async function post(url, data) {
+            const body = new URLSearchParams(data);
+            body.set("__RequestVerificationToken", token());
+            const resp = await fetch(url, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: body
+            });
+            let json = null;
+            try { json = await resp.json(); } catch (e) { /* ignore */ }
+            if (!resp.ok) throw new Error((json && json.error) || ("Request failed (" + resp.status + ")"));
+            return json;
+        }
+
+        function roleSelect(u) {
+            const opts = roles.map(r => '<option value="' + r + '"' + (r === u.role ? " selected" : "") + '>' + r + '</option>').join("");
+            return '<select class="form-select form-select-sm ma-role" data-id="' + u.userId + '">' + opts + '</select>';
+        }
+        function badges(u) {
+            let h = "";
+            if (u.hasPassword) h += '<span class="badge text-bg-secondary me-1">password</span>';
+            if (u.hasGoogle) h += '<span class="badge text-bg-info">Google</span>';
+            return h || '<span class="text-muted">—</span>';
+        }
+
+        async function load() {
+            clearError();
+            tbody.innerHTML = '<tr><td colspan="6" class="text-muted">Loading…</td></tr>';
+            try {
+                const resp = await fetch("/Users/List", { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                if (!resp.ok) throw new Error("Failed to load users (" + resp.status + ")");
+                const data = await resp.json();
+                if (!data.users || !data.users.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No users.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.users.map(function (u) {
+                    return '<tr>' +
+                        '<td>' + esc(u.displayName || u.userName) + '<div class="text-muted small">' + esc(u.userName) + '</div></td>' +
+                        '<td>' + esc(u.email) + '</td>' +
+                        '<td>' + roleSelect(u) + '</td>' +
+                        '<td>' + badges(u) + '</td>' +
+                        '<td class="small text-muted">' + (u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "never") + '</td>' +
+                        '<td class="text-end"><button class="btn btn-outline-danger btn-sm ma-delete" data-id="' + u.userId + '" data-name="' + esc(u.userName) + '">Delete</button></td>' +
+                        '</tr>';
+                }).join("");
+            } catch (e) {
+                showError(e.message);
+                tbody.innerHTML = "";
+            }
+        }
+
+        tbody.addEventListener("change", async function (ev) {
+            const sel = ev.target.closest(".ma-role");
+            if (!sel) return;
+            clearError();
+            try { await post("/Users/ChangeRole", { userId: sel.dataset.id, role: sel.value }); }
+            catch (e) { showError(e.message); load(); }
+        });
+
+        tbody.addEventListener("click", async function (ev) {
+            const btn = ev.target.closest(".ma-delete");
+            if (!btn) return;
+            if (!confirm("Delete user '" + btn.dataset.name + "'?")) return;
+            clearError();
+            try { await post("/Users/Delete", { userId: btn.dataset.id }); await load(); }
+            catch (e) { showError(e.message); }
+        });
+
+        document.getElementById("ma-add-form").addEventListener("submit", async function (ev) {
+            ev.preventDefault();
+            clearError();
+            const f = ev.target;
+            try {
+                await post("/Users/Create", {
+                    userName: f.userName.value, email: f.email.value, displayName: f.displayName.value,
+                    role: f.role.value, password: f.password.value
+                });
+                f.reset();
+                await load();
+            } catch (e) { showError(e.message); }
+        });
+
+        const openBtn = document.getElementById("manage-accounts-btn");
+        if (openBtn) openBtn.addEventListener("click", function () { modal.show(); load(); });
+    });
+</script>

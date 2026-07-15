@@ -1,0 +1,40 @@
+@model LoginViewModel
+@{
+    ViewData["Title"] = "Sign in";
+    Layout = "_AuthLayout";
+}
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2 class="h5 card-title mb-3">Sign in</h2>
+
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="alert alert-danger py-2" role="alert">@Model.ErrorMessage</div>
+        }
+
+        <form method="post" asp-controller="Account" asp-action="Login">
+            @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="ReturnUrl" />
+            <div class="mb-3">
+                <label class="form-label" asp-for="UserName">User ID</label>
+                <input class="form-control" asp-for="UserName" autocomplete="username" autofocus required />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" asp-for="Password">Password</label>
+                <input class="form-control" type="password" asp-for="Password" autocomplete="current-password" required />
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Sign in</button>
+        </form>
+
+        @if (Model.GoogleEnabled)
+        {
+            <div class="text-center text-muted my-3">or</div>
+            <a class="btn btn-outline-secondary w-100"
+               asp-controller="Account" asp-action="ExternalLogin"
+               asp-route-returnUrl="@Model.ReturnUrl">
+                Sign in with Google
+            </a>
+        }
+    </div>
+</div>

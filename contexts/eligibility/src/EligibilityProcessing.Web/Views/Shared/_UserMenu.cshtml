@@ -1,0 +1,91 @@
+@*
+    Top-right user chip: avatar (Google picture) or initial + user id + role, with
+    a dropdown. "Manage Accounts" shows only for admins (Owner/Administrator).
+    Renders nothing for an unauthenticated request. Designed to sit inside a
+    <ul class="navbar-nav"> (it is an <li>).
+*@
+@{
+    var isAuthenticated = User?.Identity?.IsAuthenticated == true;
+}
+@if (isAuthenticated)
+{
+    var userName = User?.FindFirstValue(ClaimTypes.Name) ?? "";
+    var role = User?.FindFirstValue(ClaimTypes.Role) ?? "";
+    var picture = User?.FindFirstValue(AuthConstants.PictureClaim) ?? "";
+    var isAdmin = (User?.IsInRole(Roles.Owner) ?? false) || (User?.IsInRole(Roles.Administrator) ?? false);
+    var isOwner = User?.IsInRole(Roles.Owner) ?? false;
+    var initial = string.IsNullOrEmpty(userName) ? "?" : userName.Substring(0, 1).ToUpperInvariant();
+
+    <li class="nav-item dropdown">
+        @* data-bs-auto-close="outside" keeps the parent dropdown open when the
+           user clicks the Theme submenu toggle or a theme option inside it.
+           Without this, Bootstrap closes the parent on any inner click and the
+           flyout never opens. Clicks outside still close everything. *@
+        <button class="btn btn-link nav-link dropdown-toggle d-flex align-items-center gap-2" type="button"
+                id="user-menu-toggle" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+            @if (!string.IsNullOrEmpty(picture))
+            {
+                <img src="@picture" alt="" referrerpolicy="no-referrer"
+                     style="width:28px;height:28px;border-radius:50%;object-fit:cover;" />
+            }
+            else
+            {
+                <span class="d-inline-flex align-items-center justify-content-center rounded-circle bg-secondary text-white"
+                      style="width:28px;height:28px;font-size:.8rem;">@initial</span>
+            }
+            <span class="d-none d-sm-flex flex-column lh-1 text-start">
+                <span class="small fw-semibold">@userName</span>
+                <span class="text-muted" style="font-size:.7rem;">@role</span>
+            </span>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            @if (isAdmin)
+            {
+                <li><button class="dropdown-item" type="button" id="manage-accounts-btn">Manage Accounts</button></li>
+                <li><button class="dropdown-item" type="button" id="audit-trail-btn">Audit Trail</button></li>
+                <li><hr class="dropdown-divider" /></li>
+            }
+            @if (isOwner)
+            {
+                <li><button class="dropdown-item" type="button" id="runtime-parameters-btn">Runtime Parameters</button></li>
+                <li><hr class="dropdown-divider" /></li>
+            }
+            @* Theme flyout. Bootstrap 5 dropped native nested dropdowns, so this
+               is a hand-rolled .dropdown-submenu — site.css positions the nested
+               menu to the left of the parent (the parent uses dropdown-menu-end).
+               #bd-theme-label is kept from the original navbar dropdown so the
+               existing wiring in _Layout.cshtml continues to update it. *@
+            <li class="dropdown-submenu">
+                <button class="dropdown-item dropdown-toggle" type="button"
+                        id="theme-submenu-toggle" aria-haspopup="true" aria-expanded="false">
+                    Theme: <span id="bd-theme-label">Auto</span>
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="theme-submenu-toggle">
+                    <li><button type="button" class="dropdown-item" data-bs-theme-value="light">Light</button></li>
+                    <li><button type="button" class="dropdown-item" data-bs-theme-value="dark">Dark</button></li>
+                    <li><button type="button" class="dropdown-item" data-bs-theme-value="auto">Auto</button></li>
+                </ul>
+            </li>
+            <li><hr class="dropdown-divider" /></li>
+            <li>
+                <form method="post" asp-controller="Account" asp-action="Logout">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="dropdown-item">Sign out</button>
+                </form>
+            </li>
+            <li><hr class="dropdown-divider" /></li>
+            <li><button class="dropdown-item" type="button" id="about-btn">About</button></li>
+        </ul>
+    </li>
+
+    @await Html.PartialAsync("_AboutModal")
+    @if (isAdmin)
+    {
+        @await Html.PartialAsync("_ManageAccountsModal")
+        @await Html.PartialAsync("_AuditTrailModal")
+    }
+    @if (isOwner)
+    {
+        @await Html.PartialAsync("_RuntimeParametersModal")
+    }
+}

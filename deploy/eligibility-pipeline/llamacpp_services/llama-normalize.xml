@@ -1,0 +1,15 @@
+<service>
+  <id>llama-normalize</id>
+  <name>llama.cpp normalization model</name>
+  <description>llama.cpp server for the normalization model (llama 3.2 8b)</description>
+  <executable>%LLAMA_ROOT%\llamacpp-rocm\llama-server.exe</executable>
+  <arguments>-m %LLAMA_ROOT%\Models\bartowski\allura-forge_Llama-3.3-8B-Instruct-GGUF\allura-forge_Llama-3.3-8B-Instruct-Q4_K_S.gguf --host 0.0.0.0 --port 8078 --parallel 2  --no-mmap --log-timestamps --kv-unified --no-webui --cont-batching --ctx-size 12000 --predict 1000 --repeat-penalty 1.15 -fa on</arguments>
+  <workingdirectory>%LLAMA_ROOT%\llamacpp-rocm\</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <logpath>%LLAMA_ROOT%\llamacpp-rocm\logs</logpath>
+  <onfailure action="restart" delay="5 sec"/>
+  <startmode>Automatic</startmode>
+</service>

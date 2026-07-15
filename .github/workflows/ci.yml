@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore contexts/eligibility/Eligibility.sln
+
+      - name: Build
+        run: dotnet build contexts/eligibility/Eligibility.sln --no-restore --configuration Release
+
+      # ubuntu-latest ships Docker, so the Testcontainers Postgres integration
+      # tests run here too; they skip cleanly where Docker is unavailable.
+      - name: Test
+        run: dotnet test contexts/eligibility/Eligibility.sln --no-build --configuration Release --verbosity normal
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml

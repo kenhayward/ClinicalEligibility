@@ -1,0 +1,219 @@
+@*
+    Bootstrap 5.3+ ships built-in dark-mode support via the `data-bs-theme`
+    attribute on <html>. The inline script in <head> below applies the saved /
+    auto-detected theme BEFORE the body renders so there's no flash of the
+    wrong colour scheme. Vendored Bootstrap is 5.1; we pull 5.3.3 from jsdelivr
+    for the dark-mode utilities. No SRI hash because we don't have a pinned
+    one to hand — for a higher-security deployment you'd want to add it.
+*@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Eligibility Processing</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" crossorigin="anonymous" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/EligibilityProcessing.Web.styles.css" asp-append-version="true" />
+    @* Color-mode bootstrap. Runs BEFORE the body renders so the saved theme
+       is applied immediately — without this you'd see a flash of light mode
+       on every page load for users who chose dark. Mirrors the Bootstrap
+       docs' canonical color-modes.js pattern; the dropdown wiring is at the
+       bottom of the body so it can run after the dropdown is parsed. *@
+    <script>
+        (function () {
+            const KEY = "theme";
+            function stored() { return localStorage.getItem(KEY); }
+            function systemPref() {
+                return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            }
+            function effective(theme) { return theme === "auto" ? systemPref() : theme; }
+            function apply(theme) {
+                document.documentElement.setAttribute("data-bs-theme", effective(theme));
+            }
+            const initial = stored() || "auto";
+            apply(initial);
+            // Expose for the bottom-of-page UI wiring.
+            window.__themeSetter = { apply: apply, stored: stored, KEY: KEY };
+        })();
+    </script>
+</head>
+<body>
+    @* sticky-top must sit on <header>, not <nav>, because position: sticky
+       only engages within its parent's height. The <nav>'s parent is
+       <header>, which is only as tall as the nav itself, so sticky there
+       has no scroll range to operate in. Putting it on <header> makes
+       <body> the containing block — sticky stays pinned for the full
+       document scroll. *@
+    <header class="sticky-top">
+        @* navbar-expand-sm controls the responsive collapse; bg-body-tertiary
+           is a Bootstrap 5.3 theme-aware utility that resolves to a near-white
+           in light mode and a dark grey in dark mode, replacing the old
+           hardcoded `navbar-light bg-white` combo which broke in dark mode. *@
+        <nav class="navbar navbar-expand-sm bg-body-tertiary border-bottom box-shadow mb-3">
+            <div class="container-fluid">
+                <a class="navbar-brand d-inline-flex align-items-center gap-2" asp-area="" asp-controller="Home" asp-action="Index"><img src="~/images/PlatformLogo.svg" asp-append-version="true" alt="" width="28" height="28" />Eligibility Processing</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
+                        aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                @{
+                    // Active-tab highlight: bold + bottom border. Drop the
+                    // hardcoded `text-dark` from the inactive case so the
+                    // theme's body color (light/dark) flows through.
+                    var currentAction = (ViewContext.RouteData.Values["action"]?.ToString() ?? "Index");
+                    var currentController = (ViewContext.RouteData.Values["controller"]?.ToString() ?? "Home");
+                    const string activeNav = "fw-semibold border-bottom border-2 border-primary";
+                    // Home-controller tabs: match on action, but only while on
+                    // the Home controller — otherwise an "Index" action on a
+                    // different controller (e.g. Authoring) would falsely light
+                    // the Dashboard tab.
+                    string NavClass(string action) =>
+                        "nav-link " + (string.Equals(currentController, "Home", StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(currentAction, action, StringComparison.OrdinalIgnoreCase)
+                            ? activeNav
+                            : "");
+                }
+                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
+                    <ul class="navbar-nav flex-grow-1">
+                        <li class="nav-item">
+                            <a class="@NavClass("Index")" asp-area="" asp-controller="Home" asp-action="Index">Dashboard</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="@NavClass("Runs")" asp-area="" asp-controller="Home" asp-action="Runs">Runs</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="@NavClass("History")" asp-area="" asp-controller="Home" asp-action="History">History</a>
+                        </li>
+                        <li class="nav-item">
+                            @* id="nav-analysis" — script at the bottom rewrites
+                               this href to carry the last-viewed NCT ID from
+                               sessionStorage, so the user lands back on the
+                               same trial when they return to the Analysis tab. *@
+                            <a id="nav-analysis" class="@NavClass("Analysis")" asp-area="" asp-controller="Home" asp-action="Analysis">Analysis</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="@NavClass("Results")" asp-area="" asp-controller="Home" asp-action="Results">Results</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools">Tools</a>
+                        </li>
+                    </ul>
+                    @* User chip (signed-in only). The theme picker
+                       (Light / Dark / Auto) now lives inside that menu as
+                       a flyout — see _UserMenu.cshtml. Anonymous visitors
+                       have no theme switcher; the OS preference still
+                       resolves via the color-mode bootstrap in <head>. *@
+                    <ul class="navbar-nav mb-2 mb-sm-0 align-items-center">
+                        @await Html.PartialAsync("_UserMenu")
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </header>
+    <div class="container">
+        <main role="main" class="pb-3">
+            @RenderBody()
+        </main>
+    </div>
+
+    <footer class="border-top footer text-muted">
+        <div class="container">
+            @{
+                var appVersion = EligibilityProcessing.Web.Versioning.AppVersion.GetInfo();
+            }
+            &copy; 2026 - Eligibility Processing
+            <span class="mx-1">&middot;</span>
+            v@(appVersion.Version) <span class="text-muted">(@appVersion.ReleaseDate)</span>
+            <span class="mx-1">&middot;</span>
+            <a href="/ReleaseNotes" target="_blank" rel="noreferrer">Release notes</a>
+        </div>
+    </footer>
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @* Theme dropdown wiring. Runs after the dropdown markup is parsed so
+       the addEventListener calls don't miss the elements. The "auto"
+       mode also subscribes to system theme changes so the page flips
+       live if the OS toggles dark mode while the tab is open. *@
+    <script>
+        (function () {
+            const setter = window.__themeSetter;
+            if (!setter) return;
+            // label + buttons live in _UserMenu.cshtml, which only renders for
+            // signed-in users. On pages that include _Layout without those
+            // elements (none today, but cheap to guard) we skip the UI bits.
+            const label = document.getElementById("bd-theme-label");
+            const buttons = document.querySelectorAll("[data-bs-theme-value]");
+            function updateUi(theme) {
+                if (label) {
+                    label.textContent = theme === "dark" ? "Dark" : theme === "auto" ? "Auto" : "Light";
+                }
+                buttons.forEach(b => {
+                    const active = b.dataset.bsThemeValue === theme;
+                    b.classList.toggle("active", active);
+                    if (active) b.setAttribute("aria-current", "true");
+                    else b.removeAttribute("aria-current");
+                });
+            }
+            const initial = setter.stored() || "auto";
+            updateUi(initial);
+            buttons.forEach(b => {
+                b.addEventListener("click", () => {
+                    const theme = b.dataset.bsThemeValue;
+                    localStorage.setItem(setter.KEY, theme);
+                    setter.apply(theme);
+                    updateUi(theme);
+                });
+            });
+            // Live-update when the OS theme changes AND the user is on Auto.
+            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+                if ((setter.stored() || "auto") === "auto") setter.apply("auto");
+            });
+
+            // Theme flyout (nested inside the user menu). Bootstrap 5 dropped
+            // native nested dropdowns, so we drive open/close by hand: click
+            // toggles .show; selecting a theme closes the flyout but leaves
+            // the parent open (the parent has data-bs-auto-close="outside");
+            // when the parent closes we reset the flyout state.
+            const subToggle = document.getElementById("theme-submenu-toggle");
+            if (subToggle) {
+                const subMenu = subToggle.nextElementSibling;
+                const setOpen = (open) => {
+                    subMenu.classList.toggle("show", open);
+                    subToggle.setAttribute("aria-expanded", open ? "true" : "false");
+                };
+                subToggle.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    setOpen(!subMenu.classList.contains("show"));
+                });
+                subMenu.querySelectorAll("[data-bs-theme-value]").forEach(b => {
+                    b.addEventListener("click", () => setOpen(false));
+                });
+                const parent = document.getElementById("user-menu-toggle");
+                if (parent) {
+                    parent.addEventListener("hidden.bs.dropdown", () => setOpen(false));
+                }
+            }
+        })();
+    </script>
+    @* Carry the last-viewed Analysis NCT ID forward across tab switches.
+       The Analysis page writes sessionStorage["analysis.nctId"] whenever it
+       renders real data; here we read it back and rewrite the Analysis
+       nav-link href so clicking the tab returns to the same trial without
+       a round-trip-then-redirect. sessionStorage scopes to the browser tab,
+       so opening a fresh window doesn't carry stale state. *@
+    <script>
+        (function () {
+            const link = document.getElementById("nav-analysis");
+            if (!link) return;
+            const nct = sessionStorage.getItem("analysis.nctId");
+            if (!nct) return;
+            const url = new URL(link.href, window.location.href);
+            url.searchParams.set("nctId", nct);
+            link.href = url.toString();
+        })();
+    </script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

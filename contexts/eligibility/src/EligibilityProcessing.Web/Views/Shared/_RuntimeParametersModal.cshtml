@@ -1,0 +1,193 @@
+@*
+    Runtime Parameters modal (Owner only). Edits the live LlmOptions singleton via
+    the /RuntimeParameters JSON endpoints. Changes are transient — they apply to the
+    running process and revert to the saved configuration on restart. The secret
+    ApiKey is never shown or posted. Anti-forgery token is posted as a form field.
+*@
+<div class="modal fade" id="runtimeParametersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Runtime Parameters</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @Html.AntiForgeryToken()
+                <div id="rp-error" class="alert alert-danger d-none py-2"></div>
+
+                <form id="rp-form" class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label small mb-0">Model</label>
+                        <input class="form-control form-control-sm" name="Model" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Temperature <span class="text-muted">(0–2)</span></label>
+                        <input class="form-control form-control-sm" name="Temperature" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Max tokens</label>
+                        <input class="form-control form-control-sm" name="MaxTokens" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Trial concurrency <span class="text-muted">(1–256)</span></label>
+                        <input class="form-control form-control-sm" name="ConcurrencyCap" />
+                        <div class="form-text small">Applies to the next run.</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="EnableReasoning" id="rp-enable-reasoning" />
+                            <label class="form-check-label small" for="rp-enable-reasoning">
+                                Enable reasoning <span class="text-muted">(send <code>reasoning_effort</code>; uncheck for a non-reasoning instruct model)</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Reasoning effort</label>
+                        <select class="form-select form-select-sm" name="ReasoningEffort">
+                            <option value="">(none)</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Escalate effort</label>
+                        <select class="form-select form-select-sm" name="EscalateReasoningEffort">
+                            <option value="">(none)</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="EnableReasoningEscalation" id="rp-escalate" />
+                            <label class="form-check-label small" for="rp-escalate">
+                                Enable reasoning escalation <span class="text-muted">(retry empty results at the escalate effort)</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="NormalizeEnableReasoning" id="rp-normalize-reasoning" />
+                            <label class="form-check-label small" for="rp-normalize-reasoning">
+                                Enable reasoning for normalize call <span class="text-muted">(Authoring criterion-normalize; independent of the extraction toggle above)</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small mb-0">Base URL</label>
+                        <input class="form-control form-control-sm" name="BaseUrl" />
+                    </div>
+                </form>
+
+                <hr />
+                <div class="small text-muted mb-1">Startup-bound — read-only (require a restart):</div>
+                <dl class="row small mb-2" id="rp-readonly">
+                    <dt class="col-7 fw-normal text-muted">Timeout (s)</dt><dd class="col-5" data-ro="timeoutSeconds"></dd>
+                    <dt class="col-7 fw-normal text-muted">Retry count</dt><dd class="col-5" data-ro="retryCount"></dd>
+                    <dt class="col-7 fw-normal text-muted">Retry delay (s)</dt><dd class="col-5" data-ro="retryDelaySeconds"></dd>
+                    <dt class="col-7 fw-normal text-muted">Normalize max tokens</dt><dd class="col-5" data-ro="normalizeMaxTokens"></dd>
+                    <dt class="col-7 fw-normal text-muted">Normalize endpoint</dt><dd class="col-5 text-break" data-ro="normalizeEndpoint"></dd>
+                    <dt class="col-7 fw-normal text-muted">Normalize model</dt><dd class="col-5 text-break" data-ro="normalizeModel"></dd>
+                    <dt class="col-7 fw-normal text-muted">Embedding endpoint</dt><dd class="col-5 text-break" data-ro="embeddingEndpoint"></dd>
+                    <dt class="col-7 fw-normal text-muted">Embedding model</dt><dd class="col-5 text-break" data-ro="embeddingModel"></dd>
+                    <dt class="col-7 fw-normal text-muted" title="The UMLS resolver actually in effect (Umls:Backend). Restart-bound.">UMLS backend</dt><dd class="col-5 text-break" data-ro="umlsBackend"></dd>
+                </dl>
+                <p class="small text-muted mb-0">
+                    Changes apply to the running process only and revert to the saved configuration on restart.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm" id="rp-ok">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Deferred to DOMContentLoaded: this partial renders in the page header, but
+    // Bootstrap's bundle loads at the end of <body>, so `bootstrap` is undefined
+    // at parse time.
+    document.addEventListener("DOMContentLoaded", function () {
+        const modalEl = document.getElementById("runtimeParametersModal");
+        if (!modalEl || typeof bootstrap === "undefined") return;
+        // Re-parent to <body> so the modal shares the backdrop's stacking context
+        // rather than the sticky navbar's (z-index 1020 vs backdrop 1050).
+        if (modalEl.parentElement !== document.body) {
+            document.body.appendChild(modalEl);
+        }
+        const modal = new bootstrap.Modal(modalEl);
+        const form = document.getElementById("rp-form");
+        const errorBox = document.getElementById("rp-error");
+
+        function token() {
+            const el = modalEl.querySelector('input[name="__RequestVerificationToken"]');
+            return el ? el.value : "";
+        }
+        function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("d-none"); }
+        function clearError() { errorBox.classList.add("d-none"); }
+
+        async function load() {
+            clearError();
+            try {
+                const resp = await fetch("/RuntimeParameters/Current", { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                if (!resp.ok) throw new Error("Failed to load (" + resp.status + ")");
+                const d = await resp.json();
+                const e = d.editable;
+                form.Model.value = e.model ?? "";
+                form.BaseUrl.value = e.baseUrl ?? "";
+                form.Temperature.value = e.temperature ?? "";
+                form.MaxTokens.value = e.maxTokens ?? "";
+                form.ReasoningEffort.value = e.reasoningEffort ?? "";
+                form.EscalateReasoningEffort.value = e.escalateReasoningEffort ?? "";
+                form.ConcurrencyCap.value = e.concurrencyCap ?? "";
+                form.EnableReasoning.checked = !!e.enableReasoning;
+                form.EnableReasoningEscalation.checked = !!e.enableReasoningEscalation;
+                form.NormalizeEnableReasoning.checked = !!e.normalizeEnableReasoning;
+                modalEl.querySelectorAll("#rp-readonly dd[data-ro]").forEach(function (dd) {
+                    dd.textContent = d.readOnly[dd.dataset.ro];
+                });
+            } catch (err) {
+                showError(err.message);
+            }
+        }
+
+        document.getElementById("rp-ok").addEventListener("click", async function () {
+            clearError();
+            const body = new URLSearchParams({
+                Model: form.Model.value,
+                BaseUrl: form.BaseUrl.value,
+                Temperature: form.Temperature.value,
+                MaxTokens: form.MaxTokens.value,
+                ReasoningEffort: form.ReasoningEffort.value,
+                EscalateReasoningEffort: form.EscalateReasoningEffort.value,
+                ConcurrencyCap: form.ConcurrencyCap.value,
+                EnableReasoning: form.EnableReasoning.checked ? "true" : "false",
+                EnableReasoningEscalation: form.EnableReasoningEscalation.checked ? "true" : "false",
+                NormalizeEnableReasoning: form.NormalizeEnableReasoning.checked ? "true" : "false"
+            });
+            body.set("__RequestVerificationToken", token());
+            try {
+                const resp = await fetch("/RuntimeParameters/Save", {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" },
+                    body: body
+                });
+                let json = null;
+                try { json = await resp.json(); } catch (e) { /* ignore */ }
+                if (resp.ok && json && json.ok) {
+                    modal.hide();
+                } else {
+                    showError((json && json.error) || ("Save failed (" + resp.status + ")"));
+                }
+            } catch (err) {
+                showError(err.message);
+            }
+        });
+
+        const openBtn = document.getElementById("runtime-parameters-btn");
+        if (openBtn) openBtn.addEventListener("click", function () { modal.show(); load(); });
+    });
+</script>

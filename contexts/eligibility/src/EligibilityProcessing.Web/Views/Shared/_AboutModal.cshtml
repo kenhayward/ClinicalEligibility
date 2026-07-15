@@ -1,0 +1,107 @@
+@*
+    About modal. Shows the app version (prominent) + release date, with a Release
+    Notes button that opens the changelog in a new tab. Carries the open-data
+    attributions the AACT and UMLS licenses require (no PubMed - the eligibility
+    pipeline does not use it). Version is rendered server-side from the embedded
+    version.json via AppVersion. Rendered into the page by _UserMenu.cshtml and
+    re-parented to <body> by the script below (see _ManageAccountsModal) so the
+    sticky navbar's stacking context does not trap it behind the backdrop.
+*@
+@using EligibilityProcessing.Web.Versioning
+@{
+    var version = AppVersion.GetInfo();
+}
+<div class="modal fade" id="aboutModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="d-flex align-items-center gap-2">
+                    <img src="~/images/PlatformLogo.svg" asp-append-version="true" alt="" width="24" height="24" />
+                    <h5 class="modal-title mb-0">About</h5>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <h4 class="mb-1">@version.App</h4>
+                <p class="mb-2">
+                    <span class="fw-semibold">Version @version.Version</span>
+                    <span class="text-muted"> - released @version.ReleaseDate</span>
+                </p>
+                <p>
+                    <a href="/ReleaseNotes" target="_blank" rel="noreferrer" class="btn btn-sm btn-outline-primary">
+                        Release notes
+                    </a>
+                </p>
+                <p class="small text-muted">
+                    Extracts structured eligibility criteria from ClinicalTrials.gov (AACT) trials,
+                    resolved against the UMLS Metathesaurus. Created by <strong>Ken Hayward</strong>.
+                </p>
+                <p class="small">
+                    Source code:
+                    <a href="https://github.com/kenhayward/eligibility" target="_blank" rel="noreferrer">
+                        github.com/kenhayward/eligibility
+                    </a>
+                </p>
+
+                <hr />
+
+                <h6>Open data and acknowledgements</h6>
+                <p class="small text-muted">
+                    This application is built on publicly available data sources. We gratefully
+                    acknowledge their providers, as their licenses and citation policies require.
+                </p>
+
+                <h6 class="mt-3">AACT / ClinicalTrials.gov</h6>
+                <p class="small">
+                    Clinical-trial information in this application is derived from the Aggregate
+                    Analysis of ClinicalTrials.gov (AACT) database, made available by the
+                    <strong>Clinical Trials Transformation Initiative (CTTI)</strong>. AACT aggregates
+                    public study records from ClinicalTrials.gov (U.S. National Library of Medicine).
+                    We acknowledge the Clinical Trials Transformation Initiative as the source of this
+                    data. CTTI and ClinicalTrials.gov do not endorse this application.
+                </p>
+                <p class="small">
+                    <a href="https://ctti-clinicaltrials.org/citation-policy/" target="_blank" rel="noreferrer">
+                        CTTI citation policy
+                    </a>
+                </p>
+
+                <h6 class="mt-3">UMLS Metathesaurus</h6>
+                <p class="small">
+                    Concept coding in this application uses the UMLS Metathesaurus, a product of the
+                    U.S. National Library of Medicine (NLM). The specific Metathesaurus release is
+                    determined by this deployment's UMLS data load. This application is not created,
+                    maintained, or endorsed by the NLM, and no such endorsement is implied.
+                </p>
+                <p class="small fst-italic text-muted border-start border-3 ps-2">
+                    Some material in the UMLS Metathesaurus is from copyrighted sources of the
+                    respective copyright holders. Users of the UMLS Metathesaurus are solely
+                    responsible for compliance with any copyright, patent or trademark restrictions
+                    and are referred to the copyright, patent or trademark notices appearing in the
+                    original sources, all of which are hereby incorporated by reference.
+                </p>
+                <p class="small">
+                    <a href="https://www.nlm.nih.gov/research/umls/knowledge_sources/metathesaurus/release/license_agreement.html"
+                       target="_blank" rel="noreferrer">
+                        UMLS Metathesaurus License Agreement
+                    </a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const modalEl = document.getElementById("aboutModal");
+        if (!modalEl || typeof bootstrap === "undefined") return;
+        // Re-parent out of the sticky navbar's stacking context, otherwise the
+        // body-level backdrop renders above the modal and the page looks frozen
+        // (same fix the other navbar modals apply).
+        if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
+        const modal = new bootstrap.Modal(modalEl);
+
+        const openBtn = document.getElementById("about-btn");
+        if (openBtn) openBtn.addEventListener("click", function () { modal.show(); });
+    });
+</script>

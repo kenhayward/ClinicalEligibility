@@ -1,0 +1,262 @@
+@model EligibilityProcessing.Web.Models.ResultsViewModel
+@{
+    ViewData["Title"] = "Results";
+
+    // Per-column UI choice: a dropdown when the gateway gave us <= threshold
+    // distinct values, free-text otherwise. Same control set across all six
+    // filterable columns; the layout below renders whichever the column
+    // earned.
+    string TextInput(string id, string name, string? value, string? placeholder = null) =>
+        $"<input id=\"{id}\" name=\"{name}\" value=\"{Html.Encode(value ?? "")}\" type=\"text\" class=\"form-control form-control-sm\" placeholder=\"{Html.Encode(placeholder ?? "")}\" />";
+}
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+else
+{
+    <form method="get" asp-action="Results" class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-4 col-lg-3">
+                    <label for="f-nctId" class="form-label small text-muted mb-1">NCT ID</label>
+                    @if (Model.Options.NctIds.Count > 0)
+                    {
+                        <select id="f-nctId" name="nctId" class="form-select form-select-sm">
+                            <option value="">(any)</option>
+                            @foreach (var v in Model.Options.NctIds)
+                            {
+                                <option value="@v" selected="@(v == Model.Filter.NctId)">@v</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        @Html.Raw(TextInput("f-nctId", "nctId", Model.Filter.NctId, "NCT12345678"))
+                    }
+                </div>
+                <div class="col-md-4 col-lg-3">
+                    <label for="f-domain" class="form-label small text-muted mb-1">Domain</label>
+                    @if (Model.Options.Domains.Count > 0)
+                    {
+                        <select id="f-domain" name="domain" class="form-select form-select-sm">
+                            <option value="">(any)</option>
+                            @foreach (var v in Model.Options.Domains)
+                            {
+                                <option value="@v" selected="@(v == Model.Filter.Domain)">@v</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        @Html.Raw(TextInput("f-domain", "domain", Model.Filter.Domain))
+                    }
+                </div>
+                <div class="col-md-4 col-lg-3">
+                    <label for="f-semanticType" class="form-label small text-muted mb-1">Semantic type</label>
+                    @if (Model.Options.SemanticTypes.Count > 0)
+                    {
+                        <select id="f-semanticType" name="semanticType" class="form-select form-select-sm">
+                            <option value="">(any)</option>
+                            @foreach (var v in Model.Options.SemanticTypes)
+                            {
+                                <option value="@v" selected="@(v == Model.Filter.SemanticType)">@v</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        @Html.Raw(TextInput("f-semanticType", "semanticType", Model.Filter.SemanticType))
+                    }
+                </div>
+                <div class="col-md-4 col-lg-3">
+                    <label for="f-conceptCode" class="form-label small text-muted mb-1">Concept code</label>
+                    @if (Model.Options.ConceptCodes.Count > 0)
+                    {
+                        <select id="f-conceptCode" name="conceptCode" class="form-select form-select-sm">
+                            <option value="">(any)</option>
+                            @foreach (var v in Model.Options.ConceptCodes)
+                            {
+                                <option value="@v" selected="@(v == Model.Filter.ConceptCode)">@v</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        @Html.Raw(TextInput("f-conceptCode", "conceptCode", Model.Filter.ConceptCode, "C0011849"))
+                    }
+                </div>
+                <div class="col-md-6">
+                    <label for="f-criterion" class="form-label small text-muted mb-1">Criterion (contains)</label>
+                    @if (Model.Options.Criteria.Count > 0)
+                    {
+                        <select id="f-criterion" name="criterion" class="form-select form-select-sm">
+                            <option value="">(any)</option>
+                            @foreach (var v in Model.Options.Criteria)
+                            {
+                                <option value="@v" selected="@(v == Model.Filter.Criterion)">@v</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        @Html.Raw(TextInput("f-criterion", "criterion", Model.Filter.Criterion, "substring match"))
+                    }
+                </div>
+                <div class="col-md-6">
+                    <label for="f-concept" class="form-label small text-muted mb-1">Concept (contains)</label>
+                    @if (Model.Options.Concepts.Count > 0)
+                    {
+                        <select id="f-concept" name="concept" class="form-select form-select-sm">
+                            <option value="">(any)</option>
+                            @foreach (var v in Model.Options.Concepts)
+                            {
+                                <option value="@v" selected="@(v == Model.Filter.Concept)">@v</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        @Html.Raw(TextInput("f-concept", "concept", Model.Filter.Concept, "substring match"))
+                    }
+                </div>
+            </div>
+            <div class="row g-2 mt-1">
+                <div class="col-md-4 col-lg-3">
+                    <label for="f-sortBy" class="form-label small text-muted mb-1">Sort by</label>
+                    <select id="f-sortBy" name="sortBy" class="form-select form-select-sm">
+                        @foreach (var choice in EligibilityProcessing.Web.Models.ResultsViewModel.SortChoices.All)
+                        {
+                            <option value="@choice.Value" selected="@(choice.Value == Model.SortBy)">@choice.Label</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                @* Clear must carry at least one query param so the controller treats this
+                   as an explicit interaction and skips the default-to-latest-NCT-ID
+                   fallback that fires only on a true first visit. *@
+                <a asp-action="Results" asp-route-sortBy="@EligibilityProcessing.Web.Models.ResultsViewModel.SortChoices.Default" class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </div>
+    </form>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="text-muted">No rows match the current filter.</p>
+    }
+    else
+    {
+        <p class="text-muted small">
+            Showing @Model.FirstRowOnPage–@Model.LastRowOnPage of @Model.TotalRows row@(Model.TotalRows == 1 ? "" : "s") from <code>public.eligibility</code>.
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>NCT ID</th>
+                        <th>Domain</th>
+                        <th>Criterion</th>
+                        <th>Concept</th>
+                        <th>Qualifier</th>
+                        <th>Time window</th>
+                        <th>UMLS name</th>
+                        <th>Concept code</th>
+                        <th>Semantic type</th>
+                        <th class="text-end">Score</th>
+                        <th>Source</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        <tr>
+                            <td><a asp-action="Analysis" asp-route-nctId="@row.NctId" title="@row.OriginalText" class="text-decoration-none"><code>@row.NctId</code></a></td>
+                            <td>@row.Domain</td>
+                            <td>@row.Criterion</td>
+                            <td>@row.Concept</td>
+                            <td>@row.Qualifier</td>
+                            <td>@row.TimeWindow</td>
+                            <td>@row.UmlsName</td>
+                            <td>@(string.IsNullOrEmpty(row.ConceptCode) ? "—" : row.ConceptCode)</td>
+                            <td>@(string.IsNullOrEmpty(row.SemanticType) ? "—" : row.SemanticType)</td>
+                            <td class="text-end">@row.MatchScore.ToString("F3")</td>
+                            <td>@(string.IsNullOrEmpty(row.MatchSource) ? "—" : row.MatchSource)</td>
+                            @* Render as ISO-8601 in datetime= for machine-readability and as
+                               server-side fallback text; inline script below rewrites the
+                               text content using the browser's locale formatter. *@
+                            <td><time datetime="@row.CreatedAt.ToString("o")" data-locale-time>@row.CreatedAt.ToString("u")</time></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (Model.TotalPages > 1)
+        {
+            @* Pager preserves filter + sort by carrying every relevant query param
+               through asp-route-*; only `page` changes between links. *@
+            <nav aria-label="Results pages">
+                <ul class="pagination pagination-sm">
+                    <li class="page-item @(Model.HasPrev ? "" : "disabled")">
+                        <a class="page-link"
+                           asp-action="Results"
+                           asp-route-nctId="@Model.Filter.NctId"
+                           asp-route-criterion="@Model.Filter.Criterion"
+                           asp-route-domain="@Model.Filter.Domain"
+                           asp-route-concept="@Model.Filter.Concept"
+                           asp-route-conceptCode="@Model.Filter.ConceptCode"
+                           asp-route-semanticType="@Model.Filter.SemanticType"
+                           asp-route-sortBy="@Model.SortBy"
+                           asp-route-page="@(Model.CurrentPage - 1)"
+                           tabindex="@(Model.HasPrev ? 0 : -1)"
+                           aria-disabled="@(Model.HasPrev ? "false" : "true")">Prev</a>
+                    </li>
+                    <li class="page-item disabled">
+                        <span class="page-link">Page @Model.CurrentPage of @Model.TotalPages</span>
+                    </li>
+                    <li class="page-item @(Model.HasNext ? "" : "disabled")">
+                        <a class="page-link"
+                           asp-action="Results"
+                           asp-route-nctId="@Model.Filter.NctId"
+                           asp-route-criterion="@Model.Filter.Criterion"
+                           asp-route-domain="@Model.Filter.Domain"
+                           asp-route-concept="@Model.Filter.Concept"
+                           asp-route-conceptCode="@Model.Filter.ConceptCode"
+                           asp-route-semanticType="@Model.Filter.SemanticType"
+                           asp-route-sortBy="@Model.SortBy"
+                           asp-route-page="@(Model.CurrentPage + 1)"
+                           tabindex="@(Model.HasNext ? 0 : -1)"
+                           aria-disabled="@(Model.HasNext ? "false" : "true")">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        }
+    }
+}
+
+@section Scripts {
+    @* Rewrite the server-rendered ISO timestamps in the Created column using
+       the browser's locale formatter. Falls back to the ISO 8601 string the
+       server emitted if JS is disabled. *@
+    <script>
+        (function () {
+            const fmt = new Intl.DateTimeFormat(undefined, {
+                year: "numeric", month: "short", day: "2-digit",
+                hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+            document.querySelectorAll("time[data-locale-time]").forEach(el => {
+                const iso = el.getAttribute("datetime");
+                if (!iso) return;
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return;
+                el.textContent = fmt.format(d);
+            });
+        })();
+    </script>
+}

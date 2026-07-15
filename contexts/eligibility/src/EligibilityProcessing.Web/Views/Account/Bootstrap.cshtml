@@ -1,0 +1,45 @@
+@model BootstrapViewModel
+@{
+    ViewData["Title"] = "Create owner account";
+    Layout = "_AuthLayout";
+}
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2 class="h5 card-title mb-1">Welcome</h2>
+        <p class="text-muted small mb-3">
+            No accounts exist yet. Create the first account — it becomes the
+            <strong>Owner</strong> with full permissions.
+        </p>
+
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="alert alert-danger py-2" role="alert">@Model.ErrorMessage</div>
+        }
+
+        <form method="post" asp-controller="Account" asp-action="Bootstrap">
+            @Html.AntiForgeryToken()
+            <div class="mb-3">
+                <label class="form-label" asp-for="UserName">User ID</label>
+                <input class="form-control" asp-for="UserName" autocomplete="username" autofocus required />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" asp-for="Email">Email</label>
+                <input class="form-control" type="email" asp-for="Email" autocomplete="email" required />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" asp-for="DisplayName">Display name <span class="text-muted">(optional)</span></label>
+                <input class="form-control" asp-for="DisplayName" autocomplete="name" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" asp-for="Password">Password</label>
+                <input class="form-control" type="password" asp-for="Password" autocomplete="new-password" required />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" asp-for="ConfirmPassword">Confirm password</label>
+                <input class="form-control" type="password" asp-for="ConfirmPassword" autocomplete="new-password" required />
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Create owner account</button>
+        </form>
+    </div>
+</div>

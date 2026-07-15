@@ -1,0 +1,1229 @@
+@model EligibilityProcessing.Web.Models.AnalysisViewModel
+@{
+    ViewData["Title"] = "Analysis";
+    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
+
+    string FormatDate(DateTime? d) => d.HasValue ? d.Value.ToString("yyyy-MM-dd") : "—";
+    string PhaseBadge(string p) => string.IsNullOrEmpty(p) ? "bg-secondary" : "bg-primary";
+    string StatusBadge(string s) => s switch
+    {
+        "Completed" => "bg-success",
+        "Active, not recruiting" or "Recruiting" or "Enrolling by invitation" => "bg-info",
+        "Terminated" or "Withdrawn" or "Suspended" => "bg-danger",
+        "Not yet recruiting" => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+}
+
+@* Two sibling forms in one card: the GET form drives the analyse search
+   (always visible); the POST form fires a single-trial pipeline re-run
+   for the current NctId (only shown when we actually have a trial to
+   re-process). HTML doesn't allow nested forms so they sit side-by-side
+   in the same flex row. *@
+<div class="card mb-3">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+        <form method="get" asp-action="Analysis" class="d-flex gap-2 align-items-end flex-grow-1 mb-0">
+            <div class="flex-grow-1">
+                <label for="f-nctId" class="form-label small text-muted mb-1">NCT ID</label>
+                <input id="f-nctId" name="nctId" type="text" value="@Model.NctId"
+                       placeholder="NCT12345678" class="form-control form-control-sm" autofocus />
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Analyse</button>
+            @* Search button opens a modal that lets the user query the persisted
+               study-detail snapshot by any of the main characteristics. Picking
+               a row reloads this page with that NCT. *@
+            <button type="button" class="btn btn-outline-primary btn-sm"
+                    data-bs-toggle="modal" data-bs-target="#study-search-modal">
+                Search
+            </button>
+        </form>
+        @if (canRunPipeline && Model.HasSearched && !Model.NotFound && !Model.HasError && !string.IsNullOrEmpty(Model.NctId))
+        {
+            @* Same Rerun endpoint the dashboard and Studies tab use — single
+               NCT, one-element list under one run_id. Fetch handler in the
+               scripts section keeps the browser on the Analysis page and
+               surfaces the run id / error via #rerun-status below. *@
+            <form asp-action="Rerun" method="post" data-rerun-form class="d-inline mb-0">
+                <input type="hidden" name="nctId" value="@Model.NctId" />
+                <button type="submit" class="btn btn-outline-primary btn-sm">Re-run pipeline</button>
+            </form>
+        }
+    </div>
+</div>
+
+@* Feedback target for the Re-run form. JS handler at the bottom of the page
+   fills this in instead of navigating to the controller's raw JSON. *@
+<div id="rerun-status" class="alert py-2 px-3 small d-none mb-3" role="alert"></div>
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+else if (!Model.HasSearched)
+{
+    <p class="text-muted">Enter an NCT ID above to analyse a trial. You can also click an NCT ID in the <a asp-action="Results">Results</a> table to jump straight here.</p>
+}
+else if (Model.NotFound)
+{
+    <div class="alert alert-secondary" role="alert">
+        No data found for <code>@Model.NctId</code> in either the AACT source database or the pipeline output. Check the NCT ID is correct.
+    </div>
+}
+else
+{
+    @* ===== data-source indicator ===== *@
+    <p class="small text-muted mb-2">
+        @if (Model.FromSnapshot)
+        {
+            <span title="Served from public.eligibility_study_detail">Study detail from snapshot &middot; captured @Model.SnapshotCapturedAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") UTC</span>
+        }
+        else
+        {
+            <span>Study detail fetched live from AACT</span>
+        }
+    </p>
+
+    @* ===== ID card ===== *@
+    @if (Model.Study is { } study)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 align-items-start mb-2">
+                    <h2 class="h4 mb-0 flex-grow-1">@(string.IsNullOrEmpty(study.BriefTitle) ? Model.NctId : study.BriefTitle)</h2>
+                    @* NCT ID links out to the trial's ClinicalTrials.gov record,
+                       opened in a new tab so the dashboard stays put. *@
+                    <a href="https://clinicaltrials.gov/study/@study.NctId"
+                       target="_blank" rel="noopener noreferrer"
+                       title="View @study.NctId on ClinicalTrials.gov">
+                        <code>@study.NctId</code>
+                    </a>
+                    @* "Find Similar" opens the pgvector similarity-search modal.
+                       The button is wired up to the modal via data-bs-toggle;
+                       the JS reads the source NCT from the modal's data-nct-id. *@
+                    <button type="button"
+                            class="btn btn-outline-primary btn-sm"
+                            data-bs-toggle="modal"
+                            data-bs-target="#find-similar-modal"
+                            data-nct-id="@study.NctId">
+                        Find Similar
+                    </button>
+                </div>
+                @if (!string.IsNullOrEmpty(study.OfficialTitle) && study.OfficialTitle != study.BriefTitle)
+                {
+                    <p class="text-muted small mb-2">@study.OfficialTitle</p>
+                }
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    @if (!string.IsNullOrEmpty(study.OverallStatus))
+                    {
+                        <span class="badge @StatusBadge(study.OverallStatus)">@study.OverallStatus</span>
+                    }
+                    @if (!string.IsNullOrEmpty(study.Phase))
+                    {
+                        <span class="badge @PhaseBadge(study.Phase)">@study.Phase</span>
+                    }
+                    @if (!string.IsNullOrEmpty(study.StudyType))
+                    {
+                        <span class="badge text-bg-light border">@study.StudyType</span>
+                    }
+                </div>
+
+                <dl class="row mb-2 small">
+                    <dt class="col-sm-3 text-muted">Lead sponsor</dt>
+                    <dd class="col-sm-9">@(string.IsNullOrEmpty(study.Source) ? "—" : study.Source)</dd>
+
+                    <dt class="col-sm-3 text-muted">Start → Completion</dt>
+                    <dd class="col-sm-9">
+                        @FormatDate(study.StartDate) → @FormatDate(study.CompletionDate)
+                        @if (study.PrimaryCompletionDate.HasValue && study.PrimaryCompletionDate != study.CompletionDate)
+                        {
+                            <span class="text-muted">(primary: @FormatDate(study.PrimaryCompletionDate))</span>
+                        }
+                    </dd>
+
+                    <dt class="col-sm-3 text-muted">Enrollment</dt>
+                    <dd class="col-sm-9">
+                        @(study.Enrollment.HasValue ? study.Enrollment.Value.ToString("N0") : "—")
+                        @if (!string.IsNullOrEmpty(study.EnrollmentType))
+                        {
+                            <span class="text-muted">(@study.EnrollmentType.ToLowerInvariant())</span>
+                        }
+                    </dd>
+
+                    @if (study.Conditions.Count > 0)
+                    {
+                        <dt class="col-sm-3 text-muted">Conditions</dt>
+                        <dd class="col-sm-9">
+                            @foreach (var c in study.Conditions)
+                            {
+                                <span class="badge text-bg-light border me-1">@c</span>
+                            }
+                        </dd>
+                    }
+
+                    @if (study.Interventions.Count > 0)
+                    {
+                        <dt class="col-sm-3 text-muted">Interventions</dt>
+                        <dd class="col-sm-9">
+                            <ul class="list-unstyled mb-0">
+                                @foreach (var iv in study.Interventions)
+                                {
+                                    <li>
+                                        <span class="badge bg-secondary me-1">@iv.InterventionType</span>
+                                        @iv.Name
+                                    </li>
+                                }
+                            </ul>
+                        </dd>
+                    }
+
+                    @if (!string.IsNullOrEmpty(study.WhyStopped))
+                    {
+                        <dt class="col-sm-3 text-muted">Why stopped</dt>
+                        <dd class="col-sm-9 text-danger">@study.WhyStopped</dd>
+                    }
+                </dl>
+
+                @if (!string.IsNullOrEmpty(study.BriefSummary))
+                {
+                    <details>
+                        <summary class="text-primary" style="cursor: pointer;">Brief summary</summary>
+                        <p class="text-muted small mt-2 mb-0">@study.BriefSummary</p>
+                    </details>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-warning small" role="alert">
+            <strong>No source row for <code>@Model.NctId</code>.</strong> The pipeline output below exists but the AACT study record was not found.
+        </div>
+    }
+
+    @* ===== Processing history — every run that touched this NCT_ID ===== *@
+    @if (Model.History.Count > 0)
+    {
+        string HistoryBadge(string s) => s switch
+        {
+            EligibilityProcessing.Core.StudyExecution.StatusSuccess => "bg-success",
+            EligibilityProcessing.Core.StudyExecution.StatusRunning => "bg-info",
+            EligibilityProcessing.Core.StudyExecution.StatusLlmFailed
+                or EligibilityProcessing.Core.StudyExecution.StatusPersistFailed
+                or EligibilityProcessing.Core.StudyExecution.StatusParseInvalidJson
+                or EligibilityProcessing.Core.StudyExecution.StatusFailed => "bg-danger",
+            EligibilityProcessing.Core.StudyExecution.StatusParseEmpty => "bg-warning text-dark",
+            EligibilityProcessing.Core.StudyExecution.StatusCancelled => "bg-secondary",
+            _ => "text-bg-light"
+        };
+        <div class="card mb-3">
+            <div class="card-header small text-muted">
+                Processing history &mdash; <code>public.eligibility_study</code>
+                <span class="text-muted">(@Model.History.Count run@(Model.History.Count == 1 ? "" : "s"))</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0 small">
+                        <thead>
+                            <tr>
+                                <th>Started</th>
+                                <th>Status</th>
+                                <th class="text-end">Duration</th>
+                                <th class="text-end">Parsed</th>
+                                <th class="text-end">Persisted</th>
+                                <th>Error</th>
+                                <th>Run</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var h in Model.History)
+                            {
+                                <tr>
+                                    <td><time datetime="@h.StartedAt.ToString("o")" data-locale-time>@h.StartedAt.ToString("u")</time></td>
+                                    <td><span class="badge @HistoryBadge(h.Status)">@h.Status</span></td>
+                                    <td class="text-end">@(h.Duration.HasValue ? $"{h.Duration.Value.TotalSeconds:F1}s" : "—")</td>
+                                    <td class="text-end">@(h.ParsedRecordCount.HasValue ? h.ParsedRecordCount.Value.ToString() : "—")</td>
+                                    <td class="text-end">@(h.PersistedRowCount.HasValue ? h.PersistedRowCount.Value.ToString() : "—")</td>
+                                    <td class="text-truncate" style="max-width: 18rem;" title="@h.ErrorMessage">@(string.IsNullOrEmpty(h.ErrorMessage) ? "" : h.ErrorMessage)</td>
+                                    @* Link to the History tab filtered by this run. Pass
+                                       hideSuperseded=false so trials whose latest attempt
+                                       is a later run still appear — matching the same
+                                       pattern as the Runs tab's clickable run id. *@
+                                    <td>
+                                        <a asp-action="History" asp-route-runId="@h.RunId"
+                                           asp-route-hideSuperseded="false"
+                                           class="text-decoration-none"
+                                           title="@h.RunId — view all studies from this run">
+                                            <small><code>@h.RunId.ToString("N").Substring(0, 8)</code></small>
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* ===== Bottom: source eligibility (left) + pipeline rows (right) ===== *@
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header small text-muted">Source eligibility &mdash; <code>ctgov.eligibilities</code></div>
+                <div class="card-body small">
+                    @if (Model.SourceEligibility is { } src)
+                    {
+                        <dl class="row mb-2">
+                            <dt class="col-sm-5 text-muted">Gender</dt>
+                            <dd class="col-sm-7">@(string.IsNullOrEmpty(src.Gender) ? "—" : src.Gender)</dd>
+
+                            <dt class="col-sm-5 text-muted">Minimum age</dt>
+                            <dd class="col-sm-7">@(string.IsNullOrEmpty(src.MinimumAge) ? "—" : src.MinimumAge)</dd>
+
+                            <dt class="col-sm-5 text-muted">Maximum age</dt>
+                            <dd class="col-sm-7">@(string.IsNullOrEmpty(src.MaximumAge) ? "—" : src.MaximumAge)</dd>
+
+                            <dt class="col-sm-5 text-muted">Healthy volunteers</dt>
+                            <dd class="col-sm-7">@(string.IsNullOrEmpty(src.HealthyVolunteers) ? "—" : src.HealthyVolunteers)</dd>
+
+                            <dt class="col-sm-5 text-muted">Age groups</dt>
+                            <dd class="col-sm-7">
+                                @{
+                                    var groups = new List<string>();
+                                    if (src.Child == true) groups.Add("child");
+                                    if (src.Adult == true) groups.Add("adult");
+                                    if (src.OlderAdult == true) groups.Add("older adult");
+                                }
+                                @(groups.Count > 0 ? string.Join(", ", groups) : "—")
+                            </dd>
+
+                            @if (!string.IsNullOrEmpty(src.SamplingMethod))
+                            {
+                                <dt class="col-sm-5 text-muted">Sampling method</dt>
+                                <dd class="col-sm-7">@src.SamplingMethod</dd>
+                            }
+
+                            @if (!string.IsNullOrEmpty(src.Population))
+                            {
+                                <dt class="col-sm-5 text-muted">Population</dt>
+                                <dd class="col-sm-7">@src.Population</dd>
+                            }
+                        </dl>
+
+                        @if (!string.IsNullOrEmpty(src.Criteria))
+                        {
+                            <details open>
+                                <summary class="text-primary" style="cursor: pointer;">Criteria (raw text)</summary>
+                                <pre id="criteria-text" class="bg-body-tertiary p-2 mt-2 mb-0 small" style="white-space: pre-wrap; max-height: 28rem; overflow-y: auto;">@src.Criteria</pre>
+                            </details>
+                        }
+                    }
+                    else
+                    {
+                        <p class="text-muted mb-0">No <code>ctgov.eligibilities</code> row for <code>@Model.NctId</code>.</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header small text-muted d-flex justify-content-between align-items-center gap-2">
+                    <div>
+                        Pipeline output &mdash; <code>public.eligibility</code>
+                        @if (Model.PipelineRows.Count > 0)
+                        {
+                            <span class="text-muted">(@Model.PipelineRows.Count row@(Model.PipelineRows.Count == 1 ? "" : "s"))</span>
+                        }
+                    </div>
+                    @if (Model.PipelineRows.Count > 0)
+                    {
+                        <button type="button" id="highlight-all-btn"
+                                class="btn btn-sm btn-outline-primary"
+                                aria-pressed="false"
+                                title="Highlight every row's original_text in the criteria — click again to clear">
+                            Highlight all
+                        </button>
+                    }
+                </div>
+                <div class="card-body p-0 d-flex flex-column">
+                    @if (Model.PipelineRows.Count == 0)
+                    {
+                        <p class="text-muted small p-3 mb-0">No pipeline rows for <code>@Model.NctId</code>.</p>
+                    }
+                    else
+                    {
+                        @* flex-grow-1 + min-height:0 lets the scroll area fill the
+                           whole card body (which itself stretches via h-100 on the
+                           card), so the table is as tall as the source-eligibility
+                           panel beside it. position: sticky on the thead keeps the
+                           column labels visible while scrolling. *@
+                        <div class="table-responsive flex-grow-1" style="overflow-y: auto; min-height: 0;">
+                            <table id="pipeline-rows" class="table table-sm table-striped table-hover mb-0 small">
+                                <thead style="position: sticky; top: 0; z-index: 1; background: var(--bs-body-bg);">
+                                    <tr>
+                                        <th>Domain</th>
+                                        <th>Criterion</th>
+                                        <th>Concept</th>
+                                        <th>Concept code</th>
+                                        <th>Semantic type</th>
+                                        <th class="text-end">Score</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in Model.PipelineRows)
+                                    {
+                                        <tr tabindex="0" data-original-text="@row.OriginalText" style="cursor: pointer;">
+                                            <td>@row.Domain</td>
+                                            <td>@row.Criterion</td>
+                                            <td>@row.Concept</td>
+                                            <td>
+                                                @if (string.IsNullOrEmpty(row.ConceptCode))
+                                                {
+                                                    <text>—</text>
+                                                }
+                                                else
+                                                {
+                                                    @* Bootstrap dropdown trigger. The visible text is the
+                                                       concept code; the menu offers two actions: open the
+                                                       UMLS concept page (new tab) or jump to the Results
+                                                       tab filtered by this code. data-bs-boundary=viewport
+                                                       keeps the menu from being clipped by the scrollable
+                                                       table container. *@
+                                                    <div class="dropdown">
+                                                        @* data-bs-strategy="fixed" makes Popper position
+                                                           the menu via position:fixed, escaping the
+                                                           table-responsive's overflow-y:auto which would
+                                                           otherwise clip the dropdown. *@
+                                                        <a href="#" class="dropdown-toggle text-decoration-none"
+                                                           role="button" data-bs-toggle="dropdown"
+                                                           data-bs-strategy="fixed"
+                                                           data-bs-boundary="viewport"
+                                                           aria-expanded="false"
+                                                           onclick="event.stopPropagation()">@row.ConceptCode</a>
+                                                        <ul class="dropdown-menu dropdown-menu-end shadow-sm small">
+                                                            <li>
+                                                                <a class="dropdown-item"
+                                                                   href="https://uts.nlm.nih.gov/uts/umls/concept/@row.ConceptCode"
+                                                                   target="_blank" rel="noopener noreferrer">
+                                                                    Open in UMLS <span class="text-muted">(new tab)</span>
+                                                                </a>
+                                                            </li>
+                                                            <li>
+                                                                <a class="dropdown-item"
+                                                                   asp-action="Results"
+                                                                   asp-route-conceptCode="@row.ConceptCode">
+                                                                    Filter Results by this code
+                                                                </a>
+                                                            </li>
+                                                        </ul>
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>@(string.IsNullOrEmpty(row.SemanticType) ? "—" : row.SemanticType)</td>
+                                            <td class="text-end">@row.MatchScore.ToString("F3")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Below the two-column row: the selected pipeline row's original_text.
+       Useful for comparing the model's claimed source span against the
+       criteria — when the highlight doesn't fire, this is where to look
+       to see what the LLM said vs what was actually in the trial. *@
+    <div class="card mt-3" id="original-text-panel" style="display: none;">
+        <div class="card-header small text-muted d-flex justify-content-between align-items-center">
+            <div>
+                Selected row's <code>original_text</code>
+                <span id="original-text-match-badge" class="badge ms-2"></span>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="original-text-close">Close</button>
+        </div>
+        <div class="card-body small">
+            <pre id="original-text-content"
+                 class="bg-body-tertiary p-2 mb-0"
+                 style="white-space: pre-wrap; word-break: break-word; max-height: 16rem; overflow-y: auto;"></pre>
+            <p id="original-text-mismatch-note" class="text-danger small mt-2 mb-0" style="display: none;">
+                This text was not found in the source criteria above. The LLM may have
+                paraphrased the source, hallucinated the span, or matched a passage that
+                has different whitespace / punctuation than what's stored in
+                <code>ctgov.eligibilities.criteria</code>.
+            </p>
+        </div>
+    </div>
+}
+
+@* ===== Find Similar modal =====
+   Calls /Home/SimilarTrials with the current NCT_ID and the two toggle
+   states. The endpoint reads the source trial's own embedding from
+   public.eligibility_study_embedding and KNN-scans the corpus, optionally
+   restricted by phase and/or study_type. Same NCT-link → Analysis pattern
+   as the Search modal. *@
+<div class="modal fade" id="find-similar-modal" tabindex="-1"
+     aria-labelledby="find-similar-modal-title" aria-hidden="true"
+     data-nct-id="@Model.NctId">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="find-similar-modal-title">
+                    Find studies similar to <code id="find-similar-source">@Model.NctId</code>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">
+                    Ranks processed studies by cosine similarity using each
+                    study's topic-text embedding from
+                    <code>public.eligibility_study_embedding</code>.
+                </p>
+                <div class="d-flex flex-wrap gap-3 align-items-center mb-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="find-similar-match-phase" />
+                        <label class="form-check-label small" for="find-similar-match-phase">Same Phase</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="find-similar-match-type" />
+                        <label class="form-check-label small" for="find-similar-match-type">Same Trial Type</label>
+                    </div>
+                    <button type="button" class="btn btn-outline-primary btn-sm ms-auto" id="find-similar-refresh">
+                        Refresh
+                    </button>
+                </div>
+
+                <div id="find-similar-status" class="alert py-2 px-3 small d-none" role="alert"></div>
+
+                <div id="find-similar-results-wrap" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <strong class="small text-muted">Results <span id="find-similar-count" class="text-muted"></span></strong>
+                    </div>
+                    <div class="table-responsive" style="max-height: 28rem; overflow-y: auto;">
+                        <table class="table table-sm table-striped table-hover small mb-0">
+                            <thead style="position: sticky; top: 0; z-index: 1; background: var(--bs-body-bg);">
+                                <tr>
+                                    <th>NCT ID</th>
+                                    <th>Brief title</th>
+                                    <th>Status</th>
+                                    <th>Phase</th>
+                                    <th>Type</th>
+                                    <th class="text-end">Similarity</th>
+                                </tr>
+                            </thead>
+                            <tbody id="find-similar-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+@* ===== Study Search modal =====
+   Backed by /Home/SearchStudies (GET → JSON). The form is intentionally
+   plain inputs — every text field uses ILIKE %value%. The OK button is a
+   submit; Cancel closes via Bootstrap's data-bs-dismiss. Results render
+   below the form on success; clicking an NCT_ID navigates back to this
+   Analysis page with that NCT loaded. *@
+<div class="modal fade" id="study-search-modal" tabindex="-1"
+     aria-labelledby="study-search-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="study-search-modal-title">Search studies</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    Searches the persisted study-detail snapshot
+                    (<code>public.eligibility_study_detail</code>). Every text field is a
+                    case-insensitive <em>contains</em> match; blank fields are ignored.
+                </p>
+                <form id="study-search-form" class="row g-2">
+                    <div class="col-md-4">
+                        <label for="search-nctId" class="form-label small text-muted mb-1">NCT ID</label>
+                        <input id="search-nctId" name="nctId" type="text"
+                               class="form-control form-control-sm" placeholder="NCT123" />
+                    </div>
+                    <div class="col-md-4">
+                        <label for="search-overallStatus" class="form-label small text-muted mb-1">Overall status</label>
+                        <input id="search-overallStatus" name="overallStatus" type="text"
+                               class="form-control form-control-sm" placeholder="Completed" />
+                    </div>
+                    <div class="col-md-4">
+                        <label for="search-phase" class="form-label small text-muted mb-1">Phase</label>
+                        <input id="search-phase" name="phase" type="text"
+                               class="form-control form-control-sm" placeholder="Phase 3" />
+                    </div>
+                    <div class="col-md-4">
+                        <label for="search-studyType" class="form-label small text-muted mb-1">Study type</label>
+                        <input id="search-studyType" name="studyType" type="text"
+                               class="form-control form-control-sm" placeholder="Interventional" />
+                    </div>
+                    <div class="col-md-4">
+                        <label for="search-gender" class="form-label small text-muted mb-1">Gender</label>
+                        <input id="search-gender" name="gender" type="text"
+                               class="form-control form-control-sm" placeholder="All / Male / Female" />
+                    </div>
+                    <div class="col-md-4">
+                        <label for="search-healthyVolunteers" class="form-label small text-muted mb-1">Healthy volunteers</label>
+                        <input id="search-healthyVolunteers" name="healthyVolunteers" type="text"
+                               class="form-control form-control-sm" placeholder="Yes / No" />
+                    </div>
+                    <div class="col-md-6">
+                        <label for="search-briefTitle" class="form-label small text-muted mb-1">Brief title</label>
+                        <input id="search-briefTitle" name="briefTitle" type="text"
+                               class="form-control form-control-sm" />
+                    </div>
+                    <div class="col-md-6">
+                        <label for="search-officialTitle" class="form-label small text-muted mb-1">Official title</label>
+                        <input id="search-officialTitle" name="officialTitle" type="text"
+                               class="form-control form-control-sm" />
+                    </div>
+                    <div class="col-md-6">
+                        <label for="search-source" class="form-label small text-muted mb-1">Lead sponsor</label>
+                        <input id="search-source" name="source" type="text"
+                               class="form-control form-control-sm" />
+                    </div>
+                    <div class="col-md-6">
+                        <label for="search-condition" class="form-label small text-muted mb-1">Condition</label>
+                        <input id="search-condition" name="condition" type="text"
+                               class="form-control form-control-sm" placeholder="diabetes" />
+                    </div>
+                    <div class="col-12">
+                        <label for="search-briefSummary" class="form-label small text-muted mb-1">Brief summary</label>
+                        <input id="search-briefSummary" name="briefSummary" type="text"
+                               class="form-control form-control-sm" />
+                    </div>
+                </form>
+
+                <div id="study-search-status" class="alert py-2 px-3 small mt-3 d-none" role="alert"></div>
+
+                <div id="study-search-results-wrap" class="mt-3 d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <strong class="small text-muted">Results <span id="study-search-count" class="text-muted"></span></strong>
+                        <span id="study-search-truncated" class="badge bg-warning text-dark d-none">
+                            Showing first 100 — narrow your filters for more
+                        </span>
+                    </div>
+                    <div class="table-responsive" style="max-height: 28rem; overflow-y: auto;">
+                        <table class="table table-sm table-striped table-hover small mb-0">
+                            <thead style="position: sticky; top: 0; z-index: 1; background: var(--bs-body-bg);">
+                                <tr>
+                                    <th>NCT ID</th>
+                                    <th>Brief title</th>
+                                    <th>Status</th>
+                                    <th>Phase</th>
+                                    <th>Type</th>
+                                    <th>Sponsor</th>
+                                    <th>Conditions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="study-search-results-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="study-search-ok">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @* Persist the analyse target across tab switches. The layout reads this
+       value on every page load and rewrites the Analysis nav-link href to
+       include it, so clicking back into Analysis lands on the same trial.
+       sessionStorage scopes to the browser tab — a fresh window starts clean. *@
+    <script>
+        (function () {
+            const KEY = "analysis.nctId";
+            const current = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.NctId ?? ""));
+            const searched = @(Model.HasSearched ? "true" : "false");
+            const ok = @((Model.HasSearched && !Model.NotFound && !Model.HasError) ? "true" : "false");
+            if (ok && current) {
+                sessionStorage.setItem(KEY, current);
+            } else if (searched && !current) {
+                // User submitted the form with an empty NCT — treat as "forget".
+                sessionStorage.removeItem(KEY);
+            }
+        })();
+    </script>
+    <script>
+        // Re-run pipeline button. Same pattern as the Studies tab's Re-run
+        // forms: fetch-based submit keeps the user on the page, status banner
+        // above the results renders the run id / 409 conflict / error.
+        (function () {
+            const form = document.querySelector("form[data-rerun-form]");
+            if (!form) return;
+            const status = document.getElementById("rerun-status");
+
+            function showStatus(text, cls) {
+                if (!status) return;
+                status.className = "alert py-2 px-3 small mb-3 " + cls;
+                status.textContent = text;
+                status.classList.remove("d-none");
+            }
+
+            form.addEventListener("submit", async (ev) => {
+                ev.preventDefault();
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form),
+                    headers: { "Accept": "application/json" }
+                });
+                let body = {};
+                try { body = await response.json(); } catch { /* empty body fine */ }
+                if (response.ok) {
+                    showStatus(
+                        `Re-running ${body.nct_id ?? "?"} (run ${body.run_id?.substring(0, 8) ?? "?"}) — reloading…`,
+                        "alert-success");
+                    // Reload after a short delay so the orchestrator has time
+                    // to insert the initial eligibility_run row + the audit
+                    // row for this trial. Without the delay the reloaded
+                    // page would render before the new run shows up in the
+                    // Processing history, which defeats the point of the
+                    // refresh. 1500ms is enough in practice; the user also
+                    // sees the green status banner so the action isn't
+                    // silent.
+                    setTimeout(() => window.location.reload(), 1500);
+                } else if (response.status === 409) {
+                    showStatus(
+                        `Re-run rejected: another run is already in progress (${body.current_run_id?.substring(0, 8) ?? "?"}).`,
+                        "alert-warning");
+                } else if (response.status === 400) {
+                    showStatus(`Re-run rejected: ${body.error ?? "bad request"}.`, "alert-danger");
+                } else {
+                    showStatus(`Re-run failed (HTTP ${response.status}).`, "alert-danger");
+                }
+            });
+        })();
+    </script>
+    <script>
+        // Locale-format every started_at timestamp in the Processing history
+        // table. ISO 8601 stays in the datetime= attribute as fallback.
+        (function () {
+            const fmt = new Intl.DateTimeFormat(undefined, {
+                year: "numeric", month: "short", day: "2-digit",
+                hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+            document.querySelectorAll("time[data-locale-time]").forEach(el => {
+                const iso = el.getAttribute("datetime");
+                if (!iso) return;
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return;
+                el.textContent = fmt.format(d);
+            });
+        })();
+    </script>
+    <script>
+        // Pipeline-row selection + criteria-highlight wiring. Each <tr> in
+        // #pipeline-rows tbody carries its row's original_text on a
+        // data-original-text attribute. Clicking or arrow-keying onto a row
+        // selects it: the row gets .table-active, the criteria <pre> gets
+        // the matching substring wrapped in <mark>, and the highlight
+        // scrolls into view. Empty / unmatched original_text leaves the
+        // criteria un-highlighted.
+        (function () {
+            const table = document.getElementById("pipeline-rows");
+            if (!table) return;
+            const rows = Array.from(table.querySelectorAll("tbody tr"));
+            if (rows.length === 0) return;
+
+            const pre = document.getElementById("criteria-text");
+
+            // AACT stores markdown-escaped specials in criteria — e.g. "\>="
+            // (literal backslash + ">=") so the text renders cleanly in
+            // markdown-aware viewers. The LLM un-escapes naturally and emits
+            // ">=" in its original_text. Without normalizing the source, the
+            // LLM's text never substring-matches the criteria and the
+            // highlight silently fails. Strip the markdown-escape backslashes
+            // from both sides; the display also drops them which makes the
+            // criteria more readable.
+            function normalize(s) {
+                return (s || "").replace(/\\([\\`*_{}\[\]()#+\-.!<>])/g, "$1");
+            }
+            const fullCriteriaRaw = pre ? pre.textContent : "";
+            const fullCriteria = normalize(fullCriteriaRaw);
+            if (pre) pre.textContent = fullCriteria;
+
+            const btn = document.getElementById("highlight-all-btn");
+            const origPanel    = document.getElementById("original-text-panel");
+            const origContent  = document.getElementById("original-text-content");
+            const origBadge    = document.getElementById("original-text-match-badge");
+            const origMismatch = document.getElementById("original-text-mismatch-note");
+            const origClose    = document.getElementById("original-text-close");
+            const lcFullCriteria = (fullCriteria || "").toLowerCase();
+            let selectedIdx = -1;
+            let allMode = false;
+
+            function showOriginalText(text) {
+                if (!origPanel) return;
+                origContent.textContent = text || "(empty)";
+                const normalizedText = normalize(text || "");
+                if (normalizedText && lcFullCriteria.indexOf(normalizedText.toLowerCase()) >= 0) {
+                    origBadge.className = "badge bg-success ms-2";
+                    origBadge.textContent = "found in criteria";
+                    origMismatch.style.display = "none";
+                } else {
+                    origBadge.className = "badge bg-warning text-dark ms-2";
+                    origBadge.textContent = "NOT found in criteria";
+                    origMismatch.style.display = "";
+                }
+                origPanel.style.display = "";
+            }
+
+            function hideOriginalTextPanel() {
+                if (origPanel) origPanel.style.display = "none";
+            }
+
+            if (origClose) origClose.addEventListener("click", hideOriginalTextPanel);
+
+            // Render the criteria <pre> with every occurrence of every string
+            // in `originals` wrapped in <mark>. Empty / Nothing array = no
+            // highlight (just the cached raw text). Overlapping matches get
+            // merged so adjacent or nested ranges don't double-wrap.
+            function applyHighlights(originals) {
+                if (!pre) return;
+                const filtered = (originals || []).filter(s => s && s.length > 0);
+                if (filtered.length === 0) { pre.textContent = fullCriteria; return; }
+
+                // Collect every match range across all originals.
+                const lcFull = fullCriteria.toLowerCase();
+                const ranges = [];
+                for (const orig of filtered) {
+                    // Normalize each search target so an LLM that DID keep
+                    // backslash escapes still substring-matches the
+                    // (also-normalized) criteria text.
+                    const normalizedOrig = normalize(orig);
+                    const lcOrig = normalizedOrig.toLowerCase();
+                    let cursor = 0;
+                    while (cursor < fullCriteria.length) {
+                        const idx = lcFull.indexOf(lcOrig, cursor);
+                        if (idx < 0) break;
+                        ranges.push([idx, idx + normalizedOrig.length]);
+                        cursor = idx + normalizedOrig.length;
+                    }
+                }
+                if (ranges.length === 0) { pre.textContent = fullCriteria; return; }
+
+                // Merge overlaps so the DOM renders one <mark> per contiguous
+                // highlighted span instead of stacking marks for each match.
+                ranges.sort((a, b) => a[0] - b[0]);
+                const merged = [];
+                for (const [s, e] of ranges) {
+                    if (merged.length > 0 && s <= merged[merged.length - 1][1]) {
+                        merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+                    } else {
+                        merged.push([s, e]);
+                    }
+                }
+
+                // Walk the merged ranges and rebuild the <pre> with text +
+                // <mark> nodes. Using textNodes keeps anything HTML-shaped in
+                // the source criteria from rendering as markup.
+                pre.textContent = "";
+                let cursor = 0;
+                let firstMark = null;
+                for (const [s, e] of merged) {
+                    if (s > cursor) pre.appendChild(document.createTextNode(fullCriteria.substring(cursor, s)));
+                    const mark = document.createElement("mark");
+                    mark.className = "bg-primary text-white px-1 rounded";
+                    mark.textContent = fullCriteria.substring(s, e);
+                    pre.appendChild(mark);
+                    if (!firstMark) firstMark = mark;
+                    cursor = e;
+                }
+                if (cursor < fullCriteria.length) {
+                    pre.appendChild(document.createTextNode(fullCriteria.substring(cursor)));
+                }
+                if (firstMark) scrollPreToMark(firstMark);
+            }
+
+            // Centre `mark` within the criteria <pre>'s own scroll viewport
+            // by adjusting ONLY pre.scrollTop. Deliberately avoids
+            // scrollIntoView, which also scrolls the window and shifts the
+            // whole page when a pipeline row is clicked.
+            function scrollPreToMark(mark) {
+                if (!pre || !mark) return;
+                const markRect = mark.getBoundingClientRect();
+                const preRect = pre.getBoundingClientRect();
+                const delta = (markRect.top - preRect.top)
+                            - (pre.clientHeight - markRect.height) / 2;
+                pre.scrollTop += delta;
+            }
+
+            function setAllMode(on) {
+                allMode = on;
+                if (btn) {
+                    btn.classList.toggle("active", on);
+                    btn.setAttribute("aria-pressed", String(on));
+                }
+                if (on) {
+                    // Clear any single-row selection so the two modes don't
+                    // fight over the highlight DOM.
+                    if (selectedIdx >= 0) {
+                        rows[selectedIdx].classList.remove("table-active");
+                        selectedIdx = -1;
+                    }
+                    hideOriginalTextPanel();
+                    applyHighlights(rows.map(r => r.dataset.originalText || ""));
+                } else {
+                    applyHighlights([]);
+                }
+            }
+
+            function select(idx) {
+                if (idx < 0 || idx >= rows.length) return;
+                // Selecting a row supersedes all-mode — clear it and the
+                // button's pressed state before applying the single-row mark.
+                if (allMode) {
+                    allMode = false;
+                    if (btn) {
+                        btn.classList.remove("active");
+                        btn.setAttribute("aria-pressed", "false");
+                    }
+                }
+                if (selectedIdx >= 0) rows[selectedIdx].classList.remove("table-active");
+                selectedIdx = idx;
+                const row = rows[idx];
+                row.classList.add("table-active");
+                // preventScroll: true — focusing the row must not scroll the
+                // page or the table. The user clicked the row, so it's
+                // already visible; moving the view on click is jarring.
+                row.focus({ preventScroll: true });
+                const originalText = row.dataset.originalText || "";
+                applyHighlights([originalText]);
+                showOriginalText(originalText);
+            }
+
+            rows.forEach((row, idx) => {
+                row.addEventListener("click", () => select(idx));
+                row.addEventListener("keydown", (e) => {
+                    if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        select(Math.min(idx + 1, rows.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        select(Math.max(idx - 1, 0));
+                    } else if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        select(idx);
+                    }
+                });
+            });
+
+            if (btn) {
+                btn.addEventListener("click", () => setAllMode(!allMode));
+            }
+        })();
+    </script>
+    <script>
+        // Study Search modal — collects filter values, GETs /Home/SearchStudies,
+        // renders the result rows. Each NCT_ID link reloads the Analysis page
+        // for that trial. The modal stays open so the user can refine and
+        // re-search without losing context.
+        (function () {
+            const modalEl = document.getElementById("study-search-modal");
+            if (!modalEl) return;
+            const form         = document.getElementById("study-search-form");
+            const okBtn        = document.getElementById("study-search-ok");
+            const status       = document.getElementById("study-search-status");
+            const resultsWrap  = document.getElementById("study-search-results-wrap");
+            const resultsBody  = document.getElementById("study-search-results-body");
+            const countLabel   = document.getElementById("study-search-count");
+            const truncatedTag = document.getElementById("study-search-truncated");
+
+            const analysisUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Url.Action("Analysis") ?? "/Home/Analysis"));
+            const searchUrl   = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Url.Action("SearchStudies") ?? "/Home/SearchStudies"));
+
+            function showStatus(text, cls) {
+                status.className = "alert py-2 px-3 small mt-3 " + cls;
+                status.textContent = text;
+                status.classList.remove("d-none");
+            }
+            function hideStatus() { status.classList.add("d-none"); }
+
+            function clearResults() {
+                resultsBody.innerHTML = "";
+                resultsWrap.classList.add("d-none");
+                truncatedTag.classList.add("d-none");
+                countLabel.textContent = "";
+            }
+
+            function renderResults(rows, truncated) {
+                resultsBody.innerHTML = "";
+                rows.forEach(r => {
+                    const tr = document.createElement("tr");
+
+                    const nctTd = document.createElement("td");
+                    const link = document.createElement("a");
+                    const url = new URL(analysisUrl, window.location.origin);
+                    url.searchParams.set("nctId", r.nct_id);
+                    link.href = url.pathname + url.search;
+                    link.textContent = r.nct_id;
+                    link.className = "text-decoration-none";
+                    nctTd.appendChild(link);
+                    tr.appendChild(nctTd);
+
+                    const titleTd = document.createElement("td");
+                    titleTd.textContent = r.brief_title || "";
+                    titleTd.style.maxWidth = "20rem";
+                    titleTd.className = "text-truncate";
+                    titleTd.title = r.brief_title || "";
+                    tr.appendChild(titleTd);
+
+                    const statusTd = document.createElement("td");
+                    statusTd.textContent = r.overall_status || "—";
+                    tr.appendChild(statusTd);
+
+                    const phaseTd = document.createElement("td");
+                    phaseTd.textContent = r.phase || "—";
+                    tr.appendChild(phaseTd);
+
+                    const typeTd = document.createElement("td");
+                    typeTd.textContent = r.study_type || "—";
+                    tr.appendChild(typeTd);
+
+                    const srcTd = document.createElement("td");
+                    srcTd.textContent = r.source || "—";
+                    srcTd.style.maxWidth = "12rem";
+                    srcTd.className = "text-truncate";
+                    srcTd.title = r.source || "";
+                    tr.appendChild(srcTd);
+
+                    const condTd = document.createElement("td");
+                    condTd.textContent = (r.conditions || []).join(", ");
+                    condTd.style.maxWidth = "16rem";
+                    condTd.className = "text-truncate";
+                    condTd.title = (r.conditions || []).join(", ");
+                    tr.appendChild(condTd);
+
+                    resultsBody.appendChild(tr);
+                });
+                countLabel.textContent = "(" + rows.length + ")";
+                truncatedTag.classList.toggle("d-none", !truncated);
+                resultsWrap.classList.remove("d-none");
+            }
+
+            async function runSearch() {
+                hideStatus();
+                clearResults();
+                const fd = new FormData(form);
+                const params = new URLSearchParams();
+                let any = false;
+                fd.forEach((value, key) => {
+                    const v = (value || "").toString().trim();
+                    if (v.length > 0) { params.set(key, v); any = true; }
+                });
+                if (!any) {
+                    showStatus("Enter at least one filter value.", "alert-warning");
+                    return;
+                }
+                okBtn.disabled = true;
+                try {
+                    const response = await fetch(searchUrl + "?" + params.toString(), {
+                        headers: { "Accept": "application/json" }
+                    });
+                    if (!response.ok) {
+                        showStatus("Search failed (HTTP " + response.status + ").", "alert-danger");
+                        return;
+                    }
+                    const body = await response.json();
+                    if (body.error) {
+                        showStatus("Search failed: " + body.error, "alert-danger");
+                        return;
+                    }
+                    if (!body.results || body.results.length === 0) {
+                        showStatus("No matching studies.", "alert-secondary");
+                        return;
+                    }
+                    renderResults(body.results, body.truncated === true);
+                } catch (err) {
+                    showStatus("Search failed: " + err, "alert-danger");
+                } finally {
+                    okBtn.disabled = false;
+                }
+            }
+
+            okBtn.addEventListener("click", runSearch);
+            // Enter inside any field of the form runs the search.
+            form.addEventListener("submit", (ev) => { ev.preventDefault(); runSearch(); });
+
+            // Clear state when the modal is closed so the next open starts
+            // fresh — old result rows from a prior search shouldn't linger
+            // behind a different set of inputs.
+            modalEl.addEventListener("hidden.bs.modal", () => {
+                form.reset();
+                hideStatus();
+                clearResults();
+            });
+        })();
+    </script>
+    <script>
+        // Find Similar modal — opens with the current Analysis NCT_ID, calls
+        // /Home/SimilarTrials, renders the ranked list. Same-Phase / Same-Type
+        // checkboxes pass through as boolean filters; toggling either auto
+        // re-runs the query. Each NCT link reloads Analysis with that trial.
+        (function () {
+            const modalEl = document.getElementById("find-similar-modal");
+            if (!modalEl) return;
+            const sourceEl   = document.getElementById("find-similar-source");
+            const phaseChk   = document.getElementById("find-similar-match-phase");
+            const typeChk    = document.getElementById("find-similar-match-type");
+            const refreshBtn = document.getElementById("find-similar-refresh");
+            const status     = document.getElementById("find-similar-status");
+            const wrap       = document.getElementById("find-similar-results-wrap");
+            const body       = document.getElementById("find-similar-body");
+            const countEl    = document.getElementById("find-similar-count");
+
+            const analysisUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Url.Action("Analysis") ?? "/Home/Analysis"));
+            const similarUrl  = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Url.Action("SimilarTrials") ?? "/Home/SimilarTrials"));
+
+            // Source NCT travels via the modal element's data-nct-id (set
+            // server-side from Model.NctId) and is overridden if the trigger
+            // button carries its own data-nct-id (defensive — only one
+            // button exists today).
+            function currentNctId() {
+                return modalEl.getAttribute("data-nct-id") || "";
+            }
+
+            function showStatus(text, cls) {
+                status.className = "alert py-2 px-3 small " + cls;
+                status.textContent = text;
+                status.classList.remove("d-none");
+            }
+            function hideStatus() { status.classList.add("d-none"); }
+
+            function clearResults() {
+                body.innerHTML = "";
+                wrap.classList.add("d-none");
+                countEl.textContent = "";
+            }
+
+            function renderStudies(studies) {
+                body.innerHTML = "";
+                studies.forEach(s => {
+                    const tr = document.createElement("tr");
+
+                    const nctTd = document.createElement("td");
+                    const link = document.createElement("a");
+                    const url = new URL(analysisUrl, window.location.origin);
+                    url.searchParams.set("nctId", s.nct_id);
+                    link.href = url.pathname + url.search;
+                    link.textContent = s.nct_id;
+                    link.className = "text-decoration-none";
+                    nctTd.appendChild(link);
+                    tr.appendChild(nctTd);
+
+                    const titleTd = document.createElement("td");
+                    titleTd.textContent = s.brief_title || "";
+                    titleTd.style.maxWidth = "22rem";
+                    titleTd.className = "text-truncate";
+                    titleTd.title = s.brief_title || "";
+                    tr.appendChild(titleTd);
+
+                    const statusTd = document.createElement("td");
+                    statusTd.textContent = s.overall_status || "—";
+                    tr.appendChild(statusTd);
+
+                    const phaseTd = document.createElement("td");
+                    phaseTd.textContent = s.phase || "—";
+                    tr.appendChild(phaseTd);
+
+                    const typeTd = document.createElement("td");
+                    typeTd.textContent = s.study_type || "—";
+                    tr.appendChild(typeTd);
+
+                    // Similarity as a percentage, colour-banded like the authoring
+                    // project: green > 80%, orange 70-80%, red < 70%.
+                    const simTd = document.createElement("td");
+                    simTd.className = "text-end fw-semibold";
+                    const pct = (typeof s.similarity === "number" ? s.similarity : 0) * 100;
+                    simTd.textContent = pct.toFixed(1) + "%";
+                    simTd.style.color = pct > 80 ? "#16a34a" : pct >= 70 ? "#d97706" : "#dc2626";
+                    tr.appendChild(simTd);
+
+                    body.appendChild(tr);
+                });
+                countEl.textContent = "(" + studies.length + ")";
+                wrap.classList.remove("d-none");
+            }
+
+            async function runSearch() {
+                const nctId = currentNctId();
+                hideStatus();
+                clearResults();
+                if (!nctId) {
+                    showStatus("No source NCT_ID — analyse a trial first.", "alert-warning");
+                    return;
+                }
+                refreshBtn.disabled = true;
+                const params = new URLSearchParams({
+                    nctId: nctId,
+                    matchPhase: phaseChk.checked ? "true" : "false",
+                    matchStudyType: typeChk.checked ? "true" : "false"
+                });
+                try {
+                    const response = await fetch(similarUrl + "?" + params.toString(), {
+                        headers: { "Accept": "application/json" }
+                    });
+                    if (!response.ok) {
+                        showStatus("Find Similar failed (HTTP " + response.status + ").", "alert-danger");
+                        return;
+                    }
+                    const data = await response.json();
+                    if (data.error) {
+                        showStatus("Find Similar failed: " + data.error, "alert-danger");
+                        return;
+                    }
+                    if (data.no_embedding) {
+                        showStatus("No topic embedding exists for " + nctId
+                            + " yet — run the CLI's embed-studies backfill before searching.",
+                            "alert-warning");
+                        return;
+                    }
+                    const studies = data.studies || [];
+                    if (studies.length === 0) {
+                        showStatus("No similar trials found"
+                            + ((phaseChk.checked || typeChk.checked) ? " under the current filters." : "."),
+                            "alert-secondary");
+                        return;
+                    }
+                    renderStudies(studies);
+                } catch (err) {
+                    showStatus("Find Similar failed: " + err, "alert-danger");
+                } finally {
+                    refreshBtn.disabled = false;
+                }
+            }
+
+            modalEl.addEventListener("shown.bs.modal", () => {
+                sourceEl.textContent = currentNctId() || "—";
+                runSearch();
+            });
+            phaseChk.addEventListener("change", runSearch);
+            typeChk.addEventListener("change", runSearch);
+            refreshBtn.addEventListener("click", runSearch);
+
+            modalEl.addEventListener("hidden.bs.modal", () => {
+                phaseChk.checked = false;
+                typeChk.checked = false;
+                hideStatus();
+                clearResults();
+            });
+        })();
+    </script>
+}

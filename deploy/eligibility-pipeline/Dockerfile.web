@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# Architecture spec §5: Web image — ASP.NET Core MVC + SignalR status console.
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+WORKDIR /src
+COPY . .
+RUN dotnet restore contexts/eligibility/Eligibility.sln
+RUN dotnet publish contexts/eligibility/src/EligibilityProcessing.Web/EligibilityProcessing.Web.csproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine
+WORKDIR /app
+# krb5-libs: Npgsql loads libgssapi_krb5.so.2 during PostgreSQL connection
+# negotiation, but the Alpine runtime doesn't ship the Kerberos libraries -
+# without it every DB connection fails with "Cannot load library libgssapi_krb5.so.2".
+# tzdata: real timezone data so DateTime.Now and log timestamps honor the TZ env
+# var (e.g. TZ=Europe/London) instead of defaulting to UTC.
+RUN apk add --no-cache krb5-libs tzdata
+EXPOSE 8080
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "EligibilityProcessing.Web.dll"]

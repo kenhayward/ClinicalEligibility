@@ -1,0 +1,29 @@
+@model string
+@{
+    // The live panel for one tool card (Model = the tool kind). Hidden until a job
+    // for this kind is running or has just finished; the Tools-tab script fills it
+    // from SignalR + the /Home/ToolState re-sync. Only one job runs at a time, so at
+    // most one card's panel is populated.
+    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
+}
+<div class="tool-panel d-none mt-3 pt-3 border-top" data-panel="@Model">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="tool-status badge bg-secondary">idle</span>
+        <span class="tool-timing text-muted small"></span>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+        <div class="progress flex-grow-1" style="height: 1.25rem;">
+            <div class="tool-progress-bar progress-bar" role="progressbar" style="width: 0%;">0%</div>
+        </div>
+        <span class="tool-eta text-muted small text-nowrap"></span>
+    </div>
+    <div class="text-muted small mb-2"><span class="tool-count">0 / 0</span> processed</div>
+    <div class="tool-metrics d-flex flex-wrap gap-2 mb-2"></div>
+    @if (canRunPipeline)
+    {
+        <form class="tool-cancel-form d-none" asp-action="CancelTool" method="post">
+            <button type="submit" class="tool-cancel btn btn-outline-danger btn-sm">Cancel run</button>
+            <span class="text-muted small ms-2">Stops after the in-progress item(s) finish.</span>
+        </form>
+    }
+</div>

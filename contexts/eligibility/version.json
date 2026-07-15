@@ -1,0 +1,40 @@
+{
+  "app": "Eligibility Pipeline",
+  "current": { "major": 0, "minor": 1, "build": 3, "releaseDate": "2026-06-17" },
+  "releases": [
+    {
+      "version": "0.1.3",
+      "releaseDate": "2026-06-17",
+      "enhancements": [],
+      "fixes": [
+        "Tests: updated the dashboard version-surface tests to assert the current version. They had been left pinned to 0.1.1 after the 0.1.2 bump, so the integration suite failed on the version endpoint, footer, and AppVersion checks."
+      ]
+    },
+    {
+      "version": "0.1.2",
+      "releaseDate": "2026-06-16",
+      "enhancements": [],
+      "fixes": [
+        "Deployment: the web and CLI containers can now reach a Postgres, LM Studio, or embedding server running on the Docker host. Each compose service maps host.docker.internal to the host gateway (required on Linux Docker Engine) and disables container IPv6 so the host name resolves over IPv4 only - this avoids 'Connection refused' / 'Network unreachable' errors when host services are addressed as host.docker.internal in .env."
+      ]
+    },
+    {
+      "version": "0.1.1",
+      "releaseDate": "2026-06-16",
+      "enhancements": [
+        "The platform logo now appears in the dashboard header, the About box, and the Release Notes page."
+      ],
+      "fixes": []
+    },
+    {
+      "version": "0.1.0",
+      "releaseDate": "2026-06-14",
+      "enhancements": [
+        "This is the first released version of the Eligibility Pipeline. Semantic versioning (Major.Minor.Build with a release date) starts here at 0.1.0 - there are no earlier releases, so this changelog begins now.",
+        "Version history: the pipeline is a .NET re-implementation of the production n8n eligibility-extraction workflow - trial selection, LLM extraction, UMLS concept resolution, and per-trial persistence - fronted by a SignalR dashboard and a CLI, with authentication, role-based authorization and auditing, and the corpus similarity index that feeds the Eligibility Authoring module. All of that prior work predates formal versioning and is rolled up into this 0.1.0 baseline.",
+        "Added: an About box that shows the current version and release date, and a Release Notes page that lists each version's enhancements and bug fixes."
+      ],
+      "fixes": []
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+# Keep the Docker build context small and reproducible. The remote deploy ships
+# a `git archive` (tracked files only), but a local `docker compose build` uses
+# the full working tree - exclude build output, dependencies, and VCS so the
+# context stays lean and stale artifacts never leak into an image.
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/.vs/
+.git/
+.github/
+*.tar
+**/*.user
+.env

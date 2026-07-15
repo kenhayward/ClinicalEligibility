@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <!-- Hosting brings the full pipeline composition + transitively pulls in
+         every concrete library. Web only directly uses Core (for the
+         IPostgresGateway + RunMetrics types the controller/views consume). -->
+    <ProjectReference Include="..\EligibilityProcessing.Core\EligibilityProcessing.Core.vbproj" />
+    <ProjectReference Include="..\EligibilityProcessing.Hosting\EligibilityProcessing.Hosting.vbproj" />
+    <!-- Direct reference for the RuntimeParameters panel, which binds the VB
+         LlmOptions type (also pulled in transitively via Hosting). -->
+    <ProjectReference Include="..\EligibilityProcessing.Llm\EligibilityProcessing.Llm.vbproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EligibilityProcessing.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Single source of truth for cross-host config (Llm / Umls / Pipeline /
+         Notifications). Mirrored into Cli.vbproj via the same <Link>. Loaded
+         at runtime by SharedAppSettings.AddSharedAppSettings. -->
+    <None Include="..\Shared\appsettings.Shared.json" Link="appsettings.Shared.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="8.0.11" />
+  </ItemGroup>
+
+  <!-- Per-app version + changelog (single source of truth). Embedded so the
+       runtime AppVersion reader can load it, and pointed at by the build stamp
+       below so the assembly version is derived from the same file. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\version.json" LogicalName="version.json" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <VersionJsonPath>$(MSBuildProjectDirectory)\..\..\version.json</VersionJsonPath>
+  </PropertyGroup>
+  <Import Project="..\..\..\..\build\Versioning.targets" />
+
+</Project>

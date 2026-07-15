@@ -1,0 +1,186 @@
+@model EligibilityProcessing.Web.Models.RunsViewModel
+@{
+    ViewData["Title"] = "Runs";
+
+    // Shared hh:mm:ss formatter — used for both finished runs (EndedAt -
+    // StartedAt) and the initial server-render of in-flight runs (the JS
+    // ticker takes over on page load).
+    string FormatWallClock(TimeSpan ts) =>
+        $"{(int)ts.TotalHours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}";
+
+    // mm:ss formatter for the Unit Time column. Minutes are not capped at
+    // 59 — a 70-minute-per-study unit time renders "70:00", not "10:00" —
+    // because the column has no hours component.
+    string FormatMmSs(TimeSpan ts)
+    {
+        var totalSeconds = (long)Math.Max(0, Math.Round(ts.TotalSeconds));
+        return $"{totalSeconds / 60:D2}:{totalSeconds % 60:D2}";
+    }
+
+    // Average per-trial phase split as "llm / umls / persist" seconds. Each part
+    // is a dash when that phase has no timed trials; the whole cell is "—" when
+    // none do (pre-V16 runs).
+    string FormatPhaseSplit(double? llmMs, double? umlsMs, double? persistMs)
+    {
+        if (!llmMs.HasValue && !umlsMs.HasValue && !persistMs.HasValue) return "—";
+        string s(double? ms) => ms.HasValue ? (ms.Value / 1000.0).ToString("F1") : "–";
+        return $"{s(llmMs)} / {s(umlsMs)} / {s(persistMs)}";
+    }
+}
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+else if (Model.Runs.Count == 0)
+{
+    <p class="text-muted">No runs have been recorded yet.</p>
+}
+else
+{
+    <p class="text-muted">Showing the @Model.Runs.Count most recent runs from <code>public.eligibility_run</code>.</p>
+    <div class="table-responsive">
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Started (UTC)</th>
+                    <th>Trigger</th>
+                    <th class="text-end">Studies</th>
+                    <th class="text-end">Rows</th>
+                    <th class="text-end">Resolved</th>
+                    <th class="text-end">Wall&nbsp;clock</th>
+                    <th class="text-end">Unit&nbsp;time</th>
+                    <th class="text-end" title="Trial concurrency cap (Pipeline:LlmConcurrencyCap) used for this run.">Conc.</th>
+                    <th class="text-end" title="Total completion tokens (successful trials only) ÷ wall clock — aggregate decode throughput across all parallel trials. Rises with concurrency.">Tok/s</th>
+                    <th class="text-end" title="Average per-trial phase split (seconds) across successful trials: LLM call / sequential UMLS resolution / persist transaction. If UMLS dominates, it is the throughput ceiling — and if it grows with concurrency, the phase contends under load.">LLM/UMLS/Pst&nbsp;(s)</th>
+                    <th>Status</th>
+                    <th>Run ID</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var run in Model.Runs)
+                {
+                    var statusBadge = run.Status switch
+                    {
+                        "success" => "bg-success",
+                        "failed" => "bg-danger",
+                        "running" => "bg-info",
+                        "cancelled" => "bg-warning text-dark",
+                        _ => "bg-secondary"
+                    };
+                    // hh:mm:ss; TotalHours not Hours so 25-hour runs render
+                    // "25:00:00" rather than wrapping to "01:00:00". For
+                    // in-flight runs (no EndedAt yet) leave the cell open for
+                    // the JS ticker below — it reads data-elapsed-since and
+                    // overwrites the text every second.
+                    string wallClock = run.EndedAt.HasValue
+                        ? FormatWallClock(run.EndedAt.Value - run.StartedAt)
+                        : FormatWallClock(DateTimeOffset.UtcNow - run.StartedAt);
+                    // Unit time = total wall clock ÷ studies processed. Empty
+                    // dash when no studies have completed yet (avoids divide
+                    // by zero and the visual noise of "00:00" before the
+                    // first trial finishes).
+                    var elapsedTs = run.EndedAt.HasValue
+                        ? run.EndedAt.Value - run.StartedAt
+                        : DateTimeOffset.UtcNow - run.StartedAt;
+                    string unitTime = run.StudiesProcessed > 0
+                        ? FormatMmSs(TimeSpan.FromTicks(elapsedTs.Ticks / run.StudiesProcessed))
+                        : "—";
+                    <tr>
+                        <td>@run.StartedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@run.TriggerSource</td>
+                        <td class="text-end">@run.StudiesProcessed / @run.StudyCount</td>
+                        <td class="text-end">@run.RowsPersisted</td>
+                        <td class="text-end">@run.ResolutionRate.ToString("P1")</td>
+                        @if (run.EndedAt.HasValue)
+                        {
+                            <td class="text-end font-monospace">@wallClock</td>
+                            <td class="text-end font-monospace">@unitTime</td>
+                        }
+                        else
+                        {
+                            <td class="text-end font-monospace" data-elapsed-since="@run.StartedAt.ToString("o")">@wallClock</td>
+                            <td class="text-end font-monospace"
+                                data-unit-since="@run.StartedAt.ToString("o")"
+                                data-unit-studies="@run.StudiesProcessed">@unitTime</td>
+                        }
+                        <td class="text-end font-monospace">@(run.ConcurrencyCap.HasValue ? run.ConcurrencyCap.Value.ToString() : "—")</td>
+                        @* Aggregate decode throughput, finalised once the run ends.
+                           Dash while in flight (no EndedAt) — the token sum is a
+                           render-time snapshot and isn't streamed live. *@
+                        <td class="text-end font-monospace">@(run.CompletionTokensPerSecond.HasValue ? run.CompletionTokensPerSecond.Value.ToString("F1") : "—")</td>
+                        <td class="text-end font-monospace">@FormatPhaseSplit(run.AvgLlmMs, run.AvgUmlsMs, run.AvgPersistMs)</td>
+                        <td><span class="badge @statusBadge">@run.Status</span></td>
+                        @* Link to the Studies tab filtered by this run. Pass
+                           hideSuperseded=false so trials whose latest attempt
+                           is a later run still appear here — otherwise the
+                           link would silently hide rows that DID belong to
+                           this run, which is the opposite of the intent. *@
+                        <td>
+                            <a asp-action="History" asp-route-runId="@run.RunId"
+                               asp-route-hideSuperseded="false"
+                               class="text-decoration-none"
+                               title="@run.RunId — view all studies from this run">
+                                <small><code>@run.RunId.ToString("N").Substring(0, 8)</code></small>
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@section Scripts {
+    <script>
+        // Live tickers for in-flight runs. The server only stamps the data
+        // attributes on rows with no EndedAt, so completed rows keep their
+        // static final values. A page reload after the run completes drops
+        // the attributes and the static server-rendered text sticks.
+        //
+        //  • td[data-elapsed-since]                — wall clock, hh:mm:ss.
+        //  • td[data-unit-since] + data-unit-studies — unit time, mm:ss.
+        //    Studies-processed is a render-time snapshot; reload to refresh
+        //    that count.
+        (function () {
+            const wallCells = document.querySelectorAll("td[data-elapsed-since]");
+            const unitCells = document.querySelectorAll("td[data-unit-since]");
+            if (wallCells.length === 0 && unitCells.length === 0) return;
+
+            function pad2(n) { return String(n).padStart(2, "0"); }
+            function formatHms(ms) {
+                const totalSecs = Math.max(0, Math.floor(ms / 1000));
+                const h = Math.floor(totalSecs / 3600);
+                const m = Math.floor((totalSecs % 3600) / 60);
+                const s = totalSecs % 60;
+                return pad2(h) + ":" + pad2(m) + ":" + pad2(s);
+            }
+            function formatMs(ms) {
+                const totalSecs = Math.max(0, Math.round(ms / 1000));
+                const m = Math.floor(totalSecs / 60);
+                const s = totalSecs % 60;
+                return pad2(m) + ":" + pad2(s);
+            }
+
+            function tick() {
+                const now = Date.now();
+                wallCells.forEach(cell => {
+                    const startMs = new Date(cell.dataset.elapsedSince).getTime();
+                    if (isNaN(startMs)) return;
+                    cell.textContent = formatHms(now - startMs);
+                });
+                unitCells.forEach(cell => {
+                    const startMs = new Date(cell.dataset.unitSince).getTime();
+                    if (isNaN(startMs)) return;
+                    const studies = parseInt(cell.dataset.unitStudies, 10);
+                    if (!studies || studies <= 0) { cell.textContent = "—"; return; }
+                    cell.textContent = formatMs((now - startMs) / studies);
+                });
+            }
+            tick();
+            setInterval(tick, 1000);
+        })();
+    </script>
+}

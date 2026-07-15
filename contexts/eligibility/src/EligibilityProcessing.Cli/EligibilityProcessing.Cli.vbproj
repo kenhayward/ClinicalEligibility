@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- Hosting brings the full pipeline composition + transitively pulls in
+         Llm / Umls / Notifications. Cli only directly uses Core (for domain
+         types) and Data (for PostgresGateway, exposed to the migrate command). -->
+    <ProjectReference Include="..\EligibilityProcessing.Core\EligibilityProcessing.Core.vbproj" />
+    <ProjectReference Include="..\EligibilityProcessing.Data\EligibilityProcessing.Data.vbproj" />
+    <ProjectReference Include="..\EligibilityProcessing.Hosting\EligibilityProcessing.Hosting.vbproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Single source of truth for cross-host config (Llm / Umls / Pipeline /
+         Notifications). Mirrored from Web.csproj via the same <Link>. Loaded
+         at runtime by SharedAppSettings.AddSharedAppSettings. -->
+    <None Include="..\Shared\appsettings.Shared.json" Link="appsettings.Shared.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EligibilityProcessing.Data.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>EligibilityProcessing.Cli</RootNamespace>
+    <TargetFramework>net8.0</TargetFramework>
+    <StartupObject>EligibilityProcessing.Cli.Program</StartupObject>
+    <!-- Share the eligibility app version so the pipeline's binaries (Web + CLI)
+         carry the same stamp. Single source: contexts/eligibility/version.json. -->
+    <VersionJsonPath>$(MSBuildProjectDirectory)\..\..\version.json</VersionJsonPath>
+  </PropertyGroup>
+  <Import Project="..\..\..\..\build\Versioning.targets" />
+
+</Project>

@@ -1,0 +1,72 @@
+<Project>
+
+  <!--
+    Stamps the assembly version from a per-app version.json (the single source of
+    truth shared with the runtime AppVersion reader and the docker deploy scripts).
+
+    A host project opts in by setting VersionJsonPath and importing this file, e.g.
+
+      <PropertyGroup>
+        <VersionJsonPath>$(MSBuildThisFileDirectory)..\..\version.json</VersionJsonPath>
+      </PropertyGroup>
+      <Import Project="$(MSBuildThisFileDirectory)..\..\..\build\Versioning.targets" />
+
+    The values flow into Version / FileVersion / AssemblyVersion and
+    InformationalVersion ("Major.Minor.Build (releaseDate)") before the SDK
+    generates the assembly attributes.
+
+    Parsing is done with System.Text.RegularExpressions (always present in the
+    MSBuild runtime) rather than System.Text.Json, to avoid any reference/escaping
+    surprises with RoslynCodeTaskFactory.
+  -->
+
+  <UsingTask TaskName="ReadVersionJson"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <JsonPath ParameterType="System.String" Required="true" />
+      <Major ParameterType="System.String" Output="true" />
+      <Minor ParameterType="System.String" Output="true" />
+      <Build ParameterType="System.String" Output="true" />
+      <ReleaseDate ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var json = File.ReadAllText(JsonPath);
+        // Scope to the "current" object so a release entry's fields can never win.
+        var current = Regex.Match(json, "\"current\"\\s*:\\s*\\{(.*?)\\}", RegexOptions.Singleline).Groups[1].Value;
+        Major = Regex.Match(current, "\"major\"\\s*:\\s*(\\d+)").Groups[1].Value;
+        Minor = Regex.Match(current, "\"minor\"\\s*:\\s*(\\d+)").Groups[1].Value;
+        Build = Regex.Match(current, "\"build\"\\s*:\\s*(\\d+)").Groups[1].Value;
+        ReleaseDate = Regex.Match(current, "\"releaseDate\"\\s*:\\s*\"([^\"]+)\"").Groups[1].Value;
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- Run before GetAssemblyVersion (which consumes $(Version)) and before the SDK
+       appends the git commit to InformationalVersion. We keep InformationalVersion
+       clean ("Major.Minor.Build (releaseDate)") by suppressing that suffix, so the
+       value is predictable for display and for the stamp test. -->
+  <Target Name="StampVersionFromJson"
+          BeforeTargets="GetAssemblyVersion;AddSourceRevisionToInformationalVersion"
+          Condition="'$(VersionJsonPath)' != '' and Exists('$(VersionJsonPath)')">
+    <ReadVersionJson JsonPath="$(VersionJsonPath)">
+      <Output TaskParameter="Major" PropertyName="_VerMajor" />
+      <Output TaskParameter="Minor" PropertyName="_VerMinor" />
+      <Output TaskParameter="Build" PropertyName="_VerBuild" />
+      <Output TaskParameter="ReleaseDate" PropertyName="_VerReleaseDate" />
+    </ReadVersionJson>
+    <PropertyGroup>
+      <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+      <Version>$(_VerMajor).$(_VerMinor).$(_VerBuild)</Version>
+      <VersionPrefix>$(_VerMajor).$(_VerMinor).$(_VerBuild)</VersionPrefix>
+      <FileVersion>$(_VerMajor).$(_VerMinor).$(_VerBuild).0</FileVersion>
+      <AssemblyVersion>$(_VerMajor).$(_VerMinor).$(_VerBuild).0</AssemblyVersion>
+      <InformationalVersion>$(_VerMajor).$(_VerMinor).$(_VerBuild) ($(_VerReleaseDate))</InformationalVersion>
+    </PropertyGroup>
+    <Message Importance="normal" Text="$(MSBuildProjectName): stamped version $(InformationalVersion) from $(VersionJsonPath)" />
+  </Target>
+
+</Project>

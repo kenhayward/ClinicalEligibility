@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- Serialize test-assembly execution: the integration tests share one Postgres DB
+         and deadlock when assemblies run concurrently (Postgres error 40P01). -->
+    <MaxCpuCount>1</MaxCpuCount>
+  </RunConfiguration>
+</RunSettings>

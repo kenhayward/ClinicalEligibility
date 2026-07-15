@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "EligibilityProcessing.Cli": {
+      "commandName": "Project",
+      "commandLineArgs": "migrate"
+    }
+  }
+}

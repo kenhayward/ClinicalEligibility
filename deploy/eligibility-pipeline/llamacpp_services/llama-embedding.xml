@@ -1,0 +1,15 @@
+<service>
+  <id>llama-embedding</id>
+  <name>llama.cpp embeddings model</name>
+  <description>llama.cpp server for the embeddings model (bge v1.5)</description>
+  <executable>%LLAMA_ROOT%\llamacpp-rocm\llama-server.exe</executable>
+  <arguments>-m %LLAMA_ROOT%\Models\sabafallah\bge-large-en-v1.5-Q8_0-GGUF\bge-large-en-v1.5-q8_0.gguf -c 2048  --host 0.0.0.0 --port 8079 --embeddings  --no-mmap --log-timestamps --kv-unified --no-webui --ctx-size 4096 --batch-size 4096 --ubatch-size 4096</arguments>
+  <workingdirectory>%LLAMA_ROOT%\llamacpp-rocm\</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <logpath>%LLAMA_ROOT%\llamacpp-rocm\logs</logpath>
+  <onfailure action="restart" delay="5 sec"/>
+  <startmode>Automatic</startmode>
+</service>

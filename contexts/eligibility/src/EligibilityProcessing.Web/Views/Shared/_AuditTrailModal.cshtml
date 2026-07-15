@@ -1,0 +1,187 @@
+@*
+    Audit Trail modal (admins only). Paginated, human-readable view of audit_log
+    via the /Users/AuditLog JSON endpoint, with user / action / time-span filters.
+*@
+<div class="modal fade" id="auditTrailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Audit Trail</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="at-error" class="alert alert-danger d-none py-2"></div>
+
+                <form id="at-filter-form" class="row g-2 align-items-end mb-3">
+                    <div class="col-12 col-md">
+                        <label class="form-label small mb-0">User</label>
+                        <input class="form-control form-control-sm" name="user" placeholder="name or email" />
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label small mb-0">Action</label>
+                        <select class="form-select form-select-sm" name="action">
+                            <option value="">All</option>
+                            <option value="create">Created</option>
+                            <option value="update">Updated</option>
+                            <option value="delete">Deleted</option>
+                            <option value="login">Logged in</option>
+                            <option value="login_denied">Login denied</option>
+                            <option value="role_change">Role changed</option>
+                            <option value="bootstrap">Bootstrap</option>
+                            <option value="export">Exported</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label small mb-0">From</label>
+                        <input type="datetime-local" class="form-control form-control-sm" name="from" />
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label small mb-0">To</label>
+                        <input type="datetime-local" class="form-control form-control-sm" name="to" />
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                        <button type="button" id="at-reset" class="btn btn-outline-secondary btn-sm">Reset</button>
+                    </div>
+                </form>
+
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width: 12rem;">Time</th>
+                            <th>User</th>
+                            <th>Action</th>
+                            <th>Target</th>
+                            <th>Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody id="at-rows">
+                        <tr><td colspan="5" class="text-muted">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <span class="small text-muted" id="at-summary"></span>
+                <div class="d-flex gap-2">
+                    <button type="button" id="at-export" class="btn btn-outline-success btn-sm">Export CSV</button>
+                    <div class="btn-group">
+                        <button type="button" id="at-prev" class="btn btn-outline-secondary btn-sm">‹ Prev</button>
+                        <button type="button" id="at-next" class="btn btn-outline-secondary btn-sm">Next ›</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const modalEl = document.getElementById("auditTrailModal");
+        if (!modalEl || typeof bootstrap === "undefined") return;
+        // Re-parent out of the sticky navbar's stacking context (see _ManageAccountsModal).
+        if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
+        const modal = new bootstrap.Modal(modalEl);
+
+        const form = document.getElementById("at-filter-form");
+        const errorBox = document.getElementById("at-error");
+        const tbody = document.getElementById("at-rows");
+        const summary = document.getElementById("at-summary");
+        const prevBtn = document.getElementById("at-prev");
+        const nextBtn = document.getElementById("at-next");
+
+        const state = { page: 1, pageSize: 25, totalPages: 0 };
+        const actionLabels = {
+            create: "Created", update: "Updated", delete: "Deleted",
+            login: "Logged in", login_denied: "Login denied",
+            role_change: "Role changed", bootstrap: "Bootstrap", export: "Exported"
+        };
+
+        function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
+        function showError(m) { errorBox.textContent = m; errorBox.classList.remove("d-none"); }
+        function clearError() { errorBox.classList.add("d-none"); }
+        function prettyAction(a) { return actionLabels[a] || (a || ""); }
+        function toIso(v) { if (!v) return null; const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString(); }
+
+        function filterParams() {
+            const p = new URLSearchParams();
+            const u = form.user.value.trim(); if (u) p.set("user", u);
+            const a = form.action.value; if (a) p.set("action", a);
+            const from = toIso(form.from.value); if (from) p.set("from", from);
+            const to = toIso(form.to.value); if (to) p.set("to", to);
+            return p;
+        }
+        function buildUrl() {
+            const p = filterParams();
+            p.set("page", state.page);
+            p.set("pageSize", state.pageSize);
+            return "/Users/AuditLog?" + p.toString();
+        }
+        function buildExportUrl() {
+            return "/Users/AuditLog/Export?" + filterParams().toString();
+        }
+
+        async function load() {
+            clearError();
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">Loading…</td></tr>';
+            try {
+                const resp = await fetch(buildUrl(), { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                let data = null;
+                try { data = await resp.json(); } catch (e) { /* ignore */ }
+                if (!resp.ok) throw new Error((data && data.error) || ("Request failed (" + resp.status + ")"));
+
+                state.totalPages = data.totalPages || 0;
+                if (!data.rows || !data.rows.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No matching audit entries.</td></tr>';
+                } else {
+                    tbody.innerHTML = data.rows.map(function (r) {
+                        const target = esc(r.entityType)
+                            + (r.entityId ? '<div class="text-muted small text-truncate" style="max-width:16rem;" title="' + esc(r.entityId) + '">' + esc(r.entityId) + '</div>' : '');
+                        return '<tr>' +
+                            '<td class="small">' + esc(new Date(r.occurredAt).toLocaleString()) + '</td>' +
+                            '<td>' + esc(r.user) + '</td>' +
+                            '<td>' + esc(prettyAction(r.action)) + '</td>' +
+                            '<td>' + target + '</td>' +
+                            '<td class="small text-truncate" style="max-width:22rem;" title="' + esc(r.detail) + '">' + esc(r.detail) + '</td>' +
+                            '</tr>';
+                    }).join("");
+                }
+                summary.textContent = state.totalPages > 0
+                    ? ("Page " + data.page + " of " + state.totalPages + " · " + data.totalRows + " total")
+                    : "0 entries";
+                prevBtn.disabled = data.page <= 1;
+                nextBtn.disabled = data.page >= state.totalPages;
+            } catch (e) {
+                showError(e.message);
+                tbody.innerHTML = "";
+                summary.textContent = "";
+            }
+        }
+
+        form.addEventListener("submit", function (ev) { ev.preventDefault(); state.page = 1; load(); });
+        document.getElementById("at-reset").addEventListener("click", function () {
+            form.reset(); state.page = 1; load();
+        });
+        prevBtn.addEventListener("click", function () { if (state.page > 1) { state.page--; load(); } });
+        nextBtn.addEventListener("click", function () { if (state.page < state.totalPages) { state.page++; load(); } });
+
+        const exportBtn = document.getElementById("at-export");
+        exportBtn.addEventListener("click", async function () {
+            if (typeof window.downloadFile !== "function") return;
+            clearError();
+            const original = exportBtn.textContent;
+            exportBtn.disabled = true;
+            exportBtn.textContent = "Exporting…";
+            try {
+                await window.downloadFile(buildExportUrl(), "audit-trail.csv");
+            } catch (e) {
+                showError(e.message);
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.textContent = original;
+            }
+        });
+
+        const openBtn = document.getElementById("audit-trail-btn");
+        if (openBtn) openBtn.addEventListener("click", function () { state.page = 1; modal.show(); load(); });
+    });
+</script>

@@ -1,0 +1,115 @@
+# Architecture spec §5: reference deployment topology.
+#
+# Configuration: every service reads ../.env via the `env_file:` directive
+# below. That's the same .env file the dev hosts use via DotEnvLoader, so
+# secrets/endpoints live in exactly one place. Override per-environment by
+# pointing env_file at a different path (e.g. /etc/eligibility/prod.env).
+#
+# Postgres: both the source (AACT) and output databases are EXTERNAL to this
+# compose file — Postgres__ConnectionString{Source,Output} in .env point at
+# wherever they actually live. We don't run an embedded Postgres; production
+# uses a dedicated DB server on the LAN. The web container reaches those
+# hosts via the default bridge network's outbound routing.
+#
+# If your output Postgres lives on a LAN host that the default bridge can't
+# reach (rare — bridge networks normally have outbound to the host's
+# network), use `network_mode: host` instead, or replace LAN-IP literals
+# with `host.docker.internal` (Docker Desktop) / the host's IP.
+#
+# CLI: runs as a long-lived idle `eligibility-cli` container you exec into to
+# issue commands (it shares the same env_file, so connection strings/endpoints
+# match the web host). Example:
+#   docker exec -it eligibility-cli elig migrate
+#   docker exec -it eligibility-cli elig normalize-umls --count 500
+# See the `eligibility-cli` definition below.
+
+# Project (stack) name. Without this, Compose derives the project name from
+# the directory the compose file sits in (`deploy`), which would namespace
+# every resource as `deploy_*`. Pinning it to `eligibility` keeps the stack
+# name stable regardless of where the source tree is checked out.
+name: eligibility
+
+services:
+  # Single web host serves both the dashboard (HTML + SignalR live feed) and
+  # the production trigger surface (POST /trigger). They were originally split,
+  # but the SignalR feed needs the orchestrator to run in the same process as
+  # the hub — so they're merged.
+  eligibility-web:
+    build:
+      context: ../..
+      dockerfile: deploy/eligibility-pipeline/Dockerfile.web
+    image: eligibility/web:${ELIGIBILITY_VERSION:-dev}
+    # Fixed container name so `docker ps` shows a stable, predictable name
+    # rather than the generated `eligibility-eligibility-web-1`. A fixed name
+    # rules out scaling this service past one replica, which is fine — it's a
+    # singleton host.
+    container_name: eligibility-host
+    restart: unless-stopped
+    ports:
+      - "8091:8080"
+    env_file:
+      - ../../.env
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      # Container timezone (needs tzdata in the image, which Dockerfile.web installs).
+      # Defaults to UTC; set TZ in .env (e.g. TZ=Europe/London) for local timestamps.
+      - TZ=${TZ:-UTC}
+    # Reach a Postgres running on the host via Host=host.docker.internal in .env.
+    # Built in on Docker Desktop; REQUIRED on Linux Docker Engine to resolve it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Disable IPv6 inside the container so host.docker.internal resolves/connects
+    # over IPv4 only. Without this, an IPv6 address can be tried first and fail
+    # with "Network unreachable" (the container has no IPv6 route), even though
+    # the IPv4 path to the host works.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    # Persist ASP.NET Core DataProtection keys across container recreates.
+    # These keys encrypt the auth cookie + anti-forgery tokens; without a volume
+    # they live in the ephemeral container FS, so every redeploy invalidates all
+    # sessions (users are silently logged out) — see the DataProtection warning
+    # in the container log.
+    volumes:
+      - dataprotection-keys:/root/.aspnet/DataProtection-Keys
+
+  # Long-lived CLI tools container. It idles (tail -f /dev/null) so you can exec
+  # into it and run CLI commands interactively against the same .env / databases
+  # / LLM endpoint as the web host. Started by `docker compose up`, rebuilt and
+  # recreated on each deploy. Use the bundled `elig` wrapper:
+  #   docker exec -it eligibility-cli elig migrate
+  #   docker exec -it eligibility-cli elig normalize-umls --count 500
+  #   docker exec -it eligibility-cli elig status
+  #   docker exec -it eligibility-cli sh        # then: elig run --count 50, elig retry-umls, ...
+  # (One-shot still works too: docker compose run --rm --entrypoint elig eligibility-cli migrate)
+  eligibility-cli:
+    build:
+      context: ../..
+      dockerfile: deploy/eligibility-pipeline/Dockerfile.cli
+    image: eligibility/cli:${ELIGIBILITY_VERSION:-dev}
+    container_name: eligibility-cli
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      # Local timestamps (e.g. the normalize-umls ETA finish time). Defaults to UTC;
+      # set TZ in .env (e.g. TZ=Europe/London). Needs tzdata, which Dockerfile.cli installs.
+      - TZ=${TZ:-UTC}
+    # Reach a Postgres running on the host via Host=host.docker.internal in .env.
+    # Built in on Docker Desktop; REQUIRED on Linux Docker Engine to resolve it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Disable IPv6 inside the container so host.docker.internal resolves/connects
+    # over IPv4 only. Without this, an IPv6 address can be tried first and fail
+    # with "Network unreachable" (the container has no IPv6 route), even though
+    # the IPv4 path to the host works.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    # Idle so the container stays up; real work runs via `docker exec`. `tail` is
+    # busybox-safe on the alpine runtime (older busybox `sleep` rejects "infinity").
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+volumes:
+  # Named volume for the web host's DataProtection keys (auth cookie + CSRF).
+  dataprotection-keys:
