@@ -77,7 +77,7 @@ public class SeedControllerTests
         var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Create database seed", await response.Content.ReadAsStringAsync());
+        Assert.Contains("id=\"create-seed-btn\"", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class SeedControllerTests
 
         var response = await client.SendAsync(request);
 
-        Assert.DoesNotContain("Create database seed", await response.Content.ReadAsStringAsync());
+        Assert.DoesNotContain("id=\"create-seed-btn\"", await response.Content.ReadAsStringAsync());
     }
 
     // ===== controller logic (direct, no host, no pg_dump) =====

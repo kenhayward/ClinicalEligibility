@@ -3148,6 +3148,49 @@ ON CONFLICT (nct_id) DO UPDATE SET
         Return sb.ToString()
     End Function
 
+    Public Async Function GetEmbeddingStatsAsync(cancellationToken As CancellationToken) As Task(Of EmbeddingStats) _
+            Implements IPostgresGateway.GetEmbeddingStatsAsync
+        Const Sql As String = "
+SELECT model, count(*) AS n
+FROM public.eligibility_study_embedding
+GROUP BY model
+ORDER BY n DESC"
+        Dim models As New List(Of EmbeddingModelCount)()
+        Dim total As Long = 0
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        Dim model = If(reader.IsDBNull(0), "", reader.GetString(0))
+                        Dim n = reader.GetInt64(1)
+                        models.Add(New EmbeddingModelCount(model, n))
+                        total += n
+                    End While
+                End Using
+            End Using
+        End Using
+        Return New EmbeddingStats(total, models)
+    End Function
+
+    Public Async Function ClearStudyEmbeddingsAsync(cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.ClearStudyEmbeddingsAsync
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Dim removed As Long
+            Using countCmd = conn.CreateCommand()
+                countCmd.CommandText = "SELECT count(*) FROM public.eligibility_study_embedding"
+                removed = CLng(Await countCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False))
+            End Using
+            Using truncCmd = conn.CreateCommand()
+                ' TRUNCATE (not DELETE) - it is the fast, space-reclaiming clear for the
+                ' full ~280k-row index and the import restores a fresh set right after.
+                truncCmd.CommandText = "TRUNCATE TABLE public.eligibility_study_embedding"
+                Await truncCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+            Return removed
+        End Using
+    End Function
+
     ' ============ Authentication / users (output DB, app_user) ============
 
     Public Async Function CountUsersAsync(cancellationToken As CancellationToken) As Task(Of Integer) _

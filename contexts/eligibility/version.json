@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 8, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 9, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.9",
+      "releaseDate": "2026-07-15",
+      "enhancements": [
+        "Embeddings export and import (Owners): share the corpus similarity index that powers the Authoring Analysis tab's Find Similar. The owner 'Database seed & embeddings' dialog now has an Embeddings tab that exports the index to a downloadable archive (named with the embedding model, since similarity is only comparable within one model) and imports one back - either from a file or a release-asset URL. Importing clears the existing index first, then loads the archive, so others can pick up your published embeddings without re-running embed-studies. The dialog shows the current index (row count and model) and reports what was exported or imported."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.8",
       "releaseDate": "2026-07-15",

@@ -148,7 +148,15 @@ pipeline does not use it, and the plain CRUD authoring workflow (create study,
 edit criteria, export CSV) works without it. Normalize on the Analysis tab uses
 the `Llm` endpoint. The shipped seed does not include the embedding index, so a
 fresh quickstart must run Tools -> embed-studies (with these keys set) before
-Find Similar returns results.
+Find Similar returns results - or **import** a pre-built index (see below).
+
+An owner can also **export/import** the built index without rebuilding it, from the
+account menu's "Database seed & embeddings" dialog (Embeddings tab): export dumps
+the index to a downloadable archive named with the model; import (from a file or a
+release-asset URL) clears the existing index and loads the archive. Because cosine
+similarity is only meaningful within one model, after importing set `Embedding:Model`
+to the imported model. This is how a published embeddings release lights up Find
+Similar on another instance with no embedding endpoint or backfill run.
 
 | Key | Default | Notes |
 |-----|---------|-------|

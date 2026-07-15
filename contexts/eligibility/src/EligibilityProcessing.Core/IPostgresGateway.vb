@@ -584,6 +584,21 @@ Public Interface IPostgresGateway
             sourceText As String,
             cancellationToken As CancellationToken) As Task
 
+    ''' <summary>
+    ''' Aggregate stats for the eligibility_study_embedding corpus index: total row
+    ''' count and the per-model breakdown. Backs the owner-only embeddings
+    ''' export/import surface, which surfaces the model so an imported set stays
+    ''' comparable for Find Similar.
+    ''' </summary>
+    Function GetEmbeddingStatsAsync(cancellationToken As CancellationToken) As Task(Of EmbeddingStats)
+
+    ''' <summary>
+    ''' Empties eligibility_study_embedding (TRUNCATE), returning the number of rows
+    ''' that were present. Used before an embeddings import so the imported set fully
+    ''' replaces the existing one.
+    ''' </summary>
+    Function ClearStudyEmbeddingsAsync(cancellationToken As CancellationToken) As Task(Of Long)
+
     ' ============ Authentication / users (output DB, app_user) ============
 
     ''' <summary>Total number of rows in app_user. Zero triggers first-run bootstrap.</summary>
