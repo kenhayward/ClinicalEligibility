@@ -41,3 +41,6 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+          # Required by gitleaks-action@v2 to scan pull_request events (it diffs
+          # via the GitHub API). The token is the automatic, per-run GITHUB_TOKEN.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
