@@ -107,6 +107,15 @@ services:
         condition: service_completed_successfully
     ports:
       - "${WEB_PORT:-8091}:8080"
+    # Inject .env INTO the container so any app setting (Umls__Backend, Llm__*,
+    # etc.) placed there reaches the app. Compose's top-level .env only does
+    # ${VAR} substitution in this file - it is NOT passed to containers - so
+    # without this an app setting in .env would be silently ignored. Optional so
+    # the zero-config `docker compose up` (no .env) still works. The explicit
+    # `environment:` below wins over .env for the keys it sets.
+    env_file:
+      - path: .env
+        required: false
     environment:
       ASPNETCORE_URLS: http://+:8080
       TZ: ${TZ:-UTC}

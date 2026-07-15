@@ -13,7 +13,9 @@
 *.userosscache
 *.sln.docstates
 *.env
-# But keep example templates — they're the documented config shape.
+# Also cover dotted variants (.env.local, .env.production, ...) that *.env misses.
+.env.*
+# But keep example templates - they're the documented config shape.
 !.env.example
 
 # Claude Code per-developer state (tool allow-lists, etc.). Project-wide

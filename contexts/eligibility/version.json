@@ -1,7 +1,16 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 4, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 5, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.5",
+      "releaseDate": "2026-07-15",
+      "enhancements": [],
+      "fixes": [
+        "Quickstart: the web service now reads deploy/quickstart/.env, so app settings placed there (e.g. Umls__Backend, Llm__*) actually reach the dashboard. Previously Compose used .env only for ${VAR} substitution inside the compose file and never injected it into the container, so those settings were silently ignored and the app fell back to its built-in defaults. The .env is loaded as an optional env_file, so the zero-config 'docker compose up' still works.",
+        "Hygiene: .gitignore now also excludes dotted dotenv variants (.env.local, .env.production, ...) that the previous *.env rule missed, while still keeping .env.example tracked - so an env file with real secrets cannot be committed by accident."
+      ]
+    },
     {
       "version": "0.1.4",
       "releaseDate": "2026-07-15",
