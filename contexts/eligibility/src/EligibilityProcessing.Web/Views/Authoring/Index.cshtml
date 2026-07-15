@@ -1,0 +1,25 @@
+@model EligibilityProcessing.Web.Models.AuthoringIndexViewModel
+@{
+    Layout = "_AuthoringLayout";
+    ViewData["Title"] = "Eligibility Authoring";
+}
+
+<partial name="_StudyListPanel"
+         model="@(new EligibilityProcessing.Web.Models.AuthoringListPanelModel { Studies = Model.Studies })" />
+
+<main class="authoring-main">
+    @if (TempData["AuthoringStatus"] is string status)
+    {
+        <div class="alert alert-info" role="alert">@status</div>
+    }
+    @if (Model.HasError)
+    {
+        <div class="alert alert-warning" role="alert">
+            <strong>Backend unavailable.</strong> @Model.ErrorMessage
+        </div>
+    }
+
+    <div class="authoring-empty-state text-muted">
+        <p class="mb-0">Select a study from the list, or create a new one.</p>
+    </div>
+</main>

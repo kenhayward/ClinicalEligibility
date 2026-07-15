@@ -45,6 +45,14 @@ The Postgres is also reachable directly on `localhost:5433` (db `clinical`, user
 > you'd add `Llm__*` / `Umls__*` settings and point
 > `Postgres__ConnectionStringSource` at a real AACT database.
 
+> **Authoring demo (`Authoring` in the nav).** Design a new study - optionally
+> seeded from an AACT trial's snapshot - hand-build its eligibility criteria, and
+> export them as CSV. This works out of the box. The Analysis tab's "Find Similar"
+> (mine the seeded corpus for similar trials, cluster their criteria, LLM-normalize
+> them) additionally needs the `eligibility_study_embedding` index, which the seed
+> does **not** include: set `Embedding__*` / `Llm__*` in `.env` and run
+> **Tools -> embed-studies** first to build it.
+
 ### Seed source (set one in `.env`)
 
 - **`SEED_URL`** - a GitHub Release asset URL. If the dump was byte-split because

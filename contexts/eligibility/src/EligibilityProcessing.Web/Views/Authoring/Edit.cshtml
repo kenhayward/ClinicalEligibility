@@ -1,0 +1,1166 @@
+@model EligibilityProcessing.Web.Models.AuthoringEditViewModel
+@using System.Linq
+@using System.Text.Json
+@{
+    Layout = "_AuthoringLayout";
+    ViewData["Title"] = "Eligibility Authoring";
+    var canWrite = (await AuthorizationService.AuthorizeAsync(User, "AuthorWrite")).Succeeded;
+    System.Guid? selectedId = Model.Aggregate is null ? null : Model.Study.AuthoringStudyId;
+    var listModel = new EligibilityProcessing.Web.Models.AuthoringListPanelModel
+    {
+        Studies = Model.Studies,
+        SelectedId = selectedId
+    };
+
+    // Serializes a criterion's lineage rows to the camelCase JSON the
+    // crit-sources hidden input round-trips (shape matches the Normalize
+    // response + AuthoringCriterionSourceForm).
+    Func<IReadOnlyList<EligibilityProcessing.Core.AuthoringCriterionSource>, string> sourcesJson =
+        sources => JsonSerializer.Serialize(
+            (sources ?? new List<EligibilityProcessing.Core.AuthoringCriterionSource>())
+                .Select(s => new
+                {
+                    eligibilityId = s.EligibilityId,
+                    nctId = s.NctId,
+                    criterion = s.Criterion,
+                    domain = s.Domain,
+                    concept = s.Concept,
+                    conceptCode = s.ConceptCode,
+                    semanticType = s.SemanticType,
+                    qualifier = s.Qualifier,
+                    timeWindow = s.TimeWindow,
+                    originalText = s.OriginalText,
+                    matchScore = s.MatchScore
+                }));
+}
+
+<partial name="_StudyListPanel" model="listModel" />
+
+<main class="authoring-main">
+    @if (Model.NotFound)
+    {
+        <div class="alert alert-warning" role="alert">
+            That authored study could not be found.
+        </div>
+    }
+    else if (Model.HasError)
+    {
+        <div class="alert alert-warning" role="alert">
+            <strong>Backend unavailable.</strong> @Model.ErrorMessage
+        </div>
+    }
+    else
+    {
+        var study = Model.Study;
+        var eligibility = Model.Eligibility;
+        var conditionsText = string.Join("\n", study.Conditions);
+        var interventionsText = string.Join("\n",
+            study.Interventions.Select(i => $"{i.InterventionType} | {i.Name}"));
+
+        <header class="study-header d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <h2 class="h3 mb-0 me-2 study-header-title">
+                @if (!string.IsNullOrEmpty(study.StudyId))
+                {
+                    <span class="text-muted">@study.StudyId</span><span class="text-muted mx-1">·</span>
+                }
+                @study.Label
+            </h2>
+            <small class="text-muted">
+                <span class="badge bg-secondary">@study.SourceKind</span>
+                @if (!string.IsNullOrEmpty(study.SourceRef))
+                {
+                    <span class="ms-1">@study.SourceRef</span>
+                }
+            </small>
+        </header>
+
+        @if (!string.IsNullOrEmpty(Model.StatusMessage))
+        {
+            <div class="alert alert-info" role="alert">@Model.StatusMessage</div>
+        }
+
+        @Html.AntiForgeryToken()
+
+        <ul class="nav nav-tabs authoring-tabs" id="authoring-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-overview-btn" type="button" role="tab"
+                        data-bs-toggle="tab" data-bs-target="#tab-overview"
+                        aria-controls="tab-overview" aria-selected="true">Study Overview</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-source-btn" type="button" role="tab"
+                        data-bs-toggle="tab" data-bs-target="#tab-source"
+                        aria-controls="tab-source" aria-selected="false">Source Eligibility</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-analysis-btn" type="button" role="tab"
+                        data-bs-toggle="tab" data-bs-target="#tab-analysis"
+                        aria-controls="tab-analysis" aria-selected="false">Analysis</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-criteria-btn" type="button" role="tab"
+                        data-bs-toggle="tab" data-bs-target="#tab-criteria"
+                        aria-controls="tab-criteria" aria-selected="false">Eligibility Criteria</button>
+            </li>
+        </ul>
+
+        <div class="tab-content authoring-tab-content">
+            <div class="tab-pane fade show active" id="tab-overview" role="tabpanel" aria-labelledby="tab-overview-btn">
+                    <form asp-action="SaveStudy" method="post">
+                        <input type="hidden" name="Id" value="@study.AuthoringStudyId" />
+                        <fieldset disabled="@(!canWrite)" class="border-0 p-0 m-0">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Study ID</label>
+                                @* Study ID is fixed once set. Legacy studies (created before the
+                                   V13 migration) have none, so allow setting it once; otherwise
+                                   render it read-only. The server enforces the same rule. *@
+                                @if (string.IsNullOrWhiteSpace(study.StudyId))
+                                {
+                                    <input name="StudyId" type="text" class="form-control" value="" />
+                                    <div class="form-text">Not yet set (legacy study). Assign it once here; fixed thereafter.</div>
+                                }
+                                else
+                                {
+                                    <input type="text" class="form-control" value="@study.StudyId" readonly disabled />
+                                    <div class="form-text">Set at creation and fixed thereafter.</div>
+                                }
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Label</label>
+                                <input name="Label" type="text" class="form-control" value="@study.Label" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Overall status</label>
+                                <input name="OverallStatus" type="text" class="form-control" value="@study.OverallStatus" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Brief title</label>
+                                <input name="BriefTitle" type="text" class="form-control" value="@study.BriefTitle" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Official title</label>
+                                <input name="OfficialTitle" type="text" class="form-control" value="@study.OfficialTitle" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Phase</label>
+                                <input name="Phase" type="text" class="form-control" value="@study.Phase" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Study type</label>
+                                <input name="StudyType" type="text" class="form-control" value="@study.StudyType" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Lead sponsor</label>
+                                <input name="Source" type="text" class="form-control" value="@study.Source" />
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Start date</label>
+                                <input name="StartDate" type="date" class="form-control"
+                                       value="@(study.StartDate?.ToString("yyyy-MM-dd"))" />
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Primary completion</label>
+                                <input name="PrimaryCompletionDate" type="date" class="form-control"
+                                       value="@(study.PrimaryCompletionDate?.ToString("yyyy-MM-dd"))" />
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Completion date</label>
+                                <input name="CompletionDate" type="date" class="form-control"
+                                       value="@(study.CompletionDate?.ToString("yyyy-MM-dd"))" />
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Enrollment</label>
+                                <input name="Enrollment" type="number" min="0" class="form-control"
+                                       value="@(study.Enrollment?.ToString())" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Enrollment type</label>
+                                <input name="EnrollmentType" type="text" class="form-control" value="@study.EnrollmentType" />
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Why stopped</label>
+                                <input name="WhyStopped" type="text" class="form-control" value="@study.WhyStopped" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Brief summary</label>
+                                <textarea name="BriefSummary" rows="4" class="form-control">@study.BriefSummary</textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Conditions</label>
+                                <textarea name="Conditions" rows="4" class="form-control"
+                                          placeholder="One condition per line">@conditionsText</textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Interventions</label>
+                                <textarea name="Interventions" rows="4" class="form-control"
+                                          placeholder="One per line: Type | Name">@interventionsText</textarea>
+                            </div>
+                        </div>
+                        </fieldset>
+                        @if (canWrite)
+                        {
+                            <button type="submit" class="btn btn-primary mt-3">Save Study Overview</button>
+                        }
+                    </form>
+            </div>
+
+            <div class="tab-pane fade" id="tab-source" role="tabpanel" aria-labelledby="tab-source-btn">
+                    <form asp-action="SaveEligibility" method="post">
+                        <input type="hidden" name="Id" value="@study.AuthoringStudyId" />
+                        <fieldset disabled="@(!canWrite)" class="border-0 p-0 m-0">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label">Criteria (free text)</label>
+                                <textarea name="Criteria" rows="6" class="form-control">@eligibility.Criteria</textarea>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Gender</label>
+                                <input name="Gender" type="text" class="form-control" value="@eligibility.Gender" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Minimum age</label>
+                                <input name="MinimumAge" type="text" class="form-control" value="@eligibility.MinimumAge" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Maximum age</label>
+                                <input name="MaximumAge" type="text" class="form-control" value="@eligibility.MaximumAge" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Healthy volunteers</label>
+                                <input name="HealthyVolunteers" type="text" class="form-control" value="@eligibility.HealthyVolunteers" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Sampling method</label>
+                                <input name="SamplingMethod" type="text" class="form-control" value="@eligibility.SamplingMethod" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Population</label>
+                                <input name="Population" type="text" class="form-control" value="@eligibility.Population" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Adult</label>
+                                <select name="Adult" class="form-select">
+                                    <option value="" selected="@(eligibility.Adult is null)">Unknown</option>
+                                    <option value="true" selected="@(eligibility.Adult == true)">Yes</option>
+                                    <option value="false" selected="@(eligibility.Adult == false)">No</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Child</label>
+                                <select name="Child" class="form-select">
+                                    <option value="" selected="@(eligibility.Child is null)">Unknown</option>
+                                    <option value="true" selected="@(eligibility.Child == true)">Yes</option>
+                                    <option value="false" selected="@(eligibility.Child == false)">No</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Older adult</label>
+                                <select name="OlderAdult" class="form-select">
+                                    <option value="" selected="@(eligibility.OlderAdult is null)">Unknown</option>
+                                    <option value="true" selected="@(eligibility.OlderAdult == true)">Yes</option>
+                                    <option value="false" selected="@(eligibility.OlderAdult == false)">No</option>
+                                </select>
+                            </div>
+                        </div>
+                        </fieldset>
+                        @if (canWrite)
+                        {
+                            <button type="submit" class="btn btn-primary mt-3">Save Source Eligibility</button>
+                        }
+                    </form>
+            </div>
+
+            <div class="tab-pane fade" id="tab-analysis" role="tabpanel" aria-labelledby="tab-analysis-btn">
+                    <p class="text-muted">
+                        Find processed studies similar to this one, then cluster their common
+                        eligibility criteria. Requires the study index (CLI
+                        <code>embed-studies</code>) and a configured embedding endpoint.
+                    </p>
+
+                    <div id="analysis" data-study-id="@study.AuthoringStudyId">
+                        <div class="d-flex align-items-end gap-2 mb-3 flex-wrap">
+                            <div>
+                                <label for="similar-topn" class="form-label small text-muted mb-1">Studies to consider</label>
+                                <input id="similar-topn" type="number" min="1" max="200" value="20"
+                                       class="form-control" style="width: 8rem;" />
+                            </div>
+                            <button id="find-similar-btn" type="button" class="btn btn-primary">Find similar studies</button>
+                            <div class="form-check mb-2 ms-1">
+                                <input id="match-phase-type" type="checkbox" class="form-check-input" />
+                                <label for="match-phase-type" class="form-check-label small">
+                                    Match Phase and Type
+                                </label>
+                            </div>
+                            <div>
+                                <label for="cluster-topn" class="form-label small text-muted mb-1">Top clusters per group</label>
+                                <input id="cluster-topn" type="number" min="1" max="200" value="20"
+                                       class="form-control" style="width: 8rem;" disabled />
+                            </div>
+                            <button id="cluster-btn" type="button" class="btn btn-outline-primary" disabled>
+                                Cluster criteria
+                            </button>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                            <div id="similar-status" class="small text-muted"></div>
+                            <button type="button" id="similar-toggle"
+                                    class="btn btn-link btn-sm p-0 d-none"
+                                    data-bs-toggle="collapse"
+                                    data-bs-target="#similar-results"
+                                    aria-expanded="true"
+                                    aria-controls="similar-results">Hide studies</button>
+                        </div>
+                        <div id="similar-results" class="collapse show"></div>
+
+                        <div id="cluster-section" class="mt-4" style="display:none;">
+                            <h3 class="h6">Common eligibility criteria</h3>
+                            <div id="cluster-status" class="small text-muted mt-2"></div>
+                            <div id="cluster-results" class="mt-3"></div>
+                        </div>
+                    </div>
+            </div>
+
+            <div class="tab-pane fade" id="tab-criteria" role="tabpanel" aria-labelledby="tab-criteria-btn">
+                    <p class="text-muted">
+                        The eligibility criteria for this study. Copy normalized criteria from
+                        the Analysis clusters in the previous tab, or add and edit entries directly.
+                    </p>
+
+                    <form asp-action="SaveCriteria" method="post" id="criteria-form">
+                        <input type="hidden" name="id" value="@study.AuthoringStudyId" />
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 8rem;">Type</th>
+                                        <th style="width: 8rem;">Code</th>
+                                        <th>Criterion</th>
+                                        <th class="text-end" style="width: 9rem;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="criteria-list">
+                                    @foreach (var c in Model.Criteria)
+                                    {
+                                        <tr class="criterion-row">
+                                            <td>
+                                                <select class="form-select form-select-sm crit-type">
+                                                    <option value="Inclusion" selected="@(c.Criterion != "Exclusion")">Inclusion</option>
+                                                    <option value="Exclusion" selected="@(c.Criterion == "Exclusion")">Exclusion</option>
+                                                </select>
+                                            </td>
+                                            <td class="crit-conceptcode-cell">
+                                                @if (!string.IsNullOrEmpty(c.ConceptCode))
+                                                {
+                                                    <code title="@c.Concept @(string.IsNullOrEmpty(c.SemanticType) ? "" : "— " + c.SemanticType)">@c.ConceptCode</code>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">—</span>
+                                                }
+                                            </td>
+                                            <td title="@c.SourceNote">
+                                                <textarea class="form-control form-control-sm crit-text" rows="2" readonly="@(!canWrite)">@c.NormalizedText</textarea>
+                                                <input type="hidden" class="crit-id" value="@c.AuthoringCriterionId" />
+                                                <input type="hidden" class="crit-concept" value="@c.Concept" />
+                                                <input type="hidden" class="crit-conceptcode" value="@c.ConceptCode" />
+                                                <input type="hidden" class="crit-semantictype" value="@c.SemanticType" />
+                                                <input type="hidden" class="crit-domain" value="@c.Domain" />
+                                                <input type="hidden" class="crit-sourcenote" value="@c.SourceNote" />
+                                                <input type="hidden" class="crit-manualreason" value="@c.ManualReason" />
+                                                <input type="hidden" class="crit-sources" value="@sourcesJson(c.Sources)" />
+                                                <div class="crit-sources-detail small mt-2" style="display:none;"></div>
+                                            </td>
+                                            <td class="text-end text-nowrap">
+                                                <button type="button" class="btn btn-sm btn-outline-secondary crit-sources-btn" title="Show source records">ⓘ</button>
+                                                @if (canWrite)
+                                                {
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary crit-up" title="Move up">↑</button>
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary crit-down" title="Move down">↓</button>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger crit-remove" title="Remove">✕</button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                    @if (Model.Criteria.Count == 0)
+                                    {
+                                        <tr id="criteria-empty">
+                                            <td colspan="4" class="text-muted small text-center py-3">No criteria yet.</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="d-flex gap-2 mt-3 align-items-center">
+                            @if (canWrite)
+                            {
+                                <button type="button" id="add-criterion-btn" class="btn btn-outline-secondary">Add criterion</button>
+                                <button type="submit" class="btn btn-primary">Save criteria</button>
+                            }
+                            @* Export is a read action — available to all roles. type="button" so it
+                               doesn't submit the criteria form it sits inside. *@
+                            @* Downloads two files: the criteria list and the
+                               denormalised lineage audit ({StudyId}_Eligibility_Audit.csv). *@
+                            <button type="button" id="export-criteria-btn" class="btn btn-outline-success ms-auto"
+                                    title="Downloads two CSV files: the criteria list and the lineage audit"
+                                    data-url="@Url.Action("ExportCriteria", "Authoring", new { id = study.AuthoringStudyId })"
+                                    data-audit-url="@Url.Action("ExportCriteriaAudit", "Authoring", new { id = study.AuthoringStudyId })">
+                                Export CSV
+                            </button>
+                            <span id="export-criteria-error" class="text-danger small"></span>
+                        </div>
+                    </form>
+            </div>
+        </div>
+
+        @if (canWrite)
+        {
+            <hr class="my-4" />
+
+            <form asp-action="Delete" method="post"
+                  onsubmit="return confirm('Delete this authored study? This cannot be undone.');">
+                <input type="hidden" name="id" value="@study.AuthoringStudyId" />
+                <button type="submit" class="btn btn-outline-danger">Delete study</button>
+            </form>
+        }
+    }
+</main>
+
+@section Scripts {
+    <script>
+        // Whether the current user may write authored content (AuthorWrite).
+        // Read-only roles get no JS-rendered write controls (cluster Add, row
+        // remove); the server policies are the real boundary.
+        window.authoringCanWrite = @(canWrite ? "true" : "false");
+    </script>
+    <script>
+        // Authoring tabs: restore the last-active tab from localStorage so the
+        // selection survives form-submit PRG redirects and full-page reloads.
+        // Input values inside a tab are preserved by Bootstrap automatically —
+        // tab-panes are hidden via display:none, not torn down.
+        (function () {
+            const tablist = document.getElementById("authoring-tabs");
+            if (!tablist || typeof bootstrap === "undefined") { return; }
+            const KEY = "authoring.activeTab";
+            const stored = localStorage.getItem(KEY);
+            if (stored) {
+                const btn = tablist.querySelector('[data-bs-target="' + stored + '"]');
+                if (btn) { new bootstrap.Tab(btn).show(); }
+            }
+            tablist.querySelectorAll('button[data-bs-toggle="tab"]').forEach(function (b) {
+                b.addEventListener("shown.bs.tab", function (ev) {
+                    localStorage.setItem(KEY, ev.target.dataset.bsTarget);
+                });
+            });
+        })();
+
+        // Authoring Analysis: similar-study search + criteria clustering.
+        // No-ops when #analysis is absent (NotFound / error render).
+        (function () {
+            const analysis = document.getElementById("analysis");
+            if (!analysis) { return; }
+            const studyId = analysis.dataset.studyId;
+            const tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
+            const token = tokenEl ? tokenEl.value : "";
+
+            let selectedNctIds = [];
+
+            function esc(s) {
+                const d = document.createElement("div");
+                d.textContent = (s === null || s === undefined) ? "" : String(s);
+                return d.innerHTML;
+            }
+
+            // NCT IDs shown in this Authoring → Analysis tab link out to the
+            // main dashboard's Analysis page (Home/Analysis?nctId=…) in a new
+            // tab, so authors can inspect the source trial without losing
+            // their cluster picks here. An optional tooltip (e.g. brief
+            // summary) is surfaced via the native title attribute.
+            function nctLink(nctId, tooltip) {
+                const id = nctId == null ? "" : String(nctId);
+                const tip = tooltip == null ? "" : String(tooltip).trim();
+                const titleAttr = tip ? ' title="' + esc(tip) + '"' : "";
+                return '<a href="/Home/Analysis?nctId=' + encodeURIComponent(id)
+                    + '" target="_blank" rel="noopener"' + titleAttr
+                    + '><code>' + esc(id) + '</code></a>';
+            }
+
+            async function postForm(url, fields) {
+                const fd = new FormData();
+                fd.append("__RequestVerificationToken", token);
+                Object.keys(fields).forEach(function (k) {
+                    const v = fields[k];
+                    if (Array.isArray(v)) { v.forEach(function (x) { fd.append(k, x); }); }
+                    else { fd.append(k, v); }
+                });
+                const resp = await fetch(url, { method: "POST", body: fd, headers: { "Accept": "application/json" } });
+                let body = {};
+                try { body = await resp.json(); } catch (e) { /* empty body */ }
+                return { ok: resp.ok, status: resp.status, body: body };
+            }
+
+            const findBtn = document.getElementById("find-similar-btn");
+            const similarStatus = document.getElementById("similar-status");
+            const similarResults = document.getElementById("similar-results");
+            const similarToggle = document.getElementById("similar-toggle");
+            const clusterSection = document.getElementById("cluster-section");
+
+            // Eagerly construct the collapse instance with toggle:false so
+            // later .show()/.hide() calls don't first toggle off the initial
+            // `show` class — getOrCreateInstance(el) without options defaults
+            // to toggle:true, which would briefly flash the list.
+            const similarCollapse = similarResults
+                ? bootstrap.Collapse.getOrCreateInstance(similarResults, { toggle: false })
+                : null;
+
+            // Toggle-label sync: read the collapse's own events rather than the
+            // button click, so programmatic .hide() / .show() (e.g. after the
+            // Cluster button runs) keeps the label correct.
+            if (similarResults && similarToggle) {
+                similarResults.addEventListener("shown.bs.collapse", function () {
+                    similarToggle.textContent = "Hide studies";
+                });
+                similarResults.addEventListener("hidden.bs.collapse", function () {
+                    similarToggle.textContent = "Show studies";
+                });
+            }
+
+            const clusterTopNInput = document.getElementById("cluster-topn");
+            const clusterBtnRef = document.getElementById("cluster-btn");
+
+            function setClusterControlsEnabled(enabled) {
+                if (clusterTopNInput) { clusterTopNInput.disabled = !enabled; }
+                if (clusterBtnRef) { clusterBtnRef.disabled = !enabled; }
+            }
+
+            findBtn.addEventListener("click", async function () {
+                const topN = document.getElementById("similar-topn").value || "20";
+                const matchEl = document.getElementById("match-phase-type");
+                const matchPhaseType = (matchEl && matchEl.checked) ? "true" : "false";
+                findBtn.disabled = true;
+                // Cluster controls were moved next to Find similar; disable
+                // them again whenever a fresh search starts, and re-enable
+                // only after the search returns at least one study.
+                setClusterControlsEnabled(false);
+                similarStatus.textContent = "Searching…";
+                similarResults.innerHTML = "";
+                if (similarToggle) { similarToggle.classList.add("d-none"); }
+                clusterSection.style.display = "none";
+                const r = await postForm("/Authoring/Similar",
+                    { id: studyId, topN: topN, matchPhaseType: matchPhaseType });
+                findBtn.disabled = false;
+                if (!r.ok) {
+                    similarStatus.textContent = (r.body && r.body.error) ? r.body.error : "Search failed.";
+                    return;
+                }
+                const studies = (r.body && r.body.studies) || [];
+                if (studies.length === 0) {
+                    similarStatus.textContent = "No similar studies found — has the study index been built (CLI embed-studies)?";
+                    return;
+                }
+                similarStatus.textContent = studies.length + " similar studies, most similar first. Untick any to exclude.";
+                renderSimilar(studies);
+                // Re-show the list in case it was collapsed by a prior cluster
+                // run; expose the toggle so the user can hide it again.
+                if (similarToggle) { similarToggle.classList.remove("d-none"); }
+                if (similarCollapse) { similarCollapse.show(); }
+                clusterSection.style.display = "";
+                setClusterControlsEnabled(true);
+            });
+
+            function renderSimilar(studies) {
+                let html = '<div class="table-responsive"><table class="table table-sm table-striped align-middle">';
+                html += '<thead><tr>'
+                    + '<th><input type="checkbox" id="similar-pick-all" class="form-check-input" checked '
+                    + 'aria-label="Select or deselect all studies"></th>'
+                    + '<th>NCT ID</th><th>Title</th><th>Phase</th><th>Type</th>'
+                    + '<th class="text-end">Similarity</th></tr></thead><tbody>';
+                studies.forEach(function (s) {
+                    html += '<tr>'
+                        + '<td><input type="checkbox" class="similar-pick form-check-input" value="' + esc(s.nctId) + '" checked></td>'
+                        + '<td>' + nctLink(s.nctId, s.briefSummary) + '</td>'
+                        + '<td>' + esc(s.briefTitle) + '</td>'
+                        + '<td>' + esc(s.phase) + '</td>'
+                        + '<td>' + esc(s.studyType) + '</td>'
+                        + '<td class="text-end">' + (s.similarity != null ? Number(s.similarity).toFixed(4) : "") + '</td>'
+                        + '</tr>';
+                });
+                html += '</tbody></table></div>';
+                similarResults.innerHTML = html;
+                wireSimilarSelectAll();
+            }
+
+            // The delegated row-change listener sits on similarResults and stays
+            // wired across re-renders, so it's attached once. The master
+            // checkbox is rebuilt every render — its own listener has to be
+            // (re)attached on each renderSimilar call.
+            function wireSimilarSelectAll() {
+                const master = document.getElementById("similar-pick-all");
+                if (!master) { return; }
+                master.addEventListener("change", function () {
+                    document.querySelectorAll(".similar-pick").forEach(function (c) {
+                        c.checked = master.checked;
+                    });
+                    master.indeterminate = false;
+                });
+            }
+            similarResults.addEventListener("change", function (ev) {
+                if (!ev.target || !ev.target.classList.contains("similar-pick")) { return; }
+                const master = document.getElementById("similar-pick-all");
+                if (!master) { return; }
+                const all = document.querySelectorAll(".similar-pick");
+                const checked = document.querySelectorAll(".similar-pick:checked").length;
+                master.checked = (checked === all.length && all.length > 0);
+                master.indeterminate = (checked > 0 && checked < all.length);
+            });
+
+            const clusterBtn = document.getElementById("cluster-btn");
+            const clusterStatus = document.getElementById("cluster-status");
+            const clusterResults = document.getElementById("cluster-results");
+
+            clusterBtn.addEventListener("click", async function () {
+                const picks = Array.prototype.slice
+                    .call(document.querySelectorAll(".similar-pick:checked"))
+                    .map(function (c) { return c.value; });
+                if (picks.length === 0) {
+                    clusterStatus.textContent = "Select at least one study.";
+                    return;
+                }
+                selectedNctIds = picks;
+                const topNInput = document.getElementById("cluster-topn");
+                const topN = Math.max(1, parseInt(topNInput && topNInput.value, 10) || 20);
+                clusterBtn.disabled = true;
+                clusterStatus.textContent = "Clustering…";
+                clusterResults.innerHTML = "";
+                const r = await postForm("/Authoring/Cluster", { nctIds: picks });
+                clusterBtn.disabled = false;
+                if (!r.ok) {
+                    clusterStatus.textContent = (r.body && r.body.error) ? r.body.error : "Clustering failed.";
+                    return;
+                }
+                // Drop singletons (clusters backed by a single record offer no
+                // commonality signal) then keep the top N per group.
+                const rawInc = (r.body && r.body.inclusion) || [];
+                const rawExc = (r.body && r.body.exclusion) || [];
+                const incFiltered = rawInc.filter(function (c) { return c.recordCount > 1; });
+                const excFiltered = rawExc.filter(function (c) { return c.recordCount > 1; });
+                const inc = incFiltered.slice(0, topN);
+                const exc = excFiltered.slice(0, topN);
+                clusterStatus.textContent = "Clustered " + picks.length + " studies — showing top "
+                    + inc.length + " of " + incFiltered.length + " inclusion and top "
+                    + exc.length + " of " + excFiltered.length + " exclusion clusters (≥ 2 records).";
+                clusterResults.innerHTML =
+                    renderClusterTable("Inclusion", inc)
+                    + renderClusterTable("Exclusion", exc);
+                wireExpanders();
+                // Collapse the similar-studies list so the cluster output is
+                // the primary focus. The toggle button stays visible so the
+                // user can re-expand to adjust their picks.
+                if (similarCollapse) { similarCollapse.hide(); }
+            });
+
+            function renderClusterTable(label, clusters) {
+                let html = '<h4 class="h6 mt-3">' + label + ' (' + clusters.length + ')</h4>';
+                if (clusters.length === 0) { return html + '<p class="text-muted small">None.</p>'; }
+                html += '<div class="table-responsive"><table class="table table-sm align-middle">';
+                html += '<thead><tr><th>Concept</th><th>Code</th>'
+                    + '<th style="width: 9rem;">Semantic type</th>'
+                    + '<th style="min-width: 28rem;">Normalized</th>'
+                    + '<th style="width: 5rem;"></th>'
+                    + '<th class="text-end">Studies</th>'
+                    + '<th class="text-end text-nowrap">'
+                    + '<button type="button" class="btn btn-sm btn-outline-primary normalize-all-btn">'
+                    + 'Normalize All</button></th>'
+                    + '</tr></thead><tbody>';
+                clusters.forEach(function (c, i) {
+                    const rowId = label.toLowerCase() + "-" + i;
+                    html += '<tr>'
+                        + '<td>' + esc(c.concept) + (c.resolved ? '' : ' <span class="badge bg-secondary">unresolved</span>') + '</td>'
+                        + '<td>' + (c.conceptCode ? '<code>' + esc(c.conceptCode) + '</code>' : '<span class="text-muted">—</span>') + '</td>'
+                        + '<td><small>' + esc(c.semanticType) + '</small></td>'
+                        + '<td class="cluster-normalized"></td>'
+                        + '<td class="cluster-add-cell text-nowrap"></td>'
+                        + '<td class="text-end">' + c.studyCount + '</td>'
+                        + '<td class="text-nowrap">'
+                          + '<button type="button" class="btn btn-sm btn-outline-secondary cluster-expand" '
+                          + 'data-criterion="' + esc(c.criterion) + '" data-groupkey="' + esc(c.groupKey) + '" '
+                          + 'data-row="' + rowId + '">Records</button> '
+                          + '<button type="button" class="btn btn-sm btn-outline-primary cluster-normalize" '
+                          + 'data-criterion="' + esc(c.criterion) + '" data-groupkey="' + esc(c.groupKey) + '" '
+                          + 'data-row="' + rowId + '" data-concept="' + esc(c.concept) + '" '
+                          + 'data-conceptcode="' + esc(c.conceptCode) + '" '
+                          + 'data-semantictype="' + esc(c.semanticType) + '" '
+                          + 'data-studycount="' + c.studyCount + '">Normalize</button>'
+                          + '</td>'
+                        + '</tr>';
+                    html += '<tr id="detail-' + rowId + '" style="display:none;">'
+                        + '<td colspan="7" class="bg-body-tertiary"><div class="cluster-detail small">…</div></td></tr>';
+                });
+                html += '</tbody></table></div>';
+                return html;
+            }
+
+            function wireExpanders() {
+                document.querySelectorAll(".cluster-expand").forEach(function (btn) {
+                    btn.addEventListener("click", async function () {
+                        const detailRow = document.getElementById("detail-" + btn.dataset.row);
+                        if (detailRow.style.display !== "none"
+                            && detailRow.dataset.mode === "records") {
+                            detailRow.style.display = "none";
+                            return;
+                        }
+                        detailRow.style.display = "";
+                        detailRow.dataset.mode = "records";
+                        const panel = detailRow.querySelector(".cluster-detail");
+                        panel.textContent = "Loading…";
+                        const params = new URLSearchParams();
+                        selectedNctIds.forEach(function (id) { params.append("nctIds", id); });
+                        params.append("criterion", btn.dataset.criterion);
+                        params.append("groupKey", btn.dataset.groupkey);
+                        const resp = await fetch("/Authoring/ClusterRecords?" + params.toString(),
+                            { headers: { "Accept": "application/json" } });
+                        let body = {};
+                        try { body = await resp.json(); } catch (e) { /* empty */ }
+                        if (!resp.ok) {
+                            panel.textContent = (body && body.error) ? body.error : "Failed to load records.";
+                            return;
+                        }
+                        panel.innerHTML = renderRecords((body && body.records) || []);
+                    });
+                });
+
+                document.querySelectorAll(".cluster-normalize").forEach(function (btn) {
+                    btn.addEventListener("click", function () { runNormalize(btn); });
+                });
+
+                // One .normalize-all-btn sits in each table's header column
+                // (Inclusion + Exclusion); clicking either runs the bulk
+                // action over every row in BOTH tables, so the user can use
+                // whichever is closer.
+                const normalizeAllBtns = Array.prototype.slice.call(
+                    document.querySelectorAll(".normalize-all-btn"));
+                normalizeAllBtns.forEach(function (allBtn) {
+                    allBtn.addEventListener("click", async function () {
+                        // Iterate every row's Normalize button sequentially so
+                        // the spinner UX on each row is the same as a manual
+                        // click. Sequential (not parallel) avoids stampeding
+                        // the LLM endpoint; in-flight buttons are skipped.
+                        const btns = Array.prototype.slice.call(
+                            document.querySelectorAll(".cluster-normalize"));
+                        normalizeAllBtns.forEach(function (b) { b.disabled = true; });
+                        try {
+                            for (let i = 0; i < btns.length; i++) {
+                                const label = "Normalizing " + (i + 1) + " of " + btns.length + "…";
+                                normalizeAllBtns.forEach(function (b) { b.textContent = label; });
+                                if (btns[i].disabled) { continue; }
+                                await runNormalize(btns[i]);
+                            }
+                        } finally {
+                            normalizeAllBtns.forEach(function (b) {
+                                b.textContent = "Normalize All";
+                                b.disabled = false;
+                            });
+                        }
+                    });
+                });
+            }
+
+            // Shared per-row normalize action — used by individual button
+            // clicks and by Normalize All. Renders spinner + mm:ss timer in
+            // the Normalized cell; populates the Add button on success.
+            async function runNormalize(btn) {
+                const row = btn.closest("tr");
+                const cell = row ? row.querySelector(".cluster-normalized") : null;
+                const addCell = row ? row.querySelector(".cluster-add-cell") : null;
+                if (!cell) { return; }
+                btn.disabled = true;
+                if (addCell) { addCell.innerHTML = ""; }
+                renderNormalizingStatus(cell);
+                const startMs = Date.now();
+                const tick = function () {
+                    const s = Math.floor((Date.now() - startMs) / 1000);
+                    const mm = String(Math.floor(s / 60)).padStart(2, "0");
+                    const ss = String(s % 60).padStart(2, "0");
+                    const el = cell.querySelector(".normalize-elapsed");
+                    if (el) { el.textContent = mm + ":" + ss; }
+                };
+                tick();
+                cell._normalizeTimerId = setInterval(tick, 1000);
+                try {
+                    const r = await postForm("/Authoring/Normalize", {
+                        nctIds: selectedNctIds,
+                        criterion: btn.dataset.criterion,
+                        groupKey: btn.dataset.groupkey
+                    });
+                    if (!r.ok) {
+                        cell.textContent = (r.body && r.body.error) ? r.body.error : "Normalization failed.";
+                        return;
+                    }
+                    renderNormalized(cell, btn, (r.body && r.body.normalizedText) || "",
+                        (r.body && r.body.sourceCount) || 0, (r.body && r.body.records) || []);
+                } finally {
+                    clearInterval(cell._normalizeTimerId);
+                    cell._normalizeTimerId = null;
+                    btn.disabled = false;
+                }
+            }
+
+            function renderNormalizingStatus(panel) {
+                panel.innerHTML = "";
+                const wrap = document.createElement("span");
+                wrap.className = "d-inline-flex align-items-center gap-2";
+                const spinner = document.createElement("span");
+                spinner.className = "spinner-border spinner-border-sm";
+                spinner.setAttribute("role", "status");
+                spinner.setAttribute("aria-hidden", "true");
+                const label = document.createElement("span");
+                label.textContent = "Normalizing via LLM";
+                const elapsed = document.createElement("span");
+                elapsed.className = "font-monospace text-muted normalize-elapsed";
+                elapsed.textContent = "00:00";
+                wrap.appendChild(spinner);
+                wrap.appendChild(label);
+                wrap.appendChild(elapsed);
+                panel.appendChild(wrap);
+            }
+
+            function renderNormalized(cell, btn, text, sourceCount, records) {
+                cell.innerHTML = "";
+                // Surface the LLM provenance as a hover tooltip on the cell —
+                // takes no vertical space, still discoverable. Native title
+                // works without extra Bootstrap tooltip init.
+                cell.title = "Normalized from " + sourceCount
+                    + " phrasing(s) — edit if needed, then copy:";
+                const box = document.createElement("textarea");
+                box.className = "form-control form-control-sm cluster-normalized-text";
+                box.rows = 2;
+                box.value = text;
+                cell.appendChild(box);
+
+                // Add button lives in the adjacent cell (cluster-add-cell), to
+                // the right of the Normalized column.
+                const row = cell.parentElement;
+                const addCell = row ? row.querySelector(".cluster-add-cell") : null;
+                if (!addCell) { return; }
+                addCell.innerHTML = "";
+                // Read-only roles can normalize/preview but not add to the study.
+                if (!window.authoringCanWrite) { return; }
+                const addBtn = document.createElement("button");
+                addBtn.type = "button";
+                addBtn.className = "btn btn-sm btn-success";
+                addBtn.textContent = "Add";
+                addBtn.addEventListener("click", function () {
+                    if (typeof window.authoringAddCriterion !== "function") { return; }
+                    window.authoringAddCriterion({
+                        criterion: btn.dataset.criterion,
+                        normalizedText: box.value,
+                        concept: btn.dataset.concept || "",
+                        conceptCode: btn.dataset.conceptcode || "",
+                        semanticType: btn.dataset.semantictype || "",
+                        domain: "",
+                        sourceNote: "From cluster: " + (btn.dataset.concept || btn.dataset.groupkey)
+                            + " (" + btn.dataset.studycount + " studies)",
+                        sources: records || []
+                    });
+                    addBtn.textContent = "Added ✓";
+                    addBtn.disabled = true;
+                });
+                addCell.appendChild(addBtn);
+                // Reflect any pre-existing criterion that already matches this
+                // cluster's (type, code); also handles re-renders after the
+                // user has been editing the criteria list.
+                syncAddButtons();
+            }
+
+            // De-dup the cluster Add buttons against the Eligibility Criteria
+            // tab: if a row's (criterion type, concept code) already appears
+            // there, disable Add. Empty concept codes are skipped — without a
+            // stable identifier we can't safely dedupe, and unresolved
+            // clusters shouldn't all be locked against each other.
+            function syncAddButtons() {
+                const existing = new Set();
+                document.querySelectorAll("#criteria-list .criterion-row").forEach(function (r) {
+                    const t = r.querySelector(".crit-type");
+                    const c = r.querySelector(".crit-conceptcode");
+                    const type = t ? t.value : "Inclusion";
+                    const code = c ? c.value : "";
+                    if (code) { existing.add(type + "|" + code); }
+                });
+                document.querySelectorAll(".cluster-normalize").forEach(function (cn) {
+                    const r = cn.closest("tr");
+                    const addBtn = r ? r.querySelector(".cluster-add-cell button") : null;
+                    if (!addBtn) { return; }
+                    const code = cn.dataset.conceptcode || "";
+                    if (!code) { return; }
+                    const type = cn.dataset.criterion || "Inclusion";
+                    if (existing.has(type + "|" + code)) {
+                        addBtn.textContent = "Added ✓";
+                        addBtn.disabled = true;
+                    } else {
+                        addBtn.textContent = "Add";
+                        addBtn.disabled = false;
+                    }
+                });
+            }
+            // Expose so the criteria-form IIFE can re-sync on add / remove /
+            // type-change. The criteria list lives outside this IIFE.
+            window.authoringSyncAddButtons = syncAddButtons;
+
+            function renderRecords(recs) {
+                if (recs.length === 0) { return '<span class="text-muted">No records.</span>'; }
+                let html = '<table class="table table-sm mb-0"><thead><tr><th>NCT ID</th><th>Original text</th>'
+                    + '<th>Qualifier</th><th>Time window</th><th class="text-end">Score</th></tr></thead><tbody>';
+                recs.forEach(function (r) {
+                    html += '<tr><td>' + nctLink(r.nctId) + '</td>'
+                        + '<td>' + esc(r.originalText) + '</td>'
+                        + '<td>' + esc(r.qualifier) + '</td>'
+                        + '<td>' + esc(r.timeWindow) + '</td>'
+                        + '<td class="text-end">' + (r.matchScore != null ? r.matchScore : "") + '</td></tr>';
+                });
+                html += '</tbody></table>';
+                return html;
+            }
+        })();
+
+        // Authored criteria list: add / edit / reorder / remove rows, and
+        // receive copies from the Analysis normalize panels. Indexed input
+        // names are (re)assigned just before submit so MVC binds the list.
+        (function () {
+            const form = document.getElementById("criteria-form");
+            if (!form) { return; }
+            const list = document.getElementById("criteria-list");
+
+            function esc(s) {
+                const d = document.createElement("div");
+                d.textContent = (s === null || s === undefined) ? "" : String(s);
+                return d.innerHTML.replace(/"/g, "&quot;");
+            }
+
+            function rowHtml(d) {
+                const isExcl = (d.criterion === "Exclusion");
+                // Code-cell tooltip surfaces the concept + semantic type that
+                // arrived from the cluster so the user can see where the row
+                // came from without an extra column.
+                const codeTooltip = (d.concept || "")
+                    + (d.semanticType ? " — " + d.semanticType : "");
+                const codeCell = d.conceptCode
+                    ? '<code title="' + esc(codeTooltip) + '">' + esc(d.conceptCode) + '</code>'
+                    : '<span class="text-muted">&mdash;</span>';
+                return '<td>'
+                    + '<select class="form-select form-select-sm crit-type">'
+                    + '<option value="Inclusion"' + (isExcl ? '' : ' selected') + '>Inclusion</option>'
+                    + '<option value="Exclusion"' + (isExcl ? ' selected' : '') + '>Exclusion</option>'
+                    + '</select>'
+                    + '</td>'
+                    + '<td class="crit-conceptcode-cell">' + codeCell + '</td>'
+                    + '<td' + (d.sourceNote ? ' title="' + esc(d.sourceNote) + '"' : '') + '>'
+                    + '<textarea class="form-control form-control-sm crit-text" rows="2"' + (window.authoringCanWrite ? '' : ' readonly') + '>' + esc(d.normalizedText) + '</textarea>'
+                    + '<input type="hidden" class="crit-id" value="' + esc(d.id || "") + '">'
+                    + '<input type="hidden" class="crit-concept" value="' + esc(d.concept) + '">'
+                    + '<input type="hidden" class="crit-conceptcode" value="' + esc(d.conceptCode) + '">'
+                    + '<input type="hidden" class="crit-semantictype" value="' + esc(d.semanticType) + '">'
+                    + '<input type="hidden" class="crit-domain" value="' + esc(d.domain) + '">'
+                    + '<input type="hidden" class="crit-sourcenote" value="' + esc(d.sourceNote) + '">'
+                    + '<input type="hidden" class="crit-manualreason" value="' + esc(d.manualReason) + '">'
+                    + '<input type="hidden" class="crit-sources" value="' + esc(JSON.stringify(d.sources || [])) + '">'
+                    + '<div class="crit-sources-detail small mt-2" style="display:none;"></div>'
+                    + '</td>'
+                    + '<td class="text-end text-nowrap">'
+                    + '<button type="button" class="btn btn-sm btn-outline-secondary crit-sources-btn" title="Show source records">&#9432;</button> '
+                    + (window.authoringCanWrite
+                        ? '<button type="button" class="btn btn-sm btn-outline-secondary crit-up" title="Move up">&uarr;</button> '
+                          + '<button type="button" class="btn btn-sm btn-outline-secondary crit-down" title="Move down">&darr;</button> '
+                          + '<button type="button" class="btn btn-sm btn-outline-danger crit-remove" title="Remove">&times;</button>'
+                        : '')
+                    + '</td>';
+            }
+
+            function addCriterion(d) {
+                d = d || {};
+                const empty = document.getElementById("criteria-empty");
+                if (empty) { empty.remove(); }
+                const row = document.createElement("tr");
+                row.className = "criterion-row";
+                row.innerHTML = rowHtml({
+                    criterion: d.criterion === "Exclusion" ? "Exclusion" : "Inclusion",
+                    normalizedText: d.normalizedText || "",
+                    concept: d.concept || "",
+                    conceptCode: d.conceptCode || "",
+                    semanticType: d.semanticType || "",
+                    domain: d.domain || "",
+                    sourceNote: d.sourceNote || "",
+                    manualReason: d.manualReason || "",
+                    sources: d.sources || []
+                });
+                list.appendChild(row);
+                row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                syncAdd();
+                return row;
+            }
+            window.authoringAddCriterion = addCriterion;
+
+            // The Analysis IIFE exposes its dedup pass on window — call it
+            // whenever this list changes so cluster Add buttons reflect the
+            // current (type, code) set.
+            function syncAdd() {
+                if (typeof window.authoringSyncAddButtons === "function") {
+                    window.authoringSyncAddButtons();
+                }
+            }
+
+            const addBtn = document.getElementById("add-criterion-btn");
+            if (addBtn) {
+                addBtn.addEventListener("click", function () {
+                    const row = addCriterion({});
+                    if (!row) { return; }
+                    // A manually-added criterion has no source records, so open
+                    // its expansion to reveal the reasoning box, then put the
+                    // cursor in the criterion text ready to type.
+                    toggleSources(row);
+                    const text = row.querySelector(".crit-text");
+                    if (text) { text.focus(); }
+                });
+            }
+
+            list.addEventListener("click", function (ev) {
+                const btn = ev.target.closest("button");
+                if (!btn) { return; }
+                const row = btn.closest(".criterion-row");
+                if (!row) { return; }
+                if (btn.classList.contains("crit-remove")) {
+                    row.remove();
+                    syncAdd();
+                } else if (btn.classList.contains("crit-up")) {
+                    const prev = row.previousElementSibling;
+                    if (prev) { list.insertBefore(row, prev); }
+                } else if (btn.classList.contains("crit-down")) {
+                    const next = row.nextElementSibling;
+                    if (next) { list.insertBefore(next, row); }
+                } else if (btn.classList.contains("crit-sources-btn")) {
+                    toggleSources(row);
+                }
+            });
+
+            // Lineage: toggle the inline list of source records this criterion was
+            // normalized from. Rendered lazily from the row's crit-sources hidden
+            // JSON each time it opens, so it reflects edits / re-adds.
+            function toggleSources(row) {
+                const detail = row.querySelector(".crit-sources-detail");
+                if (!detail) { return; }
+                if (detail.style.display !== "none") {
+                    detail.style.display = "none";
+                    return;
+                }
+                const input = row.querySelector(".crit-sources");
+                let recs = [];
+                try { recs = JSON.parse(input && input.value ? input.value : "[]"); } catch (e) { recs = []; }
+                if (recs.length > 0) {
+                    // Cluster-derived: show the source-record lineage.
+                    detail.innerHTML = renderSourceRecords(recs);
+                } else {
+                    // Manually-added (no lineage): show/edit the reasoning instead.
+                    const reasonInput = row.querySelector(".crit-manualreason");
+                    detail.innerHTML = renderManualReason(reasonInput ? reasonInput.value : "");
+                    const ta = detail.querySelector(".crit-reason-edit");
+                    if (ta && reasonInput) {
+                        // The hidden input is canonical — keep it in sync so the
+                        // value survives collapsing / re-rendering this panel.
+                        ta.addEventListener("input", function () { reasonInput.value = ta.value; });
+                    }
+                }
+                detail.style.display = "";
+            }
+
+            // For a manually-added criterion (no source records), the expansion
+            // panel captures the author's reasoning instead of a lineage table.
+            function renderManualReason(reason) {
+                if (window.authoringCanWrite) {
+                    return '<label class="form-label small text-muted mb-1">Reasoning for manual addition</label>'
+                        + '<textarea class="form-control form-control-sm crit-reason-edit" rows="2"'
+                        + ' placeholder="Describe why this criterion was added manually">' + esc(reason) + '</textarea>';
+                }
+                return reason
+                    ? '<div><span class="text-muted">Reasoning for manual addition:</span> ' + esc(reason) + '</div>'
+                    : '<span class="text-muted">No reasoning provided.</span>';
+            }
+
+            function renderSourceRecords(recs) {
+                if (!recs || recs.length === 0) {
+                    return '<span class="text-muted">No source records.</span>';
+                }
+                let html = '<table class="table table-sm mb-0"><thead><tr>'
+                    + '<th>NCT ID</th><th>Original text</th><th>Qualifier</th>'
+                    + '<th>Time window</th><th class="text-end">Score</th></tr></thead><tbody>';
+                recs.forEach(function (r) {
+                    const nct = r.nctId == null ? "" : String(r.nctId);
+                    html += '<tr>'
+                        + '<td><a href="/Home/Analysis?nctId=' + encodeURIComponent(nct)
+                        + '" target="_blank" rel="noopener"><code>' + esc(nct) + '</code></a></td>'
+                        + '<td>' + esc(r.originalText) + '</td>'
+                        + '<td>' + esc(r.qualifier) + '</td>'
+                        + '<td>' + esc(r.timeWindow) + '</td>'
+                        + '<td class="text-end">' + (r.matchScore != null ? esc(r.matchScore) : "") + '</td>'
+                        + '</tr>';
+                });
+                html += '</tbody></table>';
+                return html;
+            }
+
+            // Switching Inclusion <-> Exclusion changes the dedup key, so the
+            // matching cluster Add button may need to flip enabled/disabled.
+            list.addEventListener("change", function (ev) {
+                if (ev.target && ev.target.classList.contains("crit-type")) {
+                    syncAdd();
+                }
+            });
+
+            form.addEventListener("submit", function () {
+                const rows = list.querySelectorAll(".criterion-row");
+                rows.forEach(function (row, i) {
+                    const set = function (sel, field) {
+                        const el = row.querySelector(sel);
+                        if (el) { el.name = "criteria[" + i + "]." + field; }
+                    };
+                    set(".crit-id", "Id");
+                    set(".crit-type", "Criterion");
+                    set(".crit-text", "NormalizedText");
+                    set(".crit-concept", "Concept");
+                    set(".crit-conceptcode", "ConceptCode");
+                    set(".crit-semantictype", "SemanticType");
+                    set(".crit-domain", "Domain");
+                    set(".crit-sourcenote", "SourceNote");
+                    set(".crit-manualreason", "ManualReason");
+                    set(".crit-sources", "SourcesJson");
+                });
+            });
+        })();
+    </script>
+    <script>
+        // Export the criteria list to CSV via the reusable window.downloadFile
+        // helper (site.js). Available to all roles — it's a read.
+        (function () {
+            const btn = document.getElementById("export-criteria-btn");
+            if (!btn) return;
+            const err = document.getElementById("export-criteria-error");
+            btn.addEventListener("click", async function () {
+                if (typeof window.downloadFile !== "function") return;
+                if (err) err.textContent = "";
+                const original = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = "Exporting…";
+                try {
+                    await window.downloadFile(btn.dataset.url, "Eligibility.csv");
+                    // Second file: the denormalised lineage audit. The server's
+                    // Content-Disposition supplies the {StudyId}_Eligibility_Audit.csv name.
+                    if (btn.dataset.auditUrl) {
+                        await window.downloadFile(btn.dataset.auditUrl, "Eligibility_Audit.csv");
+                    }
+                } catch (e) {
+                    if (err) err.textContent = e.message;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = original;
+                }
+            });
+        })();
+    </script>
+}

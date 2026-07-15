@@ -247,15 +247,13 @@ per AACT trial that has `public.eligibility` rows. *(V7; `embedding` pinned to
 
 ---
 
-## Authoring tables (legacy)
+## Authoring tables
 
-> **Legacy note:** these `public.authoring_*` tables are **legacy**. They backed
-> the original Authoring feature (designing new studies from the processed-trial
-> corpus); its UI has been removed and the tables are **no longer written**. They
-> are still created by migrations V6/V10/V12/V13/V14 and retained read-only
-> pending a follow-up cleanup that drops them and the now-unreachable authoring
-> gateway code. The `eligibility_study_embedding` corpus index (below) is NOT
-> legacy - it is still produced by `embed-studies`.
+> These `public.authoring_*` tables back the **Authoring** feature (designing new,
+> not-yet-registered studies from the processed-trial corpus). Created by
+> migrations V6/V10/V12/V13/V14, written by the Authoring UI (`/Authoring`). The
+> `eligibility_study_embedding` corpus index (below) feeds the Analysis tab's
+> "Find Similar" and is produced by `embed-studies`.
 
 All separate from AACT-extracted data. Real FKs with `ON DELETE CASCADE`.
 

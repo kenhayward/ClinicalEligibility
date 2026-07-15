@@ -1,0 +1,56 @@
+@*
+    Create-study modal. Mode dropdown switches between blank / AACT trial /
+    authored study; the Reference field is hidden unless a source is chosen.
+    Submits to the same POST /Authoring/Create that the old inline forms used.
+*@
+<div class="modal fade" id="createStudyModal" tabindex="-1" aria-labelledby="createStudyModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form asp-controller="Authoring" asp-action="Create" method="post">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createStudyModalLabel">Create study</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body d-flex flex-column gap-3">
+                    <div>
+                        <label for="create-mode" class="form-label small text-muted mb-1">Source</label>
+                        <select id="create-mode" name="mode" class="form-select">
+                            <option value="blank" selected>Blank study</option>
+                            <option value="aact">Copy from AACT trial (NCT ID)</option>
+                            <option value="authored">Copy from authored study (id)</option>
+                        </select>
+                    </div>
+                    <div id="create-ref-wrap" hidden>
+                        <label for="create-ref" class="form-label small text-muted mb-1">Reference</label>
+                        <input id="create-ref" name="sourceRef" type="text" class="form-control"
+                               placeholder="NCT01234567 or an authored study id" />
+                    </div>
+                    <div>
+                        <label for="create-study-id" class="form-label small text-muted mb-1">Study ID</label>
+                        <input id="create-study-id" name="studyId" type="text" class="form-control"
+                               placeholder="Unique study identifier (e.g. protocol number)" required />
+                    </div>
+                    <div>
+                        <label for="create-label" class="form-label small text-muted mb-1">Label</label>
+                        <input id="create-label" name="label" type="text" class="form-control"
+                               placeholder="Working name for the study" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">OK</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+    (function () {
+        const sel = document.getElementById("create-mode");
+        const wrap = document.getElementById("create-ref-wrap");
+        if (!sel || !wrap) { return; }
+        function sync() { wrap.hidden = (sel.value === "blank"); }
+        sel.addEventListener("change", sync);
+        sync();
+    })();
+</script>
