@@ -50,8 +50,9 @@ The Postgres is also reachable directly on `localhost:5433` (db `clinical`, user
 > export them as CSV. This works out of the box. The Analysis tab's "Find Similar"
 > (mine the seeded corpus for similar trials, cluster their criteria, LLM-normalize
 > them) additionally needs the `eligibility_study_embedding` index, which the seed
-> does **not** include: set `Embedding__*` / `Llm__*` in `.env` and run
-> **Tools -> embed-studies** first to build it.
+> does **not** include. Either set `Embedding__*` / `Llm__*` in `.env` and run
+> **Tools -> embed-studies** to build it, or import a pre-built index from the owner
+> account menu ("Database seed & embeddings" -> Embeddings tab -> Import).
 
 ### Seed source (set one in `.env`)
 
@@ -78,10 +79,11 @@ Six tables, **data only** (the migration framework owns the schema):
 | `eligibility_failed` | trials whose extraction failed (for re-run from the dashboard) |
 | `eligibility_umls_retry` | UMLS-retry bookkeeping |
 
-It deliberately **excludes**: `eligibility_study_embedding` (large, unused here,
-rebuildable via `elig embed-studies`), the licensed `umls.*` Metathesaurus (load
-it yourself with `elig load-umls`), and PII (`app_user`, `audit_log` - the app
-bootstraps a fresh Owner on first run).
+It deliberately **excludes**: `eligibility_study_embedding` (large; rebuild it with
+`elig embed-studies`, or import a pre-built index from the owner "Database seed &
+embeddings" dialog - see the Authoring note above), the licensed `umls.*`
+Metathesaurus (load it yourself with `elig load-umls`), and PII (`app_user`,
+`audit_log` - the app bootstraps a fresh Owner on first run).
 
 ## Tear down
 

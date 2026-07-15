@@ -1143,6 +1143,16 @@ Friend NotInheritable Class ThrowingGateway
         Throw New NotImplementedException()
     End Function
 
+    Public Function GetEmbeddingStatsAsync(cancellationToken As CancellationToken) As Task(Of EmbeddingStats) _
+            Implements IPostgresGateway.GetEmbeddingStatsAsync
+        Throw New NotImplementedException()
+    End Function
+
+    Public Function ClearStudyEmbeddingsAsync(cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.ClearStudyEmbeddingsAsync
+        Throw New NotImplementedException()
+    End Function
+
     Public Function SelectNextTrialsAsync(
             excludedNctIds As IReadOnlyList(Of String),
             direction As TrialSelectionDirection,

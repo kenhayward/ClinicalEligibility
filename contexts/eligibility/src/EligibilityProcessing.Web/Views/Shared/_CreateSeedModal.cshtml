@@ -1,59 +1,143 @@
 @*
-    Create Database Seed modal (Owner only). Runs pg_dump (server-side, in the
-    SeedJobRunner background service) to produce a loader-compatible seed of the six
-    seed tables, shows live progress by polling /Seed/State, and offers the result
-    for download. The dump is read-only; nothing in the database is modified.
+    Owner-only "Database seed & embeddings" modal. Two tabs:
+      - Database seed: runs pg_dump (server-side, SeedJobRunner) to produce a
+        loader-compatible seed of the six seed tables and offers it for download.
+        Read-only; nothing in the database changes.
+      - Embeddings: export (pg_dump) or import (pg_restore, clearing first) the
+        eligibility_study_embedding corpus index via EmbeddingsJobRunner. Import
+        is destructive - it clears existing embeddings before loading the archive.
+    Both jobs share the RunGate, so only one runs at a time (across seed, embeddings,
+    the pipeline, and the maintenance tools). One shared anti-forgery token serves
+    every POST in this modal.
 *@
 <div class="modal fade" id="createSeedModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Create database seed</h5>
+                <h5 class="modal-title">Database seed &amp; embeddings</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 @Html.AntiForgeryToken()
-                <div id="cs-error" class="alert alert-danger d-none py-2"></div>
 
-                <p class="small text-muted mb-2">
-                    Dumps the six seed tables (<code>eligibility</code>, <code>eligibility_study</code>,
-                    <code>eligibility_study_detail</code>, <code>eligibility_run</code>,
-                    <code>eligibility_failed</code>, <code>eligibility_umls_retry</code>) into a
-                    single compressed archive, in the exact format the quickstart seed loader
-                    restores. This is a read-only dump - nothing in the database changes. Use it
-                    to publish a new seed release as coverage grows.
-                </p>
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="seed-tab-btn" data-bs-toggle="tab"
+                                data-bs-target="#seed-pane" type="button" role="tab">Database seed</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="emb-tab-btn" data-bs-toggle="tab"
+                                data-bs-target="#emb-pane" type="button" role="tab">Embeddings</button>
+                    </li>
+                </ul>
 
-                @* Idle / confirm *@
-                <div id="cs-confirm">
-                    <p class="small mb-0">This can take a few minutes for the full corpus. Start now?</p>
-                </div>
+                <div class="tab-content">
+                    @* ===================== Database seed tab ===================== *@
+                    <div class="tab-pane fade show active" id="seed-pane" role="tabpanel">
+                        <div id="cs-error" class="alert alert-danger d-none py-2"></div>
 
-                @* Progress *@
-                <div id="cs-progress" class="d-none">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span class="badge bg-secondary" id="cs-status">running</span>
-                        <span class="small text-muted"><span id="cs-elapsed">0</span>s</span>
+                        <p class="small text-muted mb-2">
+                            Dumps the six seed tables (<code>eligibility</code>, <code>eligibility_study</code>,
+                            <code>eligibility_study_detail</code>, <code>eligibility_run</code>,
+                            <code>eligibility_failed</code>, <code>eligibility_umls_retry</code>) into a
+                            single compressed archive, in the exact format the quickstart seed loader
+                            restores. This is a read-only dump - nothing in the database changes. Use it
+                            to publish a new seed release as coverage grows.
+                        </p>
+
+                        <div id="cs-confirm">
+                            <p class="small mb-0">This can take a few minutes for the full corpus. Start now?</p>
+                        </div>
+
+                        <div id="cs-progress" class="d-none">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="badge bg-secondary" id="cs-status">running</span>
+                                <span class="small text-muted"><span id="cs-elapsed">0</span>s</span>
+                            </div>
+                            <div class="progress mb-1" style="height:1rem;">
+                                <div id="cs-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width:0%;">0%</div>
+                            </div>
+                            <div class="small text-muted" id="cs-detail">Preparing...</div>
+                        </div>
+
+                        <div id="cs-result" class="d-none">
+                            <div class="alert alert-success py-2 mb-0">
+                                Seed created: <strong id="cs-file"></strong> (<span id="cs-size"></span>).
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2 mt-3">
+                            <button type="button" class="btn btn-danger btn-sm d-none" id="cs-cancel">Cancel dump</button>
+                            <button type="button" class="btn btn-success btn-sm d-none" id="cs-download">Download</button>
+                            <button type="button" class="btn btn-primary btn-sm" id="cs-start">Create seed</button>
+                        </div>
                     </div>
-                    <div class="progress mb-1" style="height:1rem;">
-                        <div id="cs-bar" class="progress-bar progress-bar-striped progress-bar-animated"
-                             role="progressbar" style="width:0%;">0%</div>
-                    </div>
-                    <div class="small text-muted" id="cs-detail">Preparing...</div>
-                </div>
 
-                @* Result *@
-                <div id="cs-result" class="d-none">
-                    <div class="alert alert-success py-2 mb-0">
-                        Seed created: <strong id="cs-file"></strong> (<span id="cs-size"></span>).
+                    @* ===================== Embeddings tab ===================== *@
+                    <div class="tab-pane fade" id="emb-pane" role="tabpanel">
+                        <div id="eb-error" class="alert alert-danger d-none py-2"></div>
+
+                        <p class="small text-muted mb-2">
+                            Export or import the corpus similarity index (<code>eligibility_study_embedding</code>) -
+                            the vectors behind the Authoring Analysis tab's <em>Find Similar</em>. This is separate
+                            from the database seed. Publish an export as a release asset so others can import it and
+                            skip rebuilding the index with <code>embed-studies</code>. Cosine similarity is only
+                            meaningful between vectors from the <strong>same embedding model</strong>, so the export
+                            notes the model.
+                        </p>
+
+                        <div class="small mb-3" id="eb-current">Current index: <span class="text-muted">checking...</span></div>
+
+                        <h6 class="mb-1">Export</h6>
+                        <p class="small text-muted mb-2">Dump the current embeddings to a downloadable archive.</p>
+                        <button type="button" class="btn btn-primary btn-sm mb-3" id="eb-export">Export embeddings</button>
+
+                        <hr class="my-3" />
+
+                        <h6 class="mb-1">Import</h6>
+                        <div class="alert alert-warning py-2 small mb-2">
+                            Importing <strong>clears all existing embeddings first</strong>, then loads the archive.
+                            Afterwards, set <code>Embedding:Model</code> to the imported model so Find Similar matches.
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1" for="eb-file">From a file</label>
+                            <div class="input-group input-group-sm">
+                                <input type="file" class="form-control" id="eb-file" accept=".dump" />
+                                <button class="btn btn-outline-primary" type="button" id="eb-import-file">Upload &amp; import</button>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1" for="eb-url">From a URL (release asset)</label>
+                            <div class="input-group input-group-sm">
+                                <input type="url" class="form-control" id="eb-url" placeholder="https://.../embeddings-....dump" />
+                                <button class="btn btn-outline-primary" type="button" id="eb-import-url">Import from URL</button>
+                            </div>
+                        </div>
+
+                        <div id="eb-progress" class="d-none mt-3">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="badge bg-secondary" id="eb-status">running</span>
+                                <span class="small text-muted"><span id="eb-elapsed">0</span>s</span>
+                            </div>
+                            <div class="progress mb-1" style="height:1rem;">
+                                <div id="eb-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width:100%;"></div>
+                            </div>
+                            <div class="small text-muted" id="eb-detail">Working...</div>
+                        </div>
+
+                        <div id="eb-result" class="alert alert-success py-2 mt-3 mb-0 d-none"></div>
+
+                        <div class="d-flex gap-2 mt-3">
+                            <button type="button" class="btn btn-danger btn-sm d-none" id="eb-cancel">Cancel</button>
+                            <button type="button" class="btn btn-success btn-sm d-none" id="eb-download">Download</button>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-danger btn-sm d-none" id="cs-cancel">Cancel dump</button>
-                <button type="button" class="btn btn-success btn-sm d-none" id="cs-download">Download</button>
-                <button type="button" class="btn btn-primary btn-sm" id="cs-start">Create seed</button>
             </div>
         </div>
     </div>
@@ -66,31 +150,10 @@
         if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
         const modal = new bootstrap.Modal(modalEl);
 
-        const errorBox = document.getElementById("cs-error");
-        const confirmEl = document.getElementById("cs-confirm");
-        const progressEl = document.getElementById("cs-progress");
-        const resultEl = document.getElementById("cs-result");
-        const statusEl = document.getElementById("cs-status");
-        const elapsedEl = document.getElementById("cs-elapsed");
-        const barEl = document.getElementById("cs-bar");
-        const detailEl = document.getElementById("cs-detail");
-        const fileEl = document.getElementById("cs-file");
-        const sizeEl = document.getElementById("cs-size");
-        const startBtn = document.getElementById("cs-start");
-        const cancelBtn = document.getElementById("cs-cancel");
-        const downloadBtn = document.getElementById("cs-download");
-
-        let poll = null;
-        let lastFileName = "seed.dump";
-
         function token() {
             const el = modalEl.querySelector('input[name="__RequestVerificationToken"]');
             return el ? el.value : "";
         }
-        function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("d-none"); }
-        function clearError() { errorBox.classList.add("d-none"); }
-        function show(el, on) { el.classList.toggle("d-none", !on); }
-
         function humanSize(bytes) {
             if (bytes == null) return "";
             const u = ["B", "KB", "MB", "GB"];
@@ -98,103 +161,268 @@
             while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
             return n.toFixed(i === 0 ? 0 : 1) + " " + u[i];
         }
+        function num(n) { return (n == null) ? "" : Number(n).toLocaleString(); }
+        function show(el, on) { el.classList.toggle("d-none", !on); }
 
-        function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
+        // ===================== Database seed tab =====================
+        (function () {
+            const errorBox = document.getElementById("cs-error");
+            const confirmEl = document.getElementById("cs-confirm");
+            const progressEl = document.getElementById("cs-progress");
+            const resultEl = document.getElementById("cs-result");
+            const statusEl = document.getElementById("cs-status");
+            const elapsedEl = document.getElementById("cs-elapsed");
+            const barEl = document.getElementById("cs-bar");
+            const detailEl = document.getElementById("cs-detail");
+            const fileEl = document.getElementById("cs-file");
+            const sizeEl = document.getElementById("cs-size");
+            const startBtn = document.getElementById("cs-start");
+            const cancelBtn = document.getElementById("cs-cancel");
+            const downloadBtn = document.getElementById("cs-download");
 
-        function render(v) {
-            // v is null (never run) or a SeedJobView.
-            const running = v && v.status === "running";
-            const completed = v && v.status === "completed";
-            const failed = v && (v.status === "failed" || v.status === "cancelled");
+            let poll = null;
+            let lastFileName = "seed.dump";
 
-            show(confirmEl, !v || (!running && !completed));
-            show(progressEl, running);
-            show(resultEl, completed);
-            show(startBtn, !running);
-            startBtn.disabled = !!running;
-            startBtn.textContent = (completed || failed) ? "Create again" : "Create seed";
-            show(cancelBtn, running);
-            show(downloadBtn, completed);
+            function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("d-none"); }
+            function clearError() { errorBox.classList.add("d-none"); }
+            function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
 
-            if (v) {
-                statusEl.textContent = v.status;
-                const total = v.totalTables || 6;
-                const pct = Math.min(100, Math.round((v.tablesDumped / total) * 100));
-                barEl.style.width = pct + "%";
-                barEl.textContent = pct + "%";
-                elapsedEl.textContent = Math.round(v.elapsedSeconds || 0);
-                detailEl.textContent = v.currentTable
-                    ? `Dumping ${v.currentTable} (table ${v.tablesDumped} of ${total})`
-                    : `Dumped ${v.tablesDumped} of ${total} tables`;
-                if (completed) {
-                    lastFileName = v.fileName || "seed.dump";
-                    fileEl.textContent = v.fileName || "";
-                    sizeEl.textContent = humanSize(v.fileSizeBytes);
+            function render(v) {
+                const running = v && v.status === "running";
+                const completed = v && v.status === "completed";
+                const failed = v && (v.status === "failed" || v.status === "cancelled");
+
+                show(confirmEl, !v || (!running && !completed));
+                show(progressEl, running);
+                show(resultEl, completed);
+                show(startBtn, !running);
+                startBtn.disabled = !!running;
+                startBtn.textContent = (completed || failed) ? "Create again" : "Create seed";
+                show(cancelBtn, running);
+                show(downloadBtn, completed);
+
+                if (v) {
+                    statusEl.textContent = v.status;
+                    const total = v.totalTables || 6;
+                    const pct = Math.min(100, Math.round((v.tablesDumped / total) * 100));
+                    barEl.style.width = pct + "%";
+                    barEl.textContent = pct + "%";
+                    elapsedEl.textContent = Math.round(v.elapsedSeconds || 0);
+                    detailEl.textContent = v.currentTable
+                        ? `Dumping ${v.currentTable} (table ${v.tablesDumped} of ${total})`
+                        : `Dumped ${v.tablesDumped} of ${total} tables`;
+                    if (completed) {
+                        lastFileName = v.fileName || "seed.dump";
+                        fileEl.textContent = v.fileName || "";
+                        sizeEl.textContent = humanSize(v.fileSizeBytes);
+                    }
+                    if (failed && v.error) showError(v.error);
                 }
-                if (failed && v.error) showError(v.error);
+
+                if (running && !poll) poll = setInterval(refresh, 1000);
+                if (!running) stopPoll();
             }
 
-            if (running && !poll) poll = setInterval(refresh, 1000);
-            if (!running) stopPoll();
-        }
-
-        async function refresh() {
-            try {
-                const resp = await fetch("/Seed/State", { headers: { "X-Requested-With": "XMLHttpRequest" } });
-                if (!resp.ok) return;
-                render(await resp.json());
-            } catch (e) { /* transient; next tick retries */ }
-        }
-
-        startBtn.addEventListener("click", async function () {
-            clearError();
-            startBtn.disabled = true;
-            try {
-                const body = new URLSearchParams();
-                body.set("__RequestVerificationToken", token());
-                const resp = await fetch("/Seed/Run", {
-                    method: "POST",
-                    headers: { "X-Requested-With": "XMLHttpRequest" },
-                    body: body
-                });
-                if (resp.status === 409) {
-                    const j = await resp.json().catch(() => null);
-                    showError("Busy: " + ((j && j.activity) || "another job") + " is running. Try again when it finishes.");
-                    startBtn.disabled = false;
-                    return;
-                }
-                if (!resp.ok) { showError("Failed to start (" + resp.status + ")"); startBtn.disabled = false; return; }
-                await refresh();
-            } catch (err) {
-                showError(err.message);
-                startBtn.disabled = false;
+            async function refresh() {
+                try {
+                    const resp = await fetch("/Seed/State", { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                    if (!resp.ok) return;
+                    render(await resp.json());
+                } catch (e) { /* transient; next tick retries */ }
             }
-        });
 
-        cancelBtn.addEventListener("click", async function () {
-            clearError();
-            try {
+            startBtn.addEventListener("click", async function () {
+                clearError();
+                startBtn.disabled = true;
+                try {
+                    const body = new URLSearchParams();
+                    body.set("__RequestVerificationToken", token());
+                    const resp = await fetch("/Seed/Run", {
+                        method: "POST", headers: { "X-Requested-With": "XMLHttpRequest" }, body: body
+                    });
+                    if (resp.status === 409) {
+                        const j = await resp.json().catch(() => null);
+                        showError("Busy: " + ((j && j.activity) || "another job") + " is running. Try again when it finishes.");
+                        startBtn.disabled = false; return;
+                    }
+                    if (!resp.ok) { showError("Failed to start (" + resp.status + ")"); startBtn.disabled = false; return; }
+                    await refresh();
+                } catch (err) { showError(err.message); startBtn.disabled = false; }
+            });
+
+            cancelBtn.addEventListener("click", async function () {
+                clearError();
+                try {
+                    const body = new URLSearchParams();
+                    body.set("__RequestVerificationToken", token());
+                    await fetch("/Seed/Cancel", { method: "POST", headers: { "X-Requested-With": "XMLHttpRequest" }, body: body });
+                    await refresh();
+                } catch (err) { showError(err.message); }
+            });
+
+            downloadBtn.addEventListener("click", async function () {
+                clearError();
+                try { await window.downloadFile("/Seed/Download", lastFileName); }
+                catch (err) { showError(err.message); }
+            });
+
+            const openBtn = document.getElementById("create-seed-btn");
+            if (openBtn) openBtn.addEventListener("click", function () { clearError(); modal.show(); refresh(); });
+            modalEl.addEventListener("hidden.bs.modal", stopPoll);
+        })();
+
+        // ===================== Embeddings tab =====================
+        (function () {
+            const errorBox = document.getElementById("eb-error");
+            const currentEl = document.getElementById("eb-current");
+            const exportBtn = document.getElementById("eb-export");
+            const fileEl = document.getElementById("eb-file");
+            const importFileBtn = document.getElementById("eb-import-file");
+            const urlEl = document.getElementById("eb-url");
+            const importUrlBtn = document.getElementById("eb-import-url");
+            const progressEl = document.getElementById("eb-progress");
+            const statusEl = document.getElementById("eb-status");
+            const elapsedEl = document.getElementById("eb-elapsed");
+            const detailEl = document.getElementById("eb-detail");
+            const resultEl = document.getElementById("eb-result");
+            const cancelBtn = document.getElementById("eb-cancel");
+            const downloadBtn = document.getElementById("eb-download");
+            const actionBtns = [exportBtn, importFileBtn, importUrlBtn];
+
+            let poll = null;
+            let lastFileName = "embeddings.dump";
+
+            function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("d-none"); }
+            function clearError() { errorBox.classList.add("d-none"); }
+            function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
+
+            async function loadCurrent() {
+                try {
+                    const r = await fetch("/Embeddings/Stats", { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                    const j = await r.json();
+                    if (!j || j.unavailable) { currentEl.innerHTML = "Current index: <span class='text-muted'>unavailable</span>"; return; }
+                    if (!j.totalRows) {
+                        currentEl.innerHTML = "Current index: <span class='text-muted'>empty - build it with Tools &rarr; embed-studies</span>";
+                        return;
+                    }
+                    const models = (j.models || []).map(m => (m.model || "(unnamed)") + " (" + num(m.count) + ")").join(", ");
+                    currentEl.innerHTML = "Current index: <strong>" + num(j.totalRows) + "</strong> embeddings - model: " + models;
+                } catch (e) { currentEl.innerHTML = "Current index: <span class='text-muted'>unavailable</span>"; }
+            }
+
+            function render(v) {
+                const running = v && v.status === "running";
+                const completed = v && v.status === "completed";
+                const failed = v && (v.status === "failed" || v.status === "cancelled");
+
+                show(progressEl, running);
+                show(cancelBtn, running);
+                actionBtns.forEach(b => b.disabled = !!running);
+                show(downloadBtn, completed && v.kind === "export" && v.downloadable);
+
+                if (v) {
+                    statusEl.textContent = v.phase ? (v.kind + ": " + v.phase) : (v.kind + " " + v.status);
+                    elapsedEl.textContent = Math.round(v.elapsedSeconds || 0);
+                    detailEl.textContent = v.phase || (v.kind === "export" ? "Exporting" : "Importing");
+
+                    if (completed) {
+                        resultEl.classList.remove("d-none");
+                        if (v.kind === "export") {
+                            lastFileName = v.fileName || "embeddings.dump";
+                            resultEl.classList.remove("alert-info"); resultEl.classList.add("alert-success");
+                            resultEl.innerHTML = "Exported <strong>" + num(v.rowCount) + " embeddings</strong>"
+                                + (v.models ? " (model: " + v.models + ")" : "")
+                                + " as <strong>" + (v.fileName || "") + "</strong> (" + humanSize(v.fileSizeBytes) + ").";
+                        } else {
+                            resultEl.innerHTML = "Imported <strong>" + num(v.rowCount) + " embeddings</strong>"
+                                + (v.rowsCleared != null ? " (cleared " + num(v.rowsCleared) + " existing)" : "")
+                                + (v.models ? ". Model: " + v.models + ". Set <code>Embedding:Model</code> to match for Find Similar." : ".");
+                            loadCurrent();
+                        }
+                    } else {
+                        resultEl.classList.add("d-none");
+                    }
+                    if (failed && v.error) showError(v.error);
+                }
+
+                if (running && !poll) poll = setInterval(refresh, 1000);
+                if (!running) stopPoll();
+            }
+
+            async function refresh() {
+                try {
+                    const resp = await fetch("/Embeddings/State", { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                    if (!resp.ok) return;
+                    render(await resp.json());
+                } catch (e) { /* transient */ }
+            }
+
+            async function postForm(url, extra) {
                 const body = new URLSearchParams();
                 body.set("__RequestVerificationToken", token());
-                await fetch("/Seed/Cancel", {
-                    method: "POST",
-                    headers: { "X-Requested-With": "XMLHttpRequest" },
-                    body: body
-                });
-                await refresh();
-            } catch (err) { showError(err.message); }
-        });
+                if (extra) for (const k in extra) body.set(k, extra[k]);
+                return fetch(url, { method: "POST", headers: { "X-Requested-With": "XMLHttpRequest" }, body: body });
+            }
 
-        downloadBtn.addEventListener("click", async function () {
-            clearError();
-            try {
-                await window.downloadFile("/Seed/Download", lastFileName);
-            } catch (err) { showError(err.message); }
-        });
+            async function handleStart(respPromise) {
+                clearError();
+                actionBtns.forEach(b => b.disabled = true);
+                try {
+                    const resp = await respPromise;
+                    if (resp.status === 409) {
+                        const j = await resp.json().catch(() => null);
+                        showError("Busy: " + ((j && j.activity) || "another job") + " is running. Try again when it finishes.");
+                        actionBtns.forEach(b => b.disabled = false); return;
+                    }
+                    if (!resp.ok) {
+                        const j = await resp.json().catch(() => null);
+                        showError((j && j.error) || ("Failed (" + resp.status + ")"));
+                        actionBtns.forEach(b => b.disabled = false); return;
+                    }
+                    await refresh();
+                } catch (err) { showError(err.message); actionBtns.forEach(b => b.disabled = false); }
+            }
 
-        const openBtn = document.getElementById("create-seed-btn");
-        if (openBtn) openBtn.addEventListener("click", function () { clearError(); modal.show(); refresh(); });
+            exportBtn.addEventListener("click", function () {
+                handleStart(postForm("/Embeddings/Export"));
+            });
 
-        modalEl.addEventListener("hidden.bs.modal", stopPoll);
+            importUrlBtn.addEventListener("click", function () {
+                const u = (urlEl.value || "").trim();
+                if (!u) { showError("Enter a URL to an embeddings archive."); return; }
+                if (!confirm("Import will CLEAR all existing embeddings, then load the archive from the URL. Continue?")) return;
+                handleStart(postForm("/Embeddings/ImportUrl", { url: u }));
+            });
+
+            importFileBtn.addEventListener("click", function () {
+                if (!fileEl.files || fileEl.files.length === 0) { showError("Choose a .dump file to upload."); return; }
+                if (!confirm("Import will CLEAR all existing embeddings, then load the uploaded archive. Continue?")) return;
+                clearError();
+                actionBtns.forEach(b => b.disabled = true);
+                const fd = new FormData();
+                fd.set("__RequestVerificationToken", token());
+                fd.set("file", fileEl.files[0]);
+                handleStart(fetch("/Embeddings/ImportUpload", {
+                    method: "POST", headers: { "X-Requested-With": "XMLHttpRequest" }, body: fd
+                }));
+            });
+
+            cancelBtn.addEventListener("click", async function () {
+                clearError();
+                try { await postForm("/Embeddings/Cancel"); await refresh(); }
+                catch (err) { showError(err.message); }
+            });
+
+            downloadBtn.addEventListener("click", async function () {
+                clearError();
+                try { await window.downloadFile("/Embeddings/Download", lastFileName); }
+                catch (err) { showError(err.message); }
+            });
+
+            // Load current stats + any in-flight job when the modal opens.
+            const openBtn = document.getElementById("create-seed-btn");
+            if (openBtn) openBtn.addEventListener("click", function () { clearError(); loadCurrent(); refresh(); });
+            modalEl.addEventListener("hidden.bs.modal", stopPoll);
+        })();
     });
 </script>

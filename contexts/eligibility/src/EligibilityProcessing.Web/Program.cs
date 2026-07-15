@@ -7,6 +7,7 @@ using EligibilityProcessing.Hosting;   // AddEligibilityPipeline (VB extension)
 using EligibilityProcessing.Web;
 using EligibilityProcessing.Web.Auth;
 using EligibilityProcessing.Web.Seeding;
+using EligibilityProcessing.Web.Embeddings;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
@@ -71,6 +72,20 @@ builder.Services.AddSingleton(_ => Channel.CreateBounded<SeedJobRequest>(new Bou
     SingleWriter = false
 }));
 builder.Services.AddHostedService<SeedJobRunner>();
+
+// Owner-only embeddings export/import job (pg_dump / pg_restore of the corpus
+// similarity index): its own single-slot channel + background runner + state,
+// sharing the RunGate so it is mutually exclusive with everything else. The named
+// HttpClient (no timeout) is for URL imports of large release-asset archives.
+builder.Services.AddSingleton<EmbeddingsJobState>();
+builder.Services.AddSingleton(_ => Channel.CreateBounded<EmbeddingsJobRequest>(new BoundedChannelOptions(1)
+{
+    FullMode = BoundedChannelFullMode.DropWrite,
+    SingleReader = true,
+    SingleWriter = false
+}));
+builder.Services.AddHostedService<EmbeddingsJobRunner>();
+builder.Services.AddHttpClient(EmbeddingsJobRunner.HttpClientName, c => c.Timeout = Timeout.InfiniteTimeSpan);
 
 // Rate limit: 1 trigger per 60 seconds in production. Values are read from
 // WebhookOptions via Options.Configure<TDep> so they resolve LAZILY — at the

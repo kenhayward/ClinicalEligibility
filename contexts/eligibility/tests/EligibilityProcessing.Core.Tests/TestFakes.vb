@@ -489,6 +489,20 @@ Friend NotInheritable Class FakeGateway
         Return Task.CompletedTask
     End Function
 
+    Public Property EmbeddingStatsResult As EmbeddingStats =
+        New EmbeddingStats(0, Array.Empty(Of EmbeddingModelCount)())
+    Public Property EmbeddingsCleared As Long
+
+    Public Function GetEmbeddingStatsAsync(cancellationToken As CancellationToken) As Task(Of EmbeddingStats) _
+            Implements IPostgresGateway.GetEmbeddingStatsAsync
+        Return Task.FromResult(EmbeddingStatsResult)
+    End Function
+
+    Public Function ClearStudyEmbeddingsAsync(cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.ClearStudyEmbeddingsAsync
+        Return Task.FromResult(EmbeddingsCleared)
+    End Function
+
     ' Auth / users / audit — not exercised by orchestrator tests; minimal stubs.
 
     Public Function CountUsersAsync(cancellationToken As CancellationToken) As Task(Of Integer) _
