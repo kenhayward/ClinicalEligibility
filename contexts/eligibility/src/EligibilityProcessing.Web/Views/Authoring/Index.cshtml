@@ -1,25 +1,31 @@
 @model EligibilityProcessing.Web.Models.AuthoringIndexViewModel
 @{
-    Layout = "_AuthoringLayout";
-    ViewData["Title"] = "Eligibility Authoring";
+    Layout = "_Layout";
+    ViewData["Title"] = "Authoring";
 }
 
-<partial name="_StudyListPanel"
-         model="@(new EligibilityProcessing.Web.Models.AuthoringListPanelModel { Studies = Model.Studies })" />
+@* Master-detail shell: the collapsible study-list sidebar (from _StudyListPanel)
+   plus the main pane. With no study selected the main pane shows an empty state;
+   selecting a study navigates to /Authoring/Edit and renders the editor here. *@
+<div class="authoring-shell" id="authoring-shell">
+    <partial name="_StudyListPanel"
+             model="@(new EligibilityProcessing.Web.Models.AuthoringListPanelModel { Studies = Model.Studies })" />
 
-<main class="authoring-main">
-    @if (TempData["AuthoringStatus"] is string status)
-    {
-        <div class="alert alert-info" role="alert">@status</div>
-    }
-    @if (Model.HasError)
-    {
-        <div class="alert alert-warning" role="alert">
-            <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    <main class="authoring-main">
+        @if (TempData["AuthoringStatus"] is string status)
+        {
+            <div class="alert alert-info" role="alert">@status</div>
+        }
+        @if (Model.HasError)
+        {
+            <div class="alert alert-warning" role="alert">
+                <strong>Backend unavailable.</strong> @Model.ErrorMessage
+            </div>
+        }
+
+        <div class="authoring-empty-state text-muted">
+            <h1 class="h4">Authoring</h1>
+            <p class="mb-0">Select a study from the list, or create a new one.</p>
         </div>
-    }
-
-    <div class="authoring-empty-state text-muted">
-        <p class="mb-0">Select a study from the list, or create a new one.</p>
-    </div>
-</main>
+    </main>
+</div>

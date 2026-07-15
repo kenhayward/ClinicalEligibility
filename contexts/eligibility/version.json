@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 7, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 8, "releaseDate": "2026-07-15" },
   "releases": [
+    {
+      "version": "0.1.8",
+      "releaseDate": "2026-07-15",
+      "enhancements": [
+        "Authoring is now a dashboard tab. Instead of opening in a separate page, Authoring lives alongside Dashboard, Runs, and the other tabs. A study list sits in a panel on the left; click a study to open it in the editor beside the list. Collapse the panel with the chevron to give the editor the full page width - your choice is remembered between visits."
+      ],
+      "fixes": [
+        "Authoring layout: restored the study-list and editor styling that was lost when the feature was first brought over, so the two-pane view renders correctly."
+      ]
+    },
     {
       "version": "0.1.7",
       "releaseDate": "2026-07-15",
