@@ -40,7 +40,9 @@ Public NotInheritable Class DashboardMetrics
             completionTokens As Long,
             failuresByStatus As IReadOnlyDictionary(Of String, Long),
             studiesWithoutEmbeddings As Long,
-            parseEmpty As Long)
+            parseEmpty As Long,
+            Optional studiesAttempted As Long = 0,
+            Optional sourceSelectableTotal As Long? = Nothing)
         Me.EligibilityRowCount = eligibilityRowCount
         Me.StudiesSuccessful = studiesSuccessful
         Me.StudiesFailedLatest = studiesFailedLatest
@@ -50,6 +52,8 @@ Public NotInheritable Class DashboardMetrics
         Me.FailuresByStatus = failuresByStatus
         Me.StudiesWithoutEmbeddings = studiesWithoutEmbeddings
         Me.ParseEmpty = parseEmpty
+        Me.StudiesAttempted = studiesAttempted
+        Me.SourceSelectableTotal = sourceSelectableTotal
     End Sub
 
     Public ReadOnly Property EligibilityRowCount As Long
@@ -81,6 +85,41 @@ Public NotInheritable Class DashboardMetrics
     ' StudiesFailedLatest). Surfaced as its own line so operators can see how
     ' many trials produced empty output without it inflating the failure count.
     Public ReadOnly Property ParseEmpty As Long
+
+    ' Distinct trials with at least one attempt (any status) - the set the
+    ' orchestrator anti-joins out when picking the next batch. Counts trials, not
+    ' attempts, so a trial re-run five times still counts once. Deliberately NOT
+    ' StudiesSuccessful: a trial that failed has still been attempted and will not
+    ' be picked up again by a normal batch, so it is not "remaining".
+    Public ReadOnly Property StudiesAttempted As Long
+
+    ' Trials in the AACT source that pass the selection filter (spec section 2.3:
+    ' non-null criteria, >= 50 chars, no "please contact" / "contact site for" /
+    ' "contact study"). Nothing when there is no reachable AACT source - the
+    ' seeded quickstart has no ctgov schema at all - in which case TrialsRemaining
+    ' is also Nothing and the dashboard omits the figure rather than guessing.
+    Public ReadOnly Property SourceSelectableTotal As Long?
+
+    ''' <summary>
+    ''' Approximate backlog: selectable source trials minus trials already
+    ''' attempted. Nothing when the source total is unknown.
+    ''' <para>
+    ''' APPROXIMATE BY DESIGN. The exact figure would need the same anti-join the
+    ''' batch selector runs (COPY the attempted set to the source, then anti-join
+    ''' ~586k rows), which is far too expensive for a dashboard read. This
+    ''' subtracts two independent counts instead, which is off by the number of
+    ''' attempted trials that are NOT in the selectable set - trials whose criteria
+    ''' were later edited below 50 chars, or that AACT dropped entirely. That skews
+    ''' the figure DOWN (understating the backlog) and is small in practice.
+    ''' Clamped at 0 so the drift can never render a negative count.
+    ''' </para>
+    ''' </summary>
+    Public ReadOnly Property TrialsRemaining As Long?
+        Get
+            If Not SourceSelectableTotal.HasValue Then Return Nothing
+            Return Math.Max(0L, SourceSelectableTotal.Value - StudiesAttempted)
+        End Get
+    End Property
 
     Public ReadOnly Property TokensUsed As Long
         Get

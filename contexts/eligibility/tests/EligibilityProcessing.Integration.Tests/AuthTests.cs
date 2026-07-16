@@ -97,7 +97,7 @@ public class AuthTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.DoesNotContain("Trigger batch", body);
+        Assert.DoesNotContain("Trigger Earliest", body);
         Assert.DoesNotContain("Manage Accounts", body);
     }
 
@@ -113,7 +113,7 @@ public class AuthTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("Trigger batch", body);
+        Assert.Contains("Trigger Earliest", body);
         Assert.Contains("Manage Accounts", body);
     }
 

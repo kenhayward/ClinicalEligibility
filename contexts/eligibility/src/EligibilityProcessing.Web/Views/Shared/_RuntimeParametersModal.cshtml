@@ -93,6 +93,8 @@
                     <dt class="col-7 fw-normal text-muted">Embedding endpoint</dt><dd class="col-5 text-break" data-ro="embeddingEndpoint"></dd>
                     <dt class="col-7 fw-normal text-muted">Embedding model</dt><dd class="col-5 text-break" data-ro="embeddingModel"></dd>
                     <dt class="col-7 fw-normal text-muted" title="The UMLS resolver actually in effect (Umls:Backend). Restart-bound.">UMLS backend</dt><dd class="col-5 text-break" data-ro="umlsBackend"></dd>
+                    <dt class="col-7 fw-normal text-muted" title="Postgres that trial selection reads ctgov.eligibilities from (Postgres:ConnectionStringSource). Host/port/database only - credentials are never shown.">Source database (ctgov)</dt><dd class="col-5 text-break" data-ro="sourceDatabase"></dd>
+                    <dt class="col-7 fw-normal text-muted" title="Postgres the pipeline writes results to (Postgres:ConnectionStringOutput). Host/port/database only - credentials are never shown.">Output database</dt><dd class="col-5 text-break" data-ro="outputDatabase"></dd>
                 </dl>
                 <p class="small text-muted mb-0">
                     Changes apply to the running process only and revert to the saved configuration on restart.

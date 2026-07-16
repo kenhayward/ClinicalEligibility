@@ -1074,7 +1074,16 @@ SELECT
     (SELECT COUNT(*) FROM public.eligibility_study_detail d
         WHERE EXISTS (SELECT 1 FROM public.eligibility e WHERE e.nct_id = d.nct_id)
           AND NOT EXISTS (SELECT 1 FROM public.eligibility_study_embedding em
-                          WHERE em.nct_id = d.nct_id))                            AS studies_without_embeddings"
+                          WHERE em.nct_id = d.nct_id))                            AS studies_without_embeddings,
+    -- Distinct trials attempted (any status). `latest` is already one row per
+    -- nct_id, so this is a free count over a CTE the query has built anyway - no
+    -- extra scan. Feeds the dashboard's approximate remaining-trials figure.
+    (SELECT COUNT(*) FROM latest)                                                 AS studies_attempted"
+
+        ' The selectable-source count lives in the OTHER database (ctgov.*), so it
+        ' cannot join the query below and needs its own round-trip. Read first so
+        ' the metrics object is constructed once, complete.
+        Dim sourceTotal = Await CountSelectableSourceTrialsAsync(cancellationToken).ConfigureAwait(False)
 
         Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
             Using cmd = conn.CreateCommand()
@@ -1097,10 +1106,66 @@ SELECT
                             completionTokens:=reader.GetInt64(5),
                             failuresByStatus:=failuresByStatus,
                             parseEmpty:=reader.GetInt64(10),
-                            studiesWithoutEmbeddings:=reader.GetInt64(11))
+                            studiesWithoutEmbeddings:=reader.GetInt64(11),
+                            studiesAttempted:=reader.GetInt64(12),
+                            sourceSelectableTotal:=sourceTotal)
                 End Using
             End Using
         End Using
+    End Function
+
+    ''' <summary>
+    ''' Count of AACT trials that pass the selection filter (spec section 2.3).
+    ''' Returns Nothing when there is no reachable AACT source, so the dashboard
+    ''' omits the backlog figure instead of showing a wrong one.
+    ''' <para>
+    ''' The WHERE clause MUST stay aligned with SelectNextTrialsAsync's filter and
+    ''' with the partial index (SelectableSourceIndexName) - the index is what makes
+    ''' this an index-only count (~150 ms warm over ~586k rows) rather than a scan
+    ''' with three ILIKEs per row. Deliberately no anti-join against the attempted
+    ''' set: that would mean COPYing ~280k ids to the source per dashboard hit. The
+    ''' caller subtracts instead and labels the result approximate.
+    ''' </para>
+    ''' </summary>
+    Friend Async Function CountSelectableSourceTrialsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long?)
+
+        If _sourceDataSource Is Nothing Then Return Nothing
+
+        Const sql As String = "
+SELECT COUNT(*)
+FROM ctgov.eligibilities src
+WHERE src.criteria IS NOT NULL
+  AND LENGTH(TRIM(src.criteria)) >= 50
+  AND src.criteria NOT ILIKE '%please contact%'
+  AND src.criteria NOT ILIKE '%contact site for%'
+  AND src.criteria NOT ILIKE '%contact study%'"
+
+        Try
+            ' Probe first: to_regclass returns NULL rather than raising when the
+            ' schema/table is absent, so the no-AACT case (seeded quickstart) costs
+            ' one cheap query and no exception.
+            If Not Await SourceHasCtgovEligibilitiesAsync(cancellationToken).ConfigureAwait(False) Then
+                Return Nothing
+            End If
+
+            Using conn = Await _sourceDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+                Using cmd = conn.CreateCommand()
+                    cmd.CommandText = sql
+                    Dim scalar = Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False)
+                    If scalar Is Nothing OrElse scalar Is DBNull.Value Then Return Nothing
+                    Return Convert.ToInt64(scalar)
+                End Using
+            End Using
+        Catch ex As OperationCanceledException When cancellationToken.IsCancellationRequested
+            Throw
+        Catch ex As Exception
+            ' Non-fatal: the backlog figure is a nice-to-have on a page that must
+            ' render even when the source DB is down. Drop it rather than 500 the
+            ' whole dashboard.
+            _logger.LogDebug(ex, "Selectable-source-trial count failed; omitting the remaining-trials figure")
+            Return Nothing
+        End Try
     End Function
 
     ' ============ SearchEligibilityAsync (output DB, dashboard Results browser) ============

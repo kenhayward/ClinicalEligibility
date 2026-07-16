@@ -24,6 +24,132 @@ Public Class PostgresGatewayIntegrationTests
         _fixture = fixture
     End Sub
 
+    ' ============ CountSelectableSourceTrialsAsync (dashboard backlog figure) ============
+
+    ' The count MUST apply the same filter as SelectNextTrialsAsync, or the
+    ' backlog figure counts trials the pipeline would never pick up. Seeds one
+    ' trial per exclusion rule plus two selectable ones.
+    <SkippableFact>
+    Public Async Function CountSelectableSourceTrials_applies_the_selection_filter() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim longEnough = New String("a"c, 60)
+        ' Selectable.
+        Await _fixture.InsertSourceTrialAsync("NCT00000001", longEnough)
+        Await _fixture.InsertSourceTrialAsync("NCT00000002", longEnough)
+        ' Excluded by each rule in spec section 2.3.
+        Await _fixture.InsertSourceTrialAsync("NCT00000003", Nothing)                        ' NULL criteria
+        Await _fixture.InsertSourceTrialAsync("NCT00000004", "too short")                    ' < 50 chars
+        Await _fixture.InsertSourceTrialAsync("NCT00000005", longEnough & " Please Contact the site") ' please contact
+        Await _fixture.InsertSourceTrialAsync("NCT00000006", longEnough & " contact site for details")
+        Await _fixture.InsertSourceTrialAsync("NCT00000007", longEnough & " CONTACT STUDY team")
+
+        Dim actual = Await _fixture.Gateway.CountSelectableSourceTrialsAsync(CancellationToken.None)
+
+        Assert.Equal(2L, actual)
+    End Function
+
+    ' The backlog is source-total minus attempted, computed from two independent
+    ' counts. Assert the whole chain end to end against a real database.
+    <SkippableFact>
+    Public Async Function DashboardMetrics_reports_remaining_as_source_total_minus_attempted() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim longEnough = New String("a"c, 60)
+        For i = 1 To 5
+            Await _fixture.InsertSourceTrialAsync("NCT" & i.ToString("D8"), longEnough)
+        Next
+
+        ' Attempt two of the five.
+        For Each nct In {"NCT00000001", "NCT00000002"}
+            Dim runId = Guid.NewGuid()
+            Dim startedAt = DateTimeOffset.UtcNow
+            Await _fixture.Gateway.StartStudyAsync(runId, nct, startedAt, CancellationToken.None)
+            Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                    runId:=runId, nctId:=nct, startedAt:=startedAt, finishedAt:=startedAt.AddSeconds(1),
+                    status:=StudyExecution.StatusSuccess, llmSucceeded:=True, llmFinishReason:="stop",
+                    llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                    parsedRecordCount:=0, persistedRowCount:=0, errorMessage:=""), CancellationToken.None)
+        Next
+
+        Dim m = Await _fixture.Gateway.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.Equal(5L, m.SourceSelectableTotal)
+        Assert.Equal(2L, m.StudiesAttempted)
+        Assert.Equal(3L, m.TrialsRemaining)
+    End Function
+
+    ' No AACT source at all - the seeded quickstart shape. A gateway with no source
+    ' data source must report Nothing (not 0, and not throw), so the dashboard
+    ' omits the figure rather than claiming an empty backlog.
+    <SkippableFact>
+    Public Async Function CountSelectableSourceTrials_returns_nothing_when_source_is_absent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim noSource As New PostgresGateway(outputDataSource:=_fixture.DataSource, sourceDataSource:=Nothing)
+
+        Dim actual = Await noSource.CountSelectableSourceTrialsAsync(CancellationToken.None)
+
+        Assert.False(actual.HasValue)
+    End Function
+
+    ' ... and the dashboard read must still render, minus the backlog figure.
+    <SkippableFact>
+    Public Async Function DashboardMetrics_reports_no_remaining_when_source_is_absent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.Gateway.PersistTrialAsync("NCT00000010",
+                {MakeResolvedWithCriterion("NCT00000010", "Inclusion", "diabetes")},
+                CancellationToken.None)
+
+        Dim noSource As New PostgresGateway(outputDataSource:=_fixture.DataSource, sourceDataSource:=Nothing)
+        Dim m = Await noSource.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.False(m.SourceSelectableTotal.HasValue)
+        Assert.False(m.TrialsRemaining.HasValue)
+        ' The rest of the dashboard still works.
+        Assert.Equal(1L, m.EligibilityRowCount)
+    End Function
+
+    ' StudiesAttempted counts distinct trials, not attempts: the figure is
+    ' subtracted from the source total, so double-counting a re-run trial would
+    ' understate the backlog.
+    <SkippableFact>
+    Public Async Function DashboardMetrics_counts_attempted_trials_once_per_nct_id() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        ' Same trial attempted three times, plus one other trial => 2 distinct.
+        Dim nct = "NCT00000042"
+        For i = 1 To 3
+            Dim runId = Guid.NewGuid()
+            Dim startedAt = DateTimeOffset.UtcNow.AddMinutes(-i)
+            Await _fixture.Gateway.StartStudyAsync(runId, nct, startedAt, CancellationToken.None)
+            Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                    runId:=runId, nctId:=nct, startedAt:=startedAt, finishedAt:=startedAt.AddSeconds(1),
+                    status:=If(i = 3, StudyExecution.StatusSuccess, StudyExecution.StatusLlmFailed),
+                    llmSucceeded:=(i = 3), llmFinishReason:="stop",
+                    llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                    parsedRecordCount:=0, persistedRowCount:=0, errorMessage:=""), CancellationToken.None)
+        Next
+        Dim other = "NCT00000043"
+        Dim otherRun = Guid.NewGuid()
+        Await _fixture.Gateway.StartStudyAsync(otherRun, other, DateTimeOffset.UtcNow, CancellationToken.None)
+        Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                runId:=otherRun, nctId:=other, startedAt:=DateTimeOffset.UtcNow,
+                finishedAt:=DateTimeOffset.UtcNow.AddSeconds(1),
+                status:=StudyExecution.StatusSuccess, llmSucceeded:=True, llmFinishReason:="stop",
+                llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                parsedRecordCount:=0, persistedRowCount:=0, errorMessage:=""), CancellationToken.None)
+
+        Dim m = Await _fixture.Gateway.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.Equal(2L, m.StudiesAttempted)
+    End Function
+
     ' ============ GetEligibilityFilterOptionsAsync + the pg_stats pre-filter ============
     '
     ' The pre-filter skips the SELECT DISTINCT scan for columns the planner says
