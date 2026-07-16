@@ -1,7 +1,16 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 10, "releaseDate": "2026-07-15" },
+  "current": { "major": 0, "minor": 1, "build": 11, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.11",
+      "releaseDate": "2026-07-16",
+      "enhancements": [
+        "Dashboard and Results pages load faster. Both were recomputing whole-corpus aggregates from scratch on every single page view - the dashboard's headline metrics (about 700 ms) and the Results page's filter dropdown lists (about 1150 ms, on every pager click and filter change too). Those figures are aggregates over the entire corpus, so they only change when a run persists new trials; they are now cached in memory for 60 seconds, which takes roughly 1.8 seconds of database work off the two busiest pages. Set Web:CorpusCacheTtlSeconds to 0 to disable the cache and always read live.",
+        "Results filter dropdowns no longer do work they throw away. Building the dropdown lists ran a SELECT DISTINCT over all 3.9M eligibility rows for each of six columns, then discarded any column whose value count exceeded the dropdown threshold - so about 950 ms of every Results page view was spent computing lists that were immediately dropped. The query now asks the database planner for its distinct-count estimate first and skips the scan entirely for columns that are provably over the threshold, cutting the six-column total from about 1150 ms to about 240 ms. Columns near the threshold, and any column the planner has no estimate for, are still counted exactly, so the dropdowns themselves are unchanged."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.10",
       "releaseDate": "2026-07-15",

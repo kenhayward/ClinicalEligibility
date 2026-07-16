@@ -30,6 +30,31 @@ Friend NotInheritable Class FakeGateway
     Public ReadOnly Property RecordFailedTrialCalls As New ConcurrentBag(Of (NctId As String, ErrorMessage As String))
     Public ReadOnly Property GetAttemptedNctIdsCalls As New ConcurrentBag(Of Integer)
 
+    ' --- corpus-read knobs (CorpusReadCacheTests). Counters are the point: the
+    ' cache is only observable through how often it reaches the gateway. ---
+    Public Property MetricsToReturn As DashboardMetrics = DashboardMetrics.Empty
+    Public Property FilterOptionsToReturn As EligibilityFilterOptions = EligibilityFilterOptions.Empty
+    ' When set, both corpus reads throw this instead of returning. Used to prove
+    ' failures are not cached.
+    Public Property CorpusReadError As Exception = Nothing
+    Private _getDashboardMetricsCalls As Integer
+    Private _getFilterOptionsCalls As Integer
+
+    Public ReadOnly Property GetDashboardMetricsCalls As Integer
+        Get
+            Return Volatile.Read(_getDashboardMetricsCalls)
+        End Get
+    End Property
+
+    Public ReadOnly Property GetFilterOptionsCalls As Integer
+        Get
+            Return Volatile.Read(_getFilterOptionsCalls)
+        End Get
+    End Property
+
+    ' Every maxDropdownSize the cache actually forwarded, in order.
+    Public ReadOnly Property FilterOptionsCallArgs As New ConcurrentBag(Of Integer)
+
     Public Function GetAttemptedNctIdsAsync(
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
             Implements IPostgresGateway.GetAttemptedNctIdsAsync
@@ -221,7 +246,10 @@ Friend NotInheritable Class FakeGateway
             cancellationToken As CancellationToken) As Task(Of EligibilityFilterOptions) _
             Implements IPostgresGateway.GetEligibilityFilterOptionsAsync
         cancellationToken.ThrowIfCancellationRequested()
-        Return Task.FromResult(EligibilityFilterOptions.Empty)
+        Interlocked.Increment(_getFilterOptionsCalls)
+        FilterOptionsCallArgs.Add(maxDropdownSize)
+        If CorpusReadError IsNot Nothing Then Return Task.FromException(Of EligibilityFilterOptions)(CorpusReadError)
+        Return Task.FromResult(FilterOptionsToReturn)
     End Function
 
     Public Function GetStudyDetailsAsync(
@@ -350,7 +378,9 @@ Friend NotInheritable Class FakeGateway
             cancellationToken As CancellationToken) As Task(Of DashboardMetrics) _
             Implements IPostgresGateway.GetDashboardMetricsAsync
         cancellationToken.ThrowIfCancellationRequested()
-        Return Task.FromResult(DashboardMetrics.Empty)
+        Interlocked.Increment(_getDashboardMetricsCalls)
+        If CorpusReadError IsNot Nothing Then Return Task.FromException(Of DashboardMetrics)(CorpusReadError)
+        Return Task.FromResult(MetricsToReturn)
     End Function
 
     ' Authoring CRUD — not exercised by orchestrator tests; minimal stubs.
