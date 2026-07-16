@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 16, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 17, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.17",
+      "releaseDate": "2026-07-16",
+      "enhancements": [],
+      "fixes": [
+        "A batch started from the command line can no longer run at the same time as one started from the dashboard. The dashboard already refused to start a second batch while one was in flight, but that check only applied within the dashboard's own process - it could not see `elig run`, which drives the same pipeline against the same database. Both would independently work out which trials to process, pick overlapping ones, and compete for the same model slots: wasted time on the one resource that actually limits throughput. Whichever starts first now takes a lock in the database, and the other is refused - the dashboard reports the run as cancelled with the reason in the log, the command line prints a message and exits without starting. The lock is released when the run finishes, and automatically if the process is killed, so it can never get stuck."
+      ]
+    },
     {
       "version": "0.1.16",
       "releaseDate": "2026-07-16",

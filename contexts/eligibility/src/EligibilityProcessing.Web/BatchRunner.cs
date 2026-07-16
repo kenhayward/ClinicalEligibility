@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using EligibilityProcessing.Core;
+using EligibilityProcessing.Data;   // PostgresRunLock (cross-process batch lock)
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -91,7 +92,40 @@ internal sealed class BatchRunner : BackgroundService
                         "BatchRunner picked up run {RunId} (StudyCount={Count}, Direction={Direction})",
                         request.RunId, request.StudyCount, request.Direction);
                 }
-                await orchestrator.ExecuteAsync(config, linked.Token).ConfigureAwait(false);
+                // RunGate got us this far, but it only serialises THIS process. Take the
+                // database-backed lock before touching any trial so a CLI batch running
+                // against the same database cannot proceed in parallel - both would
+                // select overlapping trials and fight over the model-server slots.
+                var runLock = scope.ServiceProvider.GetRequiredService<PostgresRunLock>();
+                if (!await runLock.TryAcquireAsync(linked.Token).ConfigureAwait(false))
+                {
+                    // Another process owns the pipeline. The trigger already returned 202
+                    // and the dashboard is showing a run as started, so close that loop
+                    // explicitly rather than going quiet.
+                    _logger.LogWarning(
+                        "Run {RunId} not started: another process (a CLI batch, or another host) holds the run lock.",
+                        request.RunId);
+                    try
+                    {
+                        await _hooks.OnBatchCancelledAsync(request.RunId, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception hookEx)
+                    {
+                        _logger.LogWarning(hookEx, "OnBatchCancelled hook failed for run {RunId}", request.RunId);
+                    }
+                    continue;   // the finally below still releases the in-process gate
+                }
+
+                try
+                {
+                    await orchestrator.ExecuteAsync(config, linked.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Release even on cancellation/failure. Process death would end the
+                    // session and drop the lock anyway, so this can never wedge.
+                    await runLock.ReleaseAsync().ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

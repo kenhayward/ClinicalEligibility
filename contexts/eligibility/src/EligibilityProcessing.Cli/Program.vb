@@ -1,6 +1,7 @@
 Imports System.Diagnostics
 Imports System.IO
 Imports System.Linq
+Imports System.Runtime.ExceptionServices
 Imports System.Threading
 Imports System.Threading.Tasks
 Imports EligibilityProcessing.Core
@@ -220,24 +221,66 @@ Module Program
             Dim orch = scope.ServiceProvider.GetRequiredService(Of PipelineOrchestrator)()
             Dim triggerSource As String = If(direction = TrialSelectionDirection.Recent, "cli-recent", "cli")
             Dim config = New RunConfiguration(studyCount, triggerSource, rerunNctIds:=Nothing, direction:=direction)
-            System.Console.WriteLine($"Starting batch run (StudyCount={studyCount}, Direction={direction})...")
-            Dim result = Await orch.ExecuteAsync(config, cancellationToken).ConfigureAwait(False)
 
-            Dim m = result.Metrics
-            System.Console.WriteLine($"Run {m.RunId} {m.Status}")
-            System.Console.WriteLine($"  Studies processed: {m.StudiesProcessed}")
-            System.Console.WriteLine($"  Rows persisted:    {m.RowsPersisted}")
-            System.Console.WriteLine($"  Resolution rate:   {m.ResolutionRate:P1}")
-            Dim duration As TimeSpan = If(m.EndedAt.HasValue, m.EndedAt.Value - m.StartedAt, TimeSpan.Zero)
-            System.Console.WriteLine($"  Wall clock:        {duration.TotalSeconds:F1}s")
-            If result.FailedNctIds.Count > 0 Then
-                System.Console.WriteLine($"  Failed trials:     {result.FailedNctIds.Count}")
-                For Each id In result.FailedNctIds
-                    System.Console.WriteLine($"    - {id}")
-                Next
+            ' Take the cross-process batch lock before doing anything. The web host's
+            ' RunGate is an in-process lock this process cannot see, so without this a
+            ' `elig run` here and a dashboard-triggered batch there would select
+            ' overlapping trials and compete for the same model-server slots. This is
+            ' the whole reason the lock exists - the web side alone was already
+            ' serialised.
+            Dim runLock = scope.ServiceProvider.GetRequiredService(Of PostgresRunLock)()
+            If Not Await runLock.TryAcquireAsync(cancellationToken).ConfigureAwait(False) Then
+                System.Console.Error.WriteLine(
+                        "Another batch is already running (the dashboard, or another CLI run). Nothing was started.")
+                Return 2
             End If
-            Return If(m.Status = "success", 0, 2)
+
+            ' VB.NET cannot Await inside Finally, so capture the outcome (including a
+            ' Ctrl+C cancellation, which DispatchAsync maps to exit code 3) and release
+            ' the lock below, outside the Try.
+            Dim exitCode As Integer = 2
+            Dim failure As ExceptionDispatchInfo = Nothing
+            Try
+                exitCode = Await RunBatchInnerAsync(
+                        orch, config, studyCount, direction, cancellationToken).ConfigureAwait(False)
+            Catch ex As Exception
+                failure = ExceptionDispatchInfo.Capture(ex)
+            End Try
+
+            ' Released even on failure/Ctrl+C. A killed process ends the session and
+            ' Postgres drops the lock with it, so this can never wedge.
+            Await runLock.ReleaseAsync().ConfigureAwait(False)
+
+            If failure IsNot Nothing Then failure.Throw()
+            Return exitCode
         End Using
+    End Function
+
+    ' Split out so RunBatchAsync's lock acquire/release reads as one Try/Finally rather
+    ' than wrapping the whole body.
+    Private Async Function RunBatchInnerAsync(
+            orch As PipelineOrchestrator,
+            config As RunConfiguration,
+            studyCount As Integer,
+            direction As TrialSelectionDirection,
+            cancellationToken As CancellationToken) As Task(Of Integer)
+        System.Console.WriteLine($"Starting batch run (StudyCount={studyCount}, Direction={direction})...")
+        Dim result = Await orch.ExecuteAsync(config, cancellationToken).ConfigureAwait(False)
+
+        Dim m = result.Metrics
+        System.Console.WriteLine($"Run {m.RunId} {m.Status}")
+        System.Console.WriteLine($"  Studies processed: {m.StudiesProcessed}")
+        System.Console.WriteLine($"  Rows persisted:    {m.RowsPersisted}")
+        System.Console.WriteLine($"  Resolution rate:   {m.ResolutionRate:P1}")
+        Dim duration As TimeSpan = If(m.EndedAt.HasValue, m.EndedAt.Value - m.StartedAt, TimeSpan.Zero)
+        System.Console.WriteLine($"  Wall clock:        {duration.TotalSeconds:F1}s")
+        If result.FailedNctIds.Count > 0 Then
+            System.Console.WriteLine($"  Failed trials:     {result.FailedNctIds.Count}")
+            For Each id In result.FailedNctIds
+                System.Console.WriteLine($"    - {id}")
+            Next
+        End If
+        Return If(m.Status = "success", 0, 2)
     End Function
 
     ' Destructive admin command: TRUNCATE every output table so the next batch
