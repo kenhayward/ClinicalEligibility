@@ -1125,6 +1125,18 @@ End Class
 Friend NotInheritable Class ThrowingGateway
     Implements IPostgresGateway
 
+    Public Function CountSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.CountSupersededStudiesAsync
+        Throw New InvalidOperationException("boom")
+    End Function
+
+    Public Function DeleteSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.DeleteSupersededStudiesAsync
+        Throw New InvalidOperationException("boom")
+    End Function
+
     Public Function GetAttemptedNctIdsAsync(
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
             Implements IPostgresGateway.GetAttemptedNctIdsAsync

@@ -342,10 +342,12 @@ public class HomeController : Controller
         {
             var normalizeRemaining = await _gateway.CountConceptsToNormalizeAsync(false, cancellationToken);
             var embedRemaining = await _gateway.CountStudiesToEmbedAsync(model, cancellationToken);
+            var supersededCount = await _gateway.CountSupersededStudiesAsync(cancellationToken);
             return View(new ToolsViewModel
             {
                 NormalizeRemaining = normalizeRemaining,
                 EmbedRemaining = embedRemaining,
+                SupersededCount = supersededCount,
                 EmbeddingModel = model,
                 DefaultConcurrency = cap,
                 BusyActivity = gate.CurrentActivity,
@@ -386,12 +388,65 @@ public class HomeController : Controller
             var model = config["Embedding:Model"] ?? "";
             var normalizeRemaining = await _gateway.CountConceptsToNormalizeAsync(false, cancellationToken);
             var embedRemaining = await _gateway.CountStudiesToEmbedAsync(model, cancellationToken);
-            return Json(new { normalizeRemaining, embedRemaining });
+            var supersededCount = await _gateway.CountSupersededStudiesAsync(cancellationToken);
+            return Json(new { normalizeRemaining, embedRemaining, supersededCount });
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to read tool counts");
             return Json(new { });
+        }
+    }
+
+    /// <summary>
+    /// DESTRUCTIVE. Deletes every superseded eligibility_study attempt row, keeping
+    /// the latest attempt per NCT_ID. Runs INLINE rather than as a background job:
+    /// it is a single DELETE with no LLM calls, so there is no progress to stream
+    /// and the request can just wait for it.
+    /// <para>
+    /// It still takes the shared <see cref="RunGate"/>, for two reasons: a pipeline
+    /// batch writes eligibility_study rows as it goes, so deleting mid-run would
+    /// race the very rows being superseded; and holding the gate makes this
+    /// mutually exclusive with the other tools, matching how every other write on
+    /// this tab behaves. Released in a finally so a failed DELETE cannot wedge the
+    /// gate and block all future runs.
+    /// </para>
+    /// <para>
+    /// Progression is unaffected - one row per NCT_ID always survives, so the
+    /// attempted-set anti-join is unchanged. See DeleteSupersededStudiesAsync.
+    /// </para>
+    /// </summary>
+    [HttpPost]
+    [Authorize(Policy = "PipelineOps")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemoveSuperseded(
+        [FromServices] RunGate gate,
+        CancellationToken cancellationToken)
+    {
+        var jobId = Guid.NewGuid();
+        if (!gate.TryAcquire(jobId, "remove-superseded"))
+        {
+            return Conflict(new { current_run_id = gate.CurrentRunId, activity = gate.CurrentActivity });
+        }
+
+        try
+        {
+            var deleted = await _gateway.DeleteSupersededStudiesAsync(cancellationToken);
+            await _audit.WriteAsync("delete", "eligibility_study", null,
+                $"removed {deleted} superseded attempt rows (latest attempt per NCT_ID kept)",
+                HttpContext.RequestAborted);
+            return Json(new { ok = true, deleted });
+        }
+        catch (Exception ex)
+        {
+            // Surface the reason inline: the Tools tab renders it next to the card
+            // rather than the user getting a blank 500 after confirming a delete.
+            _logger.LogWarning(ex, "Failed to remove superseded study rows");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = ex.Message });
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 

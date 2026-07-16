@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 14, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 15, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.15",
+      "releaseDate": "2026-07-16",
+      "enhancements": [
+        "Tools: a new 'Remove superseded results' card shows how many study attempts have been replaced by a later run - counting every superseded attempt, successful or failed - and lets you delete them, keeping the most recent attempt for each trial. It is a plain database delete rather than a background job, so there is no progress bar; it asks for confirmation first, naming the number of rows, because it cannot be undone. The extracted criteria in public.eligibility are not touched, and no trial becomes eligible for reprocessing: one attempt per trial always remains, so the pipeline's record of what it has already done is unchanged. The count matches exactly what the Studies tab hides under 'Hide superseded attempts'. Requires pipeline-operator permission, is blocked while a run or another tool is in flight, and is recorded in the audit trail."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.14",
       "releaseDate": "2026-07-16",

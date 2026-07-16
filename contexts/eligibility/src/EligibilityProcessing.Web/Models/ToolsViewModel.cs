@@ -14,6 +14,12 @@ public sealed class ToolsViewModel
     public string EmbeddingModel { get; init; } = "";
     public int DefaultConcurrency { get; init; } = 1;
 
+    /// <summary>Superseded eligibility_study attempt rows - every attempt that is
+    /// not the latest for its NCT_ID. Unlike the other two counts this is not
+    /// "work remaining"; it is how many audit rows the Remove superseded results
+    /// card would delete.</summary>
+    public long SupersededCount { get; init; }
+
     /// <summary>What currently holds the shared RunGate ("batch" / "normalize-umls"
     /// / "embed-studies"), or null when idle. Drives the initial disabled state.</summary>
     public string? BusyActivity { get; init; }

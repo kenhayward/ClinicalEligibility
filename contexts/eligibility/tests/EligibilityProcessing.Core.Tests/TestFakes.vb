@@ -374,6 +374,32 @@ Friend NotInheritable Class FakeGateway
         Return Task.FromResult(0)
     End Function
 
+    ' --- superseded-attempt housekeeping (Tools tab) ---
+    Public Property SupersededCountToReturn As Long = 0
+    Public Property SupersededDeletedToReturn As Long = 0
+    Private _deleteSupersededCalls As Integer
+
+    Public ReadOnly Property DeleteSupersededCalls As Integer
+        Get
+            Return Volatile.Read(_deleteSupersededCalls)
+        End Get
+    End Property
+
+    Public Function CountSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.CountSupersededStudiesAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Return Task.FromResult(SupersededCountToReturn)
+    End Function
+
+    Public Function DeleteSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.DeleteSupersededStudiesAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Interlocked.Increment(_deleteSupersededCalls)
+        Return Task.FromResult(SupersededDeletedToReturn)
+    End Function
+
     Public Function GetDashboardMetricsAsync(
             cancellationToken As CancellationToken) As Task(Of DashboardMetrics) _
             Implements IPostgresGateway.GetDashboardMetricsAsync
