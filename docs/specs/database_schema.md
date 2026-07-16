@@ -133,7 +133,11 @@ One row per batch run (the Runs tab + `status` cards read this). *(V1;
 Per-trial audit table — one row per `(run_id, nct_id)`. This is the **progress
 ledger**: the next batch anti-joins the distinct `nct_id`s here (replacing the
 old `MAX(nct_id)` watermark). Written `running` just before the LLM call,
-finalised to a terminal status afterward. *(V2; `llm_raw_response` added V3;
+finalised to a terminal status afterward. A row left at `running` by a killed host
+is therefore doubly harmful - invisible on the dashboard (neither success nor
+failure) and permanently excluded from future batches by the anti-join - which is
+why the web host reconciles stale ones to `interrupted` at startup. *(V2;
+`llm_raw_response` added V3;
 five `llm_stopped_*` / `llm_truncated` diagnostics added V9; `llm_ms` / `umls_ms`
 / `persist_ms` phase timings added V16.)*
 
@@ -143,7 +147,7 @@ five `llm_stopped_*` / `llm_truncated` diagnostics added V9; `llm_ms` / `umls_ms
 | `nct_id` | `text` | no | | PK part. |
 | `started_at` | `timestamptz` | no | | |
 | `finished_at` | `timestamptz` | yes | | |
-| `status` | `text` | no | | `running` \| `success` \| `llm_failed` \| `parse_empty` \| `parse_invalid_json` \| `persist_failed` \| `cancelled`. |
+| `status` | `text` | no | | `running` \| `success` \| `llm_failed` \| `parse_empty` \| `parse_invalid_json` \| `persist_failed` \| `failed` \| `cancelled` \| `interrupted`. Free text - no CHECK constraint - so a new value needs no migration; `StudyExecution` (Core) is the canonical list. `interrupted` is the only value NOT written by the pipeline: the web host reconciles rows stranded at `running` by a killed host at startup, once older than `Postgres:InterruptedStudyThresholdHours` (default 6h). See `PostgresGateway.ReconcileInterruptedStudiesAsync`. |
 | `llm_succeeded` | `boolean` | yes | | |
 | `llm_finish_reason` | `text` | yes | | OpenAI finish reason. |
 | `llm_prompt_tokens` | `integer` | yes | | |

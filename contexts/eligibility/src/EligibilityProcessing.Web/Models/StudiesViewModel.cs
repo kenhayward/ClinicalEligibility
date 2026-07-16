@@ -37,7 +37,10 @@ public sealed class StudiesViewModel
             StudyExecution.StatusParseInvalidJson,
             StudyExecution.StatusPersistFailed,
             StudyExecution.StatusFailed,
-            StudyExecution.StatusCancelled
+            StudyExecution.StatusCancelled,
+            // Reconciled orphans. Must be filterable: the dashboard's failure card
+            // links its "interrupted" line to History?status=interrupted.
+            StudyExecution.StatusInterrupted
         };
     }
 

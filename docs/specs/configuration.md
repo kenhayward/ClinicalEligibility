@@ -266,6 +266,7 @@ code defaults in `PostgresOptions`; add a `Postgres` section to a host's
 |-----|---------|-------|
 | `MaxStudyCount` | `5000` | Upper bound on a single batch's `StudyCount`. A larger request is clamped (with a warning) inside `SelectNextTrialsAsync`, so a fat-fingered value (e.g. `10000`) can't turn the source anti-join into a multi-minute scan. `0` disables the clamp. |
 | `SourceCommandTimeoutSeconds` | `300` | Command timeout applied to the **source** data source (the trial-selection scan + exclusion-set COPY). Replaces Npgsql's 30s default, which surfaced a slow selection as a fatal `Exception while reading from stream`. `0` means no timeout. |
+| `InterruptedStudyThresholdHours` | `6` | Age beyond which an `eligibility_study` row still at `status='running'` is assumed orphaned by a killed host and reconciled to `interrupted` at **web-host startup**. `0` or less disables the sweep. **Do not lower this below ~3h without also lowering `Llm:TimeoutSeconds`/`Llm:RetryCount`:** one trial's worst case is ~2h (3 LLM attempts x 1200s, per-attempt, doubled by reasoning escalation), and the CLI can process trials against the same database concurrently with no cross-process lock - the age gate is the only thing keeping the sweep off live rows. A trial wrongly swept self-corrects when it finishes. |
 
 > Fast selection also relies on a partial index, `ix_eligibilities_selectable_nct_id`,
 > that the app creates on startup when the source and output databases are

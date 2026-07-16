@@ -13,6 +13,9 @@
             or EligibilityProcessing.Core.StudyExecution.StatusFailed => "bg-danger",
         EligibilityProcessing.Core.StudyExecution.StatusParseEmpty => "bg-warning text-dark",
         EligibilityProcessing.Core.StudyExecution.StatusCancelled => "bg-secondary",
+        @* Amber, not red: the trial did not fail - the host stopped before it
+           reached any outcome. Re-running it will usually just work. *@
+        EligibilityProcessing.Core.StudyExecution.StatusInterrupted => "bg-warning text-dark",
         _ => "text-bg-light"
     };
     string FormatDuration(System.TimeSpan? d) =>
