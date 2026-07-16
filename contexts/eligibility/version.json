@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 11, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 12, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.12",
+      "releaseDate": "2026-07-16",
+      "enhancements": [],
+      "fixes": [
+        "Deploy: `docker compose build` now works from deploy/eligibility-pipeline. The compose file pointed `dockerfile:` at a bare `Dockerfile.web` / `Dockerfile.cli` while setting `context:` to the repository root, and Docker resolves the dockerfile path relative to the context rather than to the compose file - so the build failed with 'failed to read dockerfile: open Dockerfile.web: no such file or directory'. Both services now name the dockerfile relative to the context. The context itself is unchanged and must stay at the repository root, since the Dockerfiles copy the whole tree and restore contexts/eligibility/Eligibility.sln."
+      ]
+    },
     {
       "version": "0.1.11",
       "releaseDate": "2026-07-16",

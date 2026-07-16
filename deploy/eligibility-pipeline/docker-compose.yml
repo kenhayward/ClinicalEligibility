@@ -36,6 +36,8 @@ services:
   # the hub — so they're merged.
   eligibility-web:
     build:
+      # `dockerfile` is resolved relative to `context` (the repo root), NOT to
+      # this compose file - hence the full path back down to the deploy folder.
       context: ../..
       dockerfile: deploy/eligibility-pipeline/Dockerfile.web
     image: eligibility/web:${ELIGIBILITY_VERSION:-dev}
@@ -48,7 +50,7 @@ services:
     ports:
       - "8091:8080"
     env_file:
-      - ../../.env
+      - .env
     environment:
       - ASPNETCORE_URLS=http://+:8080
       # Container timezone (needs tzdata in the image, which Dockerfile.web installs).
@@ -84,13 +86,14 @@ services:
   # (One-shot still works too: docker compose run --rm --entrypoint elig eligibility-cli migrate)
   eligibility-cli:
     build:
+      # Resolved relative to `context` (the repo root) - see the note above.
       context: ../..
       dockerfile: deploy/eligibility-pipeline/Dockerfile.cli
     image: eligibility/cli:${ELIGIBILITY_VERSION:-dev}
     container_name: eligibility-cli
     restart: unless-stopped
     env_file:
-      - ../../.env
+      - .env
     environment:
       # Local timestamps (e.g. the normalize-umls ETA finish time). Defaults to UTC;
       # set TZ in .env (e.g. TZ=Europe/London). Needs tzdata, which Dockerfile.cli installs.
