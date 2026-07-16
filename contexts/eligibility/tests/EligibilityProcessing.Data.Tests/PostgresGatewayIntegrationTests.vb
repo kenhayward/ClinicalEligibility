@@ -24,6 +24,110 @@ Public Class PostgresGatewayIntegrationTests
         _fixture = fixture
     End Sub
 
+    ' ============ GetEligibilityFilterOptionsAsync + the pg_stats pre-filter ============
+    '
+    ' The pre-filter skips the SELECT DISTINCT scan for columns the planner says
+    ' are provably over the dropdown cap. It is a pure optimization, so the
+    ' load-bearing test is the equivalence one: the answer must not depend on
+    ' whether statistics happen to exist.
+
+    ' Seeds `distinctConcepts` trials, each contributing one distinct concept but
+    ' all sharing the same two criterion values. That gives one high-cardinality
+    ' column (concept) and one low-cardinality column (criterion) in the same table.
+    Private Async Function SeedFilterOptionRowsAsync(distinctConcepts As Integer) As Task
+        For i = 1 To distinctConcepts
+            Dim nct = "NCT" & i.ToString("D8")
+            Dim criterion = If(i Mod 2 = 0, "Inclusion", "Exclusion")
+            Await _fixture.Gateway.PersistTrialAsync(nct,
+                    {MakeResolvedWithCriterion(nct, criterion, "concept-" & i.ToString("D4"))},
+                    CancellationToken.None)
+        Next
+    End Function
+
+    Private Async Function AnalyzeEligibilityAsync() As Task
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "ANALYZE public.eligibility"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
+    ' The one that matters: statistics are an optimization input, never a
+    ' correctness input. Same corpus, same cap, with and without stats -> the
+    ' same answer. Without ANALYZE there are no estimates, so every column is
+    ' scanned (the pre-filter's fallback path); after ANALYZE the concept column
+    ' is skipped on the estimate. Both must agree.
+    <SkippableFact>
+    Public Async Function FilterOptions_skip_path_matches_scan_path() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedFilterOptionRowsAsync(60)
+
+        ' No ANALYZE yet: no estimates, so this is the full-scan path.
+        Dim scanned = Await _fixture.Gateway.GetEligibilityFilterOptionsAsync(10, CancellationToken.None)
+
+        Await AnalyzeEligibilityAsync()
+
+        ' Estimates now exist: concept (60 distinct) clears 10 * 2, so it is skipped.
+        Dim skipped = Await _fixture.Gateway.GetEligibilityFilterOptionsAsync(10, CancellationToken.None)
+
+        Assert.Equal(scanned.Concepts, skipped.Concepts)
+        Assert.Equal(scanned.Criteria, skipped.Criteria)
+        Assert.Equal(scanned.NctIds, skipped.NctIds)
+        Assert.Equal(scanned.Domains, skipped.Domains)
+        Assert.Equal(scanned.ConceptCodes, skipped.ConceptCodes)
+        Assert.Equal(scanned.SemanticTypes, skipped.SemanticTypes)
+    End Function
+
+    ' A column under the cap must still produce a dropdown after ANALYZE - the
+    ' pre-filter must not blank a low-cardinality column.
+    <SkippableFact>
+    Public Async Function FilterOptions_low_cardinality_column_still_populated_after_analyze() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedFilterOptionRowsAsync(60)
+        Await AnalyzeEligibilityAsync()
+
+        Dim options = Await _fixture.Gateway.GetEligibilityFilterOptionsAsync(10, CancellationToken.None)
+
+        ' criterion has exactly 2 distinct values, well under the cap of 10.
+        Assert.Equal({"Exclusion", "Inclusion"}, options.Criteria.OrderBy(Function(s) s).ToArray())
+        ' concept has 60 distinct, over the cap: empty list means "render a text input".
+        Assert.Empty(options.Concepts)
+    End Function
+
+    ' The pre-filter assumes pg_stats tracks reality after ANALYZE. Assert that
+    ' directly, so a future Postgres/Npgsql change that breaks the estimate query
+    ' fails loudly here rather than silently degrading into always-scan.
+    <SkippableFact>
+    Public Async Function EstimatedDistinctCounts_reflect_analyze() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedFilterOptionRowsAsync(60)
+
+        ' Before ANALYZE: no statistics, so no usable estimates. (Either the row
+        ' is absent entirely, or n_distinct is 0 - both mean "scan".)
+        Dim before = Await _fixture.Gateway.LoadEstimatedDistinctCountsAsync(
+                {"concept", "criterion"}, CancellationToken.None)
+        Dim conceptBefore As Double = 0
+        before.TryGetValue("concept", conceptBefore)
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(conceptBefore, 10))
+
+        Await AnalyzeEligibilityAsync()
+
+        Dim after = Await _fixture.Gateway.LoadEstimatedDistinctCountsAsync(
+                {"concept", "criterion"}, CancellationToken.None)
+
+        ' 60 rows is small enough that ANALYZE samples all of them, so the
+        ' estimates should be exact. Assert on the decision rather than the raw
+        ' number to avoid coupling the test to sampling behaviour.
+        Assert.True(PostgresGateway.ShouldSkipDistinctScan(after("concept"), 10),
+                    $"expected concept estimate to clear the cap, got {after("concept")}")
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(after("criterion"), 10),
+                     $"expected criterion estimate to stay under the cap, got {after("criterion")}")
+    End Function
+
     ' ============ EnsureSchemaAsync ============
 
     <SkippableFact>

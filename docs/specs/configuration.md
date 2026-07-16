@@ -25,7 +25,7 @@ higher:
 | # | Source | Holds | Committed? |
 |---|--------|-------|------------|
 | 1 | `contexts/eligibility/src/Shared/appsettings.Shared.json` | Cross-host non-secret defaults: `Llm`, `LlmNormalize`, `Embedding`, `Umls`, `Pipeline`, `Notifications:Smtp` (structure only) | ✅ yes |
-| 2 | per-host `appsettings.json` | Host-specific keys: `Webhook`, `AllowedHosts`, `Logging` | ✅ yes |
+| 2 | per-host `appsettings.json` | Host-specific keys: `Webhook`, `Web`, `AllowedHosts`, `Logging` | ✅ yes |
 | 3 | `appsettings.{Environment}.json` | Local-dev / per-environment non-secret overrides | ✅ yes |
 | 4 | User secrets (`dotnet user-secrets`) | Secrets, dev only | ❌ no (outside repo) |
 | 5 | Environment variables (incl. values loaded from `.env`) | **Secrets and any override** | ❌ no |
@@ -225,6 +225,19 @@ and the pipeline runs without email (notifications are once-per-batch, spec
 | `RateLimitPermits` | `1` | JSON | 1 trigger / window in production. |
 | `RateLimitWindowSeconds` | `60` | JSON | |
 | `Secret` | `""` | **.env** | **Secret.** Expected on the `X-Eligibility-Token` header. **When unset, `/trigger` rejects every request** — there is no implicit "no auth" path (spec §6.5). |
+
+### `Web` - dashboard read caching (Web `appsettings.json`)
+[`CorpusReadCache.vb`](../../contexts/eligibility/src/EligibilityProcessing.Core/CorpusReadCache.vb)
+
+| Key | Default | Where | Notes |
+|-----|---------|-------|-------|
+| `CorpusCacheTtlSeconds` | `60` | JSON / .env | In-memory TTL for the two whole-corpus reads behind the Dashboard and Results pages (`GetDashboardMetricsAsync`, `GetEligibilityFilterOptionsAsync`). Both are aggregates that only move when a run persists trials, but were recomputed per page view (~700 ms and ~1150 ms respectively on the production corpus). **Set to `0` to disable caching and always read live.** |
+
+Cache scope is the process, not a shared store: the web host is a singleton
+(`container_name` is pinned in `deploy/eligibility-pipeline/docker-compose.yml`,
+and SignalR requires the orchestrator in the hub's process), so there is no
+second instance to stay coherent with. The CLI's `status` command is
+deliberately uncached and always reads live.
 
 ### `Auth` — Web sign-in · Web `appsettings.json` + `.env`
 [`AuthOptions.cs`](../../contexts/eligibility/src/EligibilityProcessing.Web/Auth/AuthOptions.cs)

@@ -9,6 +9,40 @@ Imports Xunit
 
 Public Class PostgresGatewayUnitTests
 
+    ' ============ ShouldSkipDistinctScan (filter-dropdown pg_stats pre-filter) ============
+    '
+    ' The rule guards a performance shortcut, so the tests that matter are the
+    ' ones proving it stays conservative: an absent or borderline estimate must
+    ' fall through to the real scan.
+
+    <Fact>
+    Public Sub ShouldSkipDistinctScan_skips_when_estimate_clears_cap_by_margin()
+        ' 29605 distinct concepts against a cap of 100 - the production case.
+        Assert.True(PostgresGateway.ShouldSkipDistinctScan(29605.0, 100))
+    End Sub
+
+    <Fact>
+    Public Sub ShouldSkipDistinctScan_does_not_skip_when_estimate_is_unknown()
+        ' 0 is pg_stats' "no statistics" encoding (never analyzed). An absent
+        ' estimate is not evidence, so we must scan.
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(0.0, 100))
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(-1.0, 100))
+    End Sub
+
+    <Fact>
+    Public Sub ShouldSkipDistinctScan_does_not_skip_below_or_at_the_margin()
+        Dim cap = 100
+        Dim margin = cap * PostgresGateway.DistinctSkipMarginFactor
+        ' Comfortably under the cap: obviously scan.
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(50.0, cap))
+        ' Over the cap but inside the safety margin: the estimate is sampled and
+        ' could be overstating, so scan rather than risk blanking a dropdown.
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(101.0, cap))
+        Assert.False(PostgresGateway.ShouldSkipDistinctScan(CDbl(margin), cap))
+        ' Strictly past the margin: skip.
+        Assert.True(PostgresGateway.ShouldSkipDistinctScan(CDbl(margin) + 1.0, cap))
+    End Sub
+
     ' ============ MigrationNames ============
 
     <Fact>

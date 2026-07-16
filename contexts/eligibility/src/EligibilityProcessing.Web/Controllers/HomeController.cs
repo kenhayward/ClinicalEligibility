@@ -16,12 +16,18 @@ public class HomeController : Controller
     private const int RecentRunsLimit = 50;
 
     private readonly IPostgresGateway _gateway;
+    private readonly ICorpusReadCache _corpusReads;
     private readonly IAuditWriter _audit;
     private readonly ILogger<HomeController> _logger;
 
-    public HomeController(IPostgresGateway gateway, IAuditWriter audit, ILogger<HomeController> logger)
+    public HomeController(
+        IPostgresGateway gateway,
+        ICorpusReadCache corpusReads,
+        IAuditWriter audit,
+        ILogger<HomeController> logger)
     {
         _gateway = gateway;
+        _corpusReads = corpusReads;
         _audit = audit;
         _logger = logger;
     }
@@ -30,7 +36,11 @@ public class HomeController : Controller
     {
         try
         {
-            var metrics = await _gateway.GetDashboardMetricsAsync(cancellationToken);
+            // Cached (see ICorpusReadCache): a whole-corpus aggregate that only
+            // moves when a run persists trials. The most-recent-run read below
+            // stays live - it is cheap, and it is what makes a just-finished run
+            // show up immediately.
+            var metrics = await _corpusReads.GetDashboardMetricsAsync(cancellationToken);
             var recent = await _gateway.GetRecentRunsAsync(1, cancellationToken);
 
             return View(new DashboardViewModel
@@ -86,7 +96,10 @@ public class HomeController : Controller
     {
         try
         {
-            var options = await _gateway.GetEligibilityFilterOptionsAsync(
+            // Cached (see ICorpusReadCache). The dropdown lists are corpus-wide
+            // distinct values; the paged result set below is NOT cached, since it
+            // is keyed by the user's filter and must always be live.
+            var options = await _corpusReads.GetEligibilityFilterOptionsAsync(
                 ResultsDropdownThreshold, cancellationToken);
 
             var filter = new EligibilityFilter(

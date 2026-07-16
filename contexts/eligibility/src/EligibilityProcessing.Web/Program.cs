@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 // Load .env into the process environment before WebApplication.CreateBuilder
@@ -28,6 +29,27 @@ builder.Configuration.AddSharedAppSettings();
 
 // Pipeline (gateway, LLM, UMLS, orchestrator, etc.).
 builder.Services.AddEligibilityPipeline(builder.Configuration);
+
+// Cached corpus reads for the dashboard and the Results filter dropdowns.
+// Both are whole-corpus aggregates that only change when a run persists new
+// trials, yet were recomputed on every page view - measured at ~700 ms
+// (dashboard) and ~1150 ms (filter options) against the production corpus.
+//
+// Singleton: IPostgresGateway and IMemoryCache are both singletons, and the
+// cache holds no per-request state. The TTL is read inside the factory rather
+// than here so it resolves LAZILY, after WebApplicationFactory's configuration
+// overrides have been applied - same reasoning as RateLimiterOptions below.
+// Set Web:CorpusCacheTtlSeconds to 0 to disable caching and always read live.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ICorpusReadCache>(sp =>
+{
+    var ttlSeconds = sp.GetRequiredService<IConfiguration>()
+        .GetValue<int?>("Web:CorpusCacheTtlSeconds") ?? CorpusReadCache.DefaultTtlSeconds;
+    return new CorpusReadCache(
+        sp.GetRequiredService<IPostgresGateway>(),
+        sp.GetRequiredService<IMemoryCache>(),
+        TimeSpan.FromSeconds(ttlSeconds));
+});
 
 // SignalR live progress: register the hub infrastructure and override the
 // no-op IPipelineHooks default with the broadcasting impl. Co-locating the
