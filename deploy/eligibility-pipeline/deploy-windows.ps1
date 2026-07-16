@@ -11,6 +11,15 @@
     deploy. The target needs Docker Desktop + the OpenSSH Server feature;
     no source-control or .NET tooling is required on it.
 
+    WHERE .env LIVES (and why it is not the repo root): docker-compose.yml
+    gives each service `env_file: - .env`, and Compose resolves env_file
+    RELATIVE TO THE COMPOSE FILE, not to the working directory the command
+    runs from. So the file the containers actually read is
+    deploy/eligibility-pipeline/.env, and that is where this script puts it.
+    A copy at the repo root does NOT satisfy env_file - compose fails with
+    "env file ...\deploy\eligibility-pipeline\.env not found" no matter what
+    --env-file says, because --env-file only feeds ${VAR} interpolation.
+
     Uncommitted local changes are intentionally NOT shipped - the deploy
     matches a reproducible git revision. Commit your work first if you want
     it deployed.
@@ -34,7 +43,10 @@
 .PARAMETER EnvFile
     Local .env file to transfer. Path relative to the repo root. Contains
     secrets; transferred via scp and ACL-locked on the target (best effort).
-    Defaults to .env in the repo root.
+    Defaults to deploy/eligibility-pipeline/.env - i.e. next to the compose
+    file, which is where it has to land on the target (see below). It is
+    copied to the SAME relative path remotely, so keeping the local layout
+    identical to the remote one is the whole point of the default.
 
 .PARAMETER SkipBuild
     Transfer files only; skip the `docker compose up --build` step. Useful
@@ -99,9 +111,16 @@
 param(
     [Parameter(Mandatory)] [string] $Target,
     [string] $RemotePath = "D:/dockers/eligibility",
-    [string] $EnvFile = ".env",
+    [string] $EnvFile = "deploy/eligibility-pipeline/.env",
     [switch] $SkipBuild
 )
+
+# Relative path, under both the repo root locally and $RemotePath remotely, that
+# the containers actually read their environment from. Fixed rather than derived
+# from -EnvFile: -EnvFile says which local file to ship, this says where it must
+# land, and Compose's env_file directive pins the destination regardless of where
+# the operator keeps their copy. Keep in step with docker-compose.yml's env_file.
+$RemoteEnvRelative = "deploy/eligibility-pipeline/.env"
 
 $ErrorActionPreference = "Stop"
 
@@ -140,7 +159,7 @@ if (-not $repoRoot) {
 }
 $envPath = Join-Path $repoRoot $EnvFile
 if (-not (Test-Path $envPath)) {
-    throw ".env not found at $envPath. Create it (see .env.example) before deploying."
+    throw ".env not found at $envPath. Copy .env.example (repo root) there and fill it in before deploying. It lives next to docker-compose.yml rather than at the repo root because Compose resolves the services' env_file directive relative to the compose file. A repo-root .env is still what `dotnet run` picks up for local dev (DotEnvLoader walks up from the working directory), so the two can coexist - pass -EnvFile to ship a different one."
 }
 if ($RemotePath -match "\s") {
     throw "RemotePath contains spaces: '$RemotePath'. scp destination quoting across the ssh boundary is fragile - pick a spaceless path."
@@ -192,10 +211,21 @@ Remove-Item source.tar -Force
         # separately, then tighten its ACL on the remote. The ACL step is
         # best-effort: a failure there must not abort an otherwise good
         # deploy, so it warns rather than throws.
-        Write-Host "Transferring .env..." -ForegroundColor Cyan
-        Invoke-Native "scp .env" { scp $envPath "${Target}:$RemotePath/.env" }
+        #
+        # Destination is deploy/eligibility-pipeline/.env, NOT the repo root:
+        # that is the path the compose file's env_file directive resolves to
+        # (see DESCRIPTION). The tar extract above already created the folder
+        # (its other files are tracked), but the mkdir keeps this independent
+        # of that ordering - scp fails obscurely if the parent is missing.
+        Write-Host "Transferring .env -> $RemoteEnvRelative ..." -ForegroundColor Cyan
+        $remoteEnvPath = "$RemotePath/$RemoteEnvRelative"
+        $remoteEnvDir = Split-Path $remoteEnvPath -Parent
+        $remoteEnvDir = $remoteEnvDir -replace "\\", "/"
+        Invoke-RemotePwsh "remote .env mkdir" `
+            "New-Item -ItemType Directory -Force -Path '$remoteEnvDir' | Out-Null"
+        Invoke-Native "scp .env" { scp $envPath "${Target}:$remoteEnvPath" }
         Invoke-RemotePwsh "remote .env ACL" @"
-`$envFile = ('$RemotePath/.env' -replace '/', '\')
+`$envFile = ('$remoteEnvPath' -replace '/', '\')
 try {
     icacls `$envFile /inheritance:r /grant:r ('{0}:F' -f `$env:USERNAME) 'BUILTIN\Administrators:F' 'NT AUTHORITY\SYSTEM:F' | Out-Null
 } catch {
@@ -208,11 +238,16 @@ try {
             return
         }
 
+        # --env-file supplies ${VAR} interpolation for the compose file itself
+        # (TZ, and ELIGIBILITY_VERSION which is set below). It is resolved from
+        # the working directory, so it needs the full relative path. This is a
+        # SEPARATE mechanism from the services' env_file directive, which loads
+        # the same file into the containers - they just happen to be one file.
         Write-Host "Building + starting containers on target..." -ForegroundColor Cyan
         Invoke-RemotePwsh "remote compose up" @"
 Set-Location '$RemotePath'
 `$env:ELIGIBILITY_VERSION = '$version'
-docker compose -f deploy/eligibility-pipeline/docker-compose.yml --env-file .env up -d --build
+docker compose -f deploy/eligibility-pipeline/docker-compose.yml --env-file $RemoteEnvRelative up -d --build
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 "@
 

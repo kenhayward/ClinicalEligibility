@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 13, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 14, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.14",
+      "releaseDate": "2026-07-16",
+      "enhancements": [],
+      "fixes": [
+        "Deploy: the deploy scripts now put .env where docker compose actually reads it. Both deploy.ps1 and deploy-windows.ps1 expected .env at the repository root and copied it there on the target, but the compose file gives each service `env_file: - .env`, and Compose resolves that relative to the compose file - so the containers needed it at deploy/eligibility-pipeline/.env and a deploy onto a clean target failed with 'env file ...deploy/eligibility-pipeline/.env not found'. The scripts now default -EnvFile to deploy/eligibility-pipeline/.env and transfer it to the same path on the target. Passing -EnvFile explicitly still works and now ships whichever file you name to the correct destination. A repository-root .env is unaffected and is still what `dotnet run` reads for local development."
+      ]
+    },
     {
       "version": "0.1.13",
       "releaseDate": "2026-07-16",
