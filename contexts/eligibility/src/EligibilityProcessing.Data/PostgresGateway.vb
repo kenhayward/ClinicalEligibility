@@ -758,6 +758,70 @@ WHERE @include_attempted OR NOT EXISTS (
         End Using
     End Function
 
+    ' ============ Superseded study attempts (Tools tab housekeeping) ============
+    '
+    ' "Superseded" is defined exactly as the Studies tab's "Hide superseded
+    ' attempts" toggle defines it (SearchStudiesAsync): rank attempts per NCT_ID by
+    ' started_at DESC and keep rn = 1. This counts/deletes the complement, rn > 1.
+    ' The two MUST stay in step - if they ever diverge, the Tools card would offer
+    ' to delete rows the Studies tab still shows as current.
+    '
+    ' On ties (two attempts with an identical started_at) ROW_NUMBER picks
+    ' arbitrarily but consistently within one statement, so exactly one row per
+    ' NCT_ID still survives. timestamptz ties are vanishingly unlikely here, and
+    ' matching the Studies view's ordering matters more than inventing a tiebreak
+    ' that would make the two disagree.
+    Private Const SupersededRanked As String = "
+    SELECT run_id, nct_id,
+           ROW_NUMBER() OVER (PARTITION BY nct_id ORDER BY started_at DESC) AS rn
+    FROM public.eligibility_study"
+
+    Public Async Function CountSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.CountSupersededStudiesAsync
+
+        Const sql As String = "
+SELECT COUNT(*)
+FROM (" & SupersededRanked & "
+) ranked
+WHERE ranked.rn > 1"
+
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = sql
+                Dim scalar = Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False)
+                Return If(scalar Is Nothing OrElse scalar Is DBNull.Value, 0L, Convert.ToInt64(scalar))
+            End Using
+        End Using
+    End Function
+
+    Public Async Function DeleteSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.DeleteSupersededStudiesAsync
+
+        ' DELETE ... USING joins back on the (run_id, nct_id) primary key, so the
+        ' window is evaluated once against a stable snapshot and each doomed row is
+        ' matched by key rather than re-ranked per row. One statement = one implicit
+        ' transaction: it either removes every superseded row or none.
+        Const sql As String = "
+DELETE FROM public.eligibility_study s
+USING (" & SupersededRanked & "
+) ranked
+WHERE ranked.rn > 1
+  AND s.run_id = ranked.run_id
+  AND s.nct_id = ranked.nct_id"
+
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = sql
+                Dim deleted = Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+                _logger.LogInformation(
+                        "Removed {Deleted} superseded eligibility_study rows (latest attempt per NCT_ID kept)", deleted)
+                Return CLng(deleted)
+            End Using
+        End Using
+    End Function
+
     Public Async Function RecordConceptNormalizationAsync(
             conceptNorm As String,
             normalizedTerm As String,

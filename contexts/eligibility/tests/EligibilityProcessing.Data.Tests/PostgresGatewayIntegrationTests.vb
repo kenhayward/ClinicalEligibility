@@ -24,6 +24,215 @@ Public Class PostgresGatewayIntegrationTests
         _fixture = fixture
     End Sub
 
+    ' ============ Superseded study attempts (Tools tab: Remove superseded results) ============
+    '
+    ' Every test here runs against the Testcontainers Postgres from PostgresFixture.
+    ' This is a destructive feature; nothing in this file may ever point at a real
+    ' database.
+
+    ' Records `attempts` attempts for one trial, oldest first, one minute apart so
+    ' started_at ordering is unambiguous. Returns the run id of the LAST (newest)
+    ' attempt - the one that must survive.
+    Private Async Function SeedAttemptsAsync(
+            nctId As String, attempts As Integer,
+            Optional lastStatus As String = StudyExecution.StatusSuccess) As Task(Of Guid)
+        Dim lastRun As Guid = Guid.Empty
+        For i = 1 To attempts
+            Dim runId = Guid.NewGuid()
+            ' i=1 is the oldest; the newest gets the most recent started_at.
+            Dim startedAt = DateTimeOffset.UtcNow.AddMinutes(-(attempts - i) - 1)
+            Dim status = If(i = attempts, lastStatus, StudyExecution.StatusLlmFailed)
+            Await _fixture.Gateway.StartStudyAsync(runId, nctId, startedAt, CancellationToken.None)
+            Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                    runId:=runId, nctId:=nctId, startedAt:=startedAt, finishedAt:=startedAt.AddSeconds(2),
+                    status:=status, llmSucceeded:=(status = StudyExecution.StatusSuccess),
+                    llmFinishReason:="stop", llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                    parsedRecordCount:=0, persistedRowCount:=0, errorMessage:=""), CancellationToken.None)
+            lastRun = runId
+        Next
+        Return lastRun
+    End Function
+
+    Private Async Function CountStudyRowsAsync(nctId As String) As Task(Of Long)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT COUNT(*) FROM public.eligibility_study WHERE nct_id = @n"
+                cmd.Parameters.AddWithValue("n", nctId)
+                Return Convert.ToInt64(Await cmd.ExecuteScalarAsync())
+            End Using
+        End Using
+    End Function
+
+    Private Async Function SurvivingRunIdAsync(nctId As String) As Task(Of Guid)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT run_id FROM public.eligibility_study WHERE nct_id = @n"
+                cmd.Parameters.AddWithValue("n", nctId)
+                Return CType(Await cmd.ExecuteScalarAsync(), Guid)
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function CountSuperseded_counts_every_attempt_except_the_latest() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Await SeedAttemptsAsync("NCT00000001", 3)   ' 2 superseded
+        Await SeedAttemptsAsync("NCT00000002", 1)   ' 0 superseded - single attempt
+        Await SeedAttemptsAsync("NCT00000003", 2)   ' 1 superseded
+
+        Assert.Equal(3L, Await _fixture.Gateway.CountSupersededStudiesAsync(CancellationToken.None))
+    End Function
+
+    ' "whether successful or failed" - a superseded SUCCESS still counts. Guards
+    ' against someone narrowing this to failures only.
+    <SkippableFact>
+    Public Async Function CountSuperseded_counts_superseded_successes_too() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        ' Older attempt succeeded, newer one failed: the old success is superseded.
+        Dim nct = "NCT00000009"
+        Dim oldRun = Guid.NewGuid()
+        Dim oldStart = DateTimeOffset.UtcNow.AddMinutes(-5)
+        Await _fixture.Gateway.StartStudyAsync(oldRun, nct, oldStart, CancellationToken.None)
+        Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                runId:=oldRun, nctId:=nct, startedAt:=oldStart, finishedAt:=oldStart.AddSeconds(1),
+                status:=StudyExecution.StatusSuccess, llmSucceeded:=True, llmFinishReason:="stop",
+                llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                parsedRecordCount:=1, persistedRowCount:=1, errorMessage:=""), CancellationToken.None)
+        Dim newRun = Guid.NewGuid()
+        Dim newStart = DateTimeOffset.UtcNow
+        Await _fixture.Gateway.StartStudyAsync(newRun, nct, newStart, CancellationToken.None)
+        Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                runId:=newRun, nctId:=nct, startedAt:=newStart, finishedAt:=newStart.AddSeconds(1),
+                status:=StudyExecution.StatusLlmFailed, llmSucceeded:=False, llmFinishReason:="",
+                llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                parsedRecordCount:=0, persistedRowCount:=0, errorMessage:="boom"), CancellationToken.None)
+
+        Assert.Equal(1L, Await _fixture.Gateway.CountSupersededStudiesAsync(CancellationToken.None))
+
+        Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None)
+
+        ' The FAILED newer attempt survives - recency wins, not success.
+        Assert.Equal(newRun, Await SurvivingRunIdAsync(nct))
+    End Function
+
+    <SkippableFact>
+    Public Async Function CountSuperseded_is_zero_on_an_empty_table() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Assert.Equal(0L, Await _fixture.Gateway.CountSupersededStudiesAsync(CancellationToken.None))
+    End Function
+
+    <SkippableFact>
+    Public Async Function DeleteSuperseded_keeps_exactly_the_latest_attempt_per_trial() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim latest1 = Await SeedAttemptsAsync("NCT00000001", 3)
+        Dim latest2 = Await SeedAttemptsAsync("NCT00000002", 1)
+        Dim latest3 = Await SeedAttemptsAsync("NCT00000003", 2)
+
+        Dim deleted = Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None)
+
+        Assert.Equal(3L, deleted)
+        Assert.Equal(1L, Await CountStudyRowsAsync("NCT00000001"))
+        Assert.Equal(1L, Await CountStudyRowsAsync("NCT00000002"))
+        Assert.Equal(1L, Await CountStudyRowsAsync("NCT00000003"))
+        ' The surviving row is the NEWEST attempt, not just any one.
+        Assert.Equal(latest1, Await SurvivingRunIdAsync("NCT00000001"))
+        Assert.Equal(latest2, Await SurvivingRunIdAsync("NCT00000002"))
+        Assert.Equal(latest3, Await SurvivingRunIdAsync("NCT00000003"))
+        ' Nothing left to remove.
+        Assert.Equal(0L, Await _fixture.Gateway.CountSupersededStudiesAsync(CancellationToken.None))
+    End Function
+
+    ' THE load-bearing test. The pipeline's only progress marker is the DISTINCT
+    ' NCT_ID set of eligibility_study (spec section 2.2). If this delete ever
+    ' removed a trial's last row, that trial would silently be reprocessed.
+    <SkippableFact>
+    Public Async Function DeleteSuperseded_leaves_the_attempted_set_unchanged() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Await SeedAttemptsAsync("NCT00000001", 3)
+        Await SeedAttemptsAsync("NCT00000002", 1)
+        Await SeedAttemptsAsync("NCT00000003", 2)
+        Dim before = (Await _fixture.Gateway.GetAttemptedNctIdsAsync(CancellationToken.None)).
+                OrderBy(Function(s) s).ToArray()
+
+        Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None)
+
+        Dim after = (Await _fixture.Gateway.GetAttemptedNctIdsAsync(CancellationToken.None)).
+                OrderBy(Function(s) s).ToArray()
+        Assert.Equal(before, after)
+        Assert.Equal({"NCT00000001", "NCT00000002", "NCT00000003"}, after)
+    End Function
+
+    ' The extracted criteria are a separate table with per-trial DELETE+INSERT
+    ' semantics; trimming audit history must not touch them.
+    <SkippableFact>
+    Public Async Function DeleteSuperseded_does_not_touch_eligibility_rows() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Await _fixture.Gateway.PersistTrialAsync("NCT00000001",
+                {MakeResolvedWithCriterion("NCT00000001", "Inclusion", "diabetes"),
+                 MakeResolvedWithCriterion("NCT00000001", "Inclusion", "hypertension")},
+                CancellationToken.None)
+        Await SeedAttemptsAsync("NCT00000001", 3)
+
+        Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None)
+
+        Dim m = Await _fixture.Gateway.GetDashboardMetricsAsync(CancellationToken.None)
+        Assert.Equal(2L, m.EligibilityRowCount)
+    End Function
+
+    <SkippableFact>
+    Public Async Function DeleteSuperseded_is_idempotent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedAttemptsAsync("NCT00000001", 3)
+
+        Assert.Equal(2L, Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None))
+        ' Second run has nothing to do and must not touch the survivor.
+        Assert.Equal(0L, Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None))
+        Assert.Equal(1L, Await CountStudyRowsAsync("NCT00000001"))
+    End Function
+
+    <SkippableFact>
+    Public Async Function DeleteSuperseded_on_an_empty_table_is_a_no_op() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Assert.Equal(0L, Await _fixture.Gateway.DeleteSupersededStudiesAsync(CancellationToken.None))
+    End Function
+
+    ' The count and the Studies tab's "Hide superseded attempts" toggle MUST agree:
+    ' the card offers to delete exactly the rows that view hides. If these ever
+    ' diverge, the card would delete rows the operator still sees as current.
+    <SkippableFact>
+    Public Async Function CountSuperseded_agrees_with_the_studies_tab_hide_superseded_view() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Await SeedAttemptsAsync("NCT00000001", 3)
+        Await SeedAttemptsAsync("NCT00000002", 1)
+        Await SeedAttemptsAsync("NCT00000003", 2)
+
+        Dim all = Await _fixture.Gateway.GetStudiesAsync(
+                New StudyFilter(hideSuperseded:=False), "started_at_desc", 1, 200, CancellationToken.None)
+        Dim latestOnly = Await _fixture.Gateway.GetStudiesAsync(
+                New StudyFilter(hideSuperseded:=True), "started_at_desc", 1, 200, CancellationToken.None)
+        Dim superseded = Await _fixture.Gateway.CountSupersededStudiesAsync(CancellationToken.None)
+
+        ' hidden-by-the-toggle == offered-for-deletion
+        Assert.Equal(all.TotalRows - latestOnly.TotalRows, superseded)
+    End Function
+
     ' ============ CountSelectableSourceTrialsAsync (dashboard backlog figure) ============
 
     ' The count MUST apply the same filter as SelectNextTrialsAsync, or the

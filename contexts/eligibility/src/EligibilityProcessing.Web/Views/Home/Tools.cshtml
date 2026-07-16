@@ -119,6 +119,54 @@
             </div>
         </div>
     </div>
+
+    @* ---------------- remove-superseded ----------------
+       No _ToolJobPanel: this is a single DELETE, not a background job, so there is
+       no progress to stream. The result line below stands in for the panel. *@
+    <div class="col-12 col-lg-6">
+        <div class="card h-100" data-tool="remove-superseded">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h2 class="h5 mb-1">Remove superseded results</h2>
+                        <p class="text-muted small mb-0">
+                            Delete study attempts that a later run has replaced, keeping the most
+                            recent attempt for each trial. Counts every superseded attempt whether
+                            it succeeded or failed. Extracted criteria in
+                            <code>public.eligibility</code> are not affected, and no trial becomes
+                            eligible for reprocessing - one attempt per trial always remains.
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <div class="display-6 lh-1" data-remaining>@Model.SupersededCount.ToString("N0")</div>
+                        <div class="text-muted small">superseded attempts</div>
+                    </div>
+                </div>
+
+                @if (canRunPipeline)
+                {
+                    <form id="superseded-form" asp-action="RemoveSuperseded" method="post"
+                          class="row g-2 align-items-end mt-2">
+                        <div class="col-12">
+                            @* data-zero mirrors "nothing to delete" so setRunDisabled can
+                               re-apply it without re-querying the count. *@
+                            <button type="submit" class="btn btn-outline-danger btn-sm" id="superseded-btn"
+                                    data-zero="@(Model.SupersededCount == 0 ? "1" : "")"
+                                    disabled="@(busy || Model.SupersededCount == 0 ? "disabled" : null)">
+                                Remove superseded
+                            </button>
+                            <span id="superseded-result" class="small ms-2"></span>
+                        </div>
+                    </form>
+                }
+
+                @if (!canRunPipeline)
+                {
+                    <p class="text-muted small mb-0 mt-2">Removing rows requires pipeline-operator permission.</p>
+                }
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
@@ -235,6 +283,11 @@
 
             function setRunDisabled(disabled) {
                 document.querySelectorAll(".tool-run-btn").forEach((b) => { b.disabled = disabled; });
+                // The superseded button is NOT a .tool-run-btn: it has a second gate
+                // (nothing to delete), so a blanket re-enable when a job ends would leave
+                // it live with a count of zero. Re-apply both conditions instead.
+                const sb = document.getElementById("superseded-btn");
+                if (sb) { sb.disabled = disabled || sb.dataset.zero === "1"; }
             }
             function setBanner(activity) {
                 const banner = document.getElementById("tools-busy-banner");
@@ -282,7 +335,20 @@
                     };
                     set("normalize-umls", c.normalizeRemaining);
                     set("embed-studies", c.embedRemaining);
+                    // A pipeline batch re-attempting a trial creates a superseded row,
+                    // so this count moves when a batch ends even though no tool ran.
+                    set("remove-superseded", c.supersededCount);
+                    syncSupersededButton(c.supersededCount);
                 } catch { /* leave the current numbers */ }
+            }
+
+            // Nothing to delete => nothing to click. Kept in step with the count so the
+            // button doesn't stay live after the last superseded row is removed.
+            function syncSupersededButton(count) {
+                const btn = document.getElementById("superseded-btn");
+                if (!btn || typeof count !== "number") { return; }
+                btn.dataset.zero = count === 0 ? "1" : "";
+                btn.disabled = count === 0 || btn.dataset.busy === "1";
             }
 
             connection.on("ToolJobStarted", (e) => { setRunDisabled(true); setBanner(e.kind); resetCancelButtons(); });
@@ -327,6 +393,55 @@
             }
             bindRun("normalize-form");
             bindRun("embed-form");
+
+            // Remove superseded results. Not bindRun: this is a synchronous DELETE, not a
+            // background job, so there is no ToolJobCompleted event to re-enable the UI or
+            // refresh the counts - it does both itself when the response lands.
+            (function bindSuperseded() {
+                const f = document.getElementById("superseded-form");
+                if (!f) { return; }
+                const btn = document.getElementById("superseded-btn");
+                const out = document.getElementById("superseded-result");
+                f.addEventListener("submit", async (ev) => {
+                    ev.preventDefault();
+                    const countEl = document.querySelector('[data-tool="remove-superseded"] [data-remaining]');
+                    const shown = countEl ? countEl.textContent.trim() : "";
+                    // Destructive and irreversible - name the number and what survives, so
+                    // the confirm is an informed one rather than a reflex.
+                    if (!window.confirm(
+                        `Permanently delete ${shown} superseded study attempt${shown === "1" ? "" : "s"}?\n\n` +
+                        `The most recent attempt for each trial is kept, and the extracted criteria ` +
+                        `in public.eligibility are not touched. This cannot be undone.`)) {
+                        return;
+                    }
+                    btn.dataset.busy = "1";
+                    btn.disabled = true;
+                    out.className = "small ms-2 text-muted";
+                    out.textContent = "Removing...";
+                    try {
+                        const r = await postForm(ev.currentTarget);
+                        if (r.ok) {
+                            const n = Number(r.body.deleted ?? 0);
+                            out.className = "small ms-2 text-success";
+                            out.textContent = `Removed ${n.toLocaleString()} row${n === 1 ? "" : "s"}.`;
+                        } else if (r.status === 409) {
+                            setBanner(r.body.activity || "another job");
+                            out.className = "small ms-2 text-warning";
+                            out.textContent = `A job is running (${r.body.activity || "?"}); try again when it finishes.`;
+                        } else {
+                            out.className = "small ms-2 text-danger";
+                            out.textContent = r.body.error || `Failed (HTTP ${r.status}).`;
+                        }
+                    } catch (e) {
+                        out.className = "small ms-2 text-danger";
+                        out.textContent = "Failed: " + e;
+                    } finally {
+                        btn.dataset.busy = "";
+                        // Re-reads the count and re-disables the button when it hits zero.
+                        await refreshCounts();
+                    }
+                });
+            })();
 
             document.querySelectorAll(".tool-cancel-form").forEach((f) => {
                 f.addEventListener("submit", async (ev) => {

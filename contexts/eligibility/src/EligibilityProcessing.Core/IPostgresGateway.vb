@@ -157,6 +157,40 @@ Public Interface IPostgresGateway
             cancellationToken As CancellationToken) As Task(Of Integer)
 
     ''' <summary>
+    ''' Count of SUPERSEDED public.eligibility_study rows: every attempt that is not
+    ''' the most recent one for its NCT_ID, regardless of status. Same projection the
+    ''' Studies tab's "Hide superseded attempts" toggle uses
+    ''' (<c>ROW_NUMBER() OVER (PARTITION BY nct_id ORDER BY started_at DESC)</c>,
+    ''' keeping rn = 1), counted from the other side: rn > 1.
+    ''' <para>
+    ''' A trial attempted once contributes 0. A trial attempted three times
+    ''' contributes 2, whether those attempts succeeded or failed.
+    ''' </para>
+    ''' </summary>
+    Function CountSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long)
+
+    ''' <summary>
+    ''' DESTRUCTIVE. Deletes every superseded attempt row counted by
+    ''' <see cref="CountSupersededStudiesAsync"/>, keeping the most recent attempt
+    ''' per NCT_ID. Returns the number of rows deleted.
+    ''' <para>
+    ''' PROGRESSION IS PRESERVED BY CONSTRUCTION: exactly one row per NCT_ID always
+    ''' survives, so the DISTINCT NCT_ID set behind
+    ''' <see cref="GetAttemptedNctIdsAsync"/> - the pipeline's only progress marker
+    ''' (spec section 2.2) - is bit-for-bit unchanged. This trims audit history, it
+    ''' never makes a trial eligible for reprocessing.
+    ''' </para>
+    ''' <para>
+    ''' What it does NOT touch: public.eligibility (the extracted criteria rows are
+    ''' per-trial DELETE+INSERT, so they only ever reflect the latest attempt
+    ''' anyway), public.eligibility_run, and public.eligibility_failed.
+    ''' </para>
+    ''' </summary>
+    Function DeleteSupersededStudiesAsync(
+            cancellationToken As CancellationToken) As Task(Of Long)
+
+    ''' <summary>
     ''' LLM concept-normalization — record one outcome. In a single transaction:
     ''' UPSERT the umls.concept_normalization cache row for
     ''' <paramref name="conceptNorm"/> (the LLM term + the re-lookup result), and
