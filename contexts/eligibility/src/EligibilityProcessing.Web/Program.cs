@@ -241,6 +241,32 @@ using (var startupScope = app.Services.CreateScope())
         app.Logger.LogWarning(ex,
             "Source performance-index startup step failed; trial selection will still work but may be slower.");
     }
+
+    // Best-effort startup step: reconcile study rows stranded at status='running' by
+    // a host that was killed mid-trial. Left alone they are invisible (counted as
+    // neither success nor failure) AND permanently skipped (the batch anti-join has
+    // no status filter), so the trial is silently lost. Marking them 'interrupted'
+    // surfaces them on the dashboard and makes them re-runnable from History.
+    //
+    // Age-gated by Postgres:InterruptedStudyThresholdHours (default 6h) because the
+    // CLI can be processing trials against this same database right now and RunGate
+    // cannot see it - see ReconcileInterruptedStudiesAsync.
+    //
+    // Its own try/catch rather than sharing the one above, so a failure of the index
+    // step does not skip this, and vice versa. Own scope reused deliberately.
+    try
+    {
+        var thresholdHours = startupScope.ServiceProvider
+            .GetRequiredService<IOptions<PostgresOptions>>().Value.InterruptedStudyThresholdHours;
+        await startupScope.ServiceProvider
+            .GetRequiredService<PostgresGateway>()
+            .ReconcileInterruptedStudiesAsync(TimeSpan.FromHours(thresholdHours), CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex,
+            "Interrupted-study reconcile startup step failed; rows stranded at 'running' stay hidden until the next start.");
+    }
 }
 
 if (!app.Environment.IsDevelopment())

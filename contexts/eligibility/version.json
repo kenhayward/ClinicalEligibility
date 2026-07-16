@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 15, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 16, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.16",
+      "releaseDate": "2026-07-16",
+      "enhancements": [],
+      "fixes": [
+        "Trials cut short by the host stopping are no longer lost without trace. A study row is marked 'running' the moment a trial starts and updated when it finishes, so a host killed mid-trial left the row marked 'running' for ever: the dashboard counted it as neither a success nor a failure, and the pipeline treated the trial as already attempted, so no later batch ever picked it up. On start-up the dashboard now records any study still marked 'running' and older than six hours as 'interrupted' - a new status that appears in the Studies failed card and in History, where the trial can be re-run like any other. The six-hour limit is deliberate and configurable via Postgres:InterruptedStudyThresholdHours (0 disables it): a single trial can legitimately take around two hours, and a batch started from the command line can be running against the same database at the same time, so nothing younger than the limit is touched. A trial that turns out to have still been running is corrected back to its real outcome when it finishes. Studies already stranded are recovered the next time the dashboard starts."
+      ]
+    },
     {
       "version": "0.1.15",
       "releaseDate": "2026-07-16",

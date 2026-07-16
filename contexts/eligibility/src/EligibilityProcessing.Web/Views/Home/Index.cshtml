@@ -112,9 +112,16 @@ else
                        default hide-superseded view uses the same latest-attempt
                        grouping, so the filtered list matches this count. *@
                     @{
+                        @* "interrupted" is the host-died-mid-trial bucket, reconciled
+                           at startup. It is in this list because it must be visible
+                           somewhere - the whole point is that these trials were
+                           previously counted as neither success nor failure - and the
+                           failure card is the only "needs attention" surface. It is
+                           not a failure OF the trial, which is why History badges it
+                           amber rather than red. *@
                         var failureTypes = new[]
                         {
-                            "llm_failed", "parse_invalid_json", "persist_failed", "failed"
+                            "llm_failed", "parse_invalid_json", "persist_failed", "failed", "interrupted"
                         };
                         var activeFailures = failureTypes
                             .Select(s => (Status: s,

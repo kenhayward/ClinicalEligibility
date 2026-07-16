@@ -104,4 +104,22 @@ Public Class StudyExecutionTests
         Assert.Equal(0.0, ex.CompletionTokensPerSecond.Value, precision:=3)
     End Sub
 
+    ' These literals are PERSISTED in public.eligibility_study.status and are matched
+    ' verbatim by SQL (the dashboard's status buckets) and by the History filter.
+    ' Renaming one is a data migration, not a refactor - so pin the wire values.
+    <Fact>
+    Public Sub StatusInterrupted_has_the_expected_wire_value()
+        Assert.Equal("interrupted", StudyExecution.StatusInterrupted)
+    End Sub
+
+    <Fact>
+    Public Sub Status_constants_are_distinct()
+        Dim all = {StudyExecution.StatusRunning, StudyExecution.StatusSuccess,
+                   StudyExecution.StatusLlmFailed, StudyExecution.StatusParseEmpty,
+                   StudyExecution.StatusParseInvalidJson, StudyExecution.StatusPersistFailed,
+                   StudyExecution.StatusFailed, StudyExecution.StatusCancelled,
+                   StudyExecution.StatusInterrupted}
+        Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count())
+    End Sub
+
 End Class

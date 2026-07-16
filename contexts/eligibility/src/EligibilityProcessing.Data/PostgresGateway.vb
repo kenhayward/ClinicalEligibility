@@ -1126,7 +1126,8 @@ SELECT
     -- failure status is introduced upstream without this query knowing about it.
     (SELECT COUNT(*) FROM latest
         WHERE status NOT IN ('success', 'running', 'parse_empty', 'cancelled',
-                             'llm_failed', 'parse_invalid_json', 'persist_failed')) AS failed_other,
+                             'llm_failed', 'parse_invalid_json', 'persist_failed',
+                             'interrupted')) AS failed_other,
     -- parse_empty: latest attempt returned valid JSON but zero records. A valid
     -- terminal state, not a failure — surfaced separately so the dashboard can
     -- show it without inflating studies_failed_latest.
@@ -1142,7 +1143,17 @@ SELECT
     -- Distinct trials attempted (any status). `latest` is already one row per
     -- nct_id, so this is a free count over a CTE the query has built anyway - no
     -- extra scan. Feeds the dashboard's approximate remaining-trials figure.
-    (SELECT COUNT(*) FROM latest)                                                 AS studies_attempted"
+    (SELECT COUNT(*) FROM latest)                                                 AS studies_attempted,
+    -- Trials whose host died mid-flight, reconciled from 'running' at web-host
+    -- startup (see ReconcileInterruptedStudiesAsync). Its OWN bucket rather than
+    -- being left to fall into failed_other, because the reader folds failed_other
+    -- under the generic failed key, and the dashboard links that line to
+    -- History?status=failed, which matches on the literal status - a merged count
+    -- would render as a failure and drill through to an empty list.
+    --
+    -- MUST STAY LAST: the reader below is positional (reader.GetInt64(0..13)), so
+    -- inserting a column above this silently shifts every metric.
+    (SELECT COUNT(*) FROM latest WHERE status = 'interrupted')                    AS failed_interrupted"
 
         ' The selectable-source count lives in the OTHER database (ctgov.*), so it
         ' cannot join the query below and needs its own round-trip. Read first so
@@ -1156,11 +1167,15 @@ SELECT
                     If Not Await reader.ReadAsync(cancellationToken).ConfigureAwait(False) Then
                         Return DashboardMetrics.Empty
                     End If
+                    ' Ordinal 9 is failed_other, surfaced under the "failed" key - the
+                    ' generic bucket. Ordinal 13 is the interrupted count, kept separate
+                    ' so its dashboard line links to a History filter that matches.
                     Dim failuresByStatus As New Dictionary(Of String, Long) From {
                             {"llm_failed", reader.GetInt64(6)},
                             {"parse_invalid_json", reader.GetInt64(7)},
                             {"persist_failed", reader.GetInt64(8)},
-                            {"failed", reader.GetInt64(9)}}
+                            {"failed", reader.GetInt64(9)},
+                            {"interrupted", reader.GetInt64(13)}}
                     Return New DashboardMetrics(
                             eligibilityRowCount:=reader.GetInt64(0),
                             studiesSuccessful:=reader.GetInt64(1),
@@ -1990,6 +2005,87 @@ WHERE nct_id = @nct_id"
     End Function
 
     ' ============ Study audit (output DB, public.eligibility_study) ============
+
+    ''' <summary>
+    ''' Reconciles orphaned study rows: rows still at status='running' whose host died
+    ''' before reaching a terminal status. Marks any older than
+    ''' <paramref name="minimumAge"/> as 'interrupted' and returns the count.
+    ''' <paramref name="minimumAge"/> &lt;= zero disables the sweep (returns 0 without
+    ''' touching the database).
+    ''' <para>
+    ''' WHY AN AGE THRESHOLD, AND WHY IT IS THE ONLY SAFEGUARD: a 'running' row is not
+    ''' proof of an orphan - it is proof of an in-flight trial. RunGate is an
+    ''' in-process CLR lock, so the CLI (`elig run`) can be processing trials against
+    ''' this same database right now and this process cannot see it. There is no
+    ''' ownership registry to consult. The age gate is what keeps the sweep off those
+    ''' live rows: a single trial's worst case is ~2h on the shipped config (see
+    ''' PostgresOptions.InterruptedStudyThresholdHours), so anything older is dead.
+    ''' </para>
+    ''' <para>
+    ''' SELF-HEALING, DELIBERATELY: FinishStudyAsync updates by (run_id, nct_id) with
+    ''' NO status predicate, so if this sweep ever does mislabel a live trial, that
+    ''' trial's completion overwrites 'interrupted' with its real outcome. Do NOT
+    ''' "harden" FinishStudyAsync with `AND status = 'running'` - that turns a
+    ''' self-correcting transient into permanent corruption, freezing the row at
+    ''' 'interrupted' and discarding the true result.
+    ''' </para>
+    ''' <para>
+    ''' Progression is untouched. GetAttemptedNctIdsAsync has no status filter, so an
+    ''' 'interrupted' trial stays excluded from forward batches exactly as a failed one
+    ''' does; recovery is the History tab's Re-run, which bypasses the anti-join. This
+    ''' method buys visibility, not re-selection.
+    ''' </para>
+    ''' </summary>
+    Public Async Function ReconcileInterruptedStudiesAsync(
+            minimumAge As TimeSpan,
+            cancellationToken As CancellationToken) As Task(Of Integer)
+
+        If minimumAge <= TimeSpan.Zero Then
+            _logger.LogDebug(
+                    "Interrupted-study reconcile disabled (threshold {Hours}h); skipping.",
+                    minimumAge.TotalHours)
+            Return 0
+        End If
+
+        ' Cutoff from the APP clock, not the database's now(): started_at is written
+        ' by the caller (PipelineOrchestrator) from DateTimeOffset.UtcNow, so comparing
+        ' against now() would silently drift if the app and DB clocks disagree.
+        Dim cutoff = DateTimeOffset.UtcNow - minimumAge
+
+        ' status='running' is served by ix_eligibility_study_status and started_at by
+        ' ix_eligibility_study_started_at (both from V2), so no new index is needed.
+        ' finished_at IS NULL is redundant with status='running' (StartStudyAsync's
+        ' upsert clears it) but costs nothing and documents the invariant.
+        Const Sql As String = "
+UPDATE public.eligibility_study
+   SET status        = 'interrupted',
+       finished_at   = @finished_at,
+       error_message = COALESCE(NULLIF(error_message, ''),
+                                'Interrupted: the host process stopped before this trial reached a terminal status.')
+ WHERE status = 'running'
+   AND finished_at IS NULL
+   AND started_at < @cutoff"
+
+        ' Exceptions propagate: the caller (Program.cs startup) owns the try/catch, the
+        ' same shape as EnsureSourcePerformanceIndexesAsync's startup step.
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                cmd.Parameters.Add(New NpgsqlParameter("finished_at", NpgsqlDbType.TimestampTz) With {
+                        .Value = DateTimeOffset.UtcNow})
+                cmd.Parameters.Add(New NpgsqlParameter("cutoff", NpgsqlDbType.TimestampTz) With {
+                        .Value = cutoff})
+                Dim updated = Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+                If updated > 0 Then
+                    _logger.LogInformation(
+                            "Reconciled {Count} study row(s) stranded at 'running' for more than {Hours}h to 'interrupted'. " &
+                            "They are visible on the dashboard and re-runnable from History.",
+                            updated, minimumAge.TotalHours)
+                End If
+                Return updated
+            End Using
+        End Using
+    End Function
 
     Public Async Function StartStudyAsync(
             runId As Guid,

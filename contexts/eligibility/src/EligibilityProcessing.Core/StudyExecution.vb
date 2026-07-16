@@ -4,12 +4,19 @@
 ' terminal state once the trial completes or fails.
 '
 ' Status values (free text in the table, enumerated here for callers):
-'   running         - in flight; finished_at = Nothing
-'   success         - everything worked, persisted_row_count >= 0
-'   llm_failed      - the LLM call returned a transport / model failure
-'   parse_empty     - LLM returned content but parser emitted 0 records
-'   persist_failed  - the DB write threw after parse succeeded
-'   cancelled       - user cancellation interrupted the trial mid-flight
+'   running            - in flight; finished_at = Nothing
+'   success            - everything worked, persisted_row_count >= 0
+'   llm_failed         - the LLM call returned a transport / model failure
+'   parse_empty        - LLM returned content but parser emitted 0 records
+'   parse_invalid_json - LLM output was unparseable (typically truncated)
+'   persist_failed     - the DB write threw after parse succeeded
+'   failed             - generic post-LLM, pre-persist failure (UMLS, scoring)
+'   cancelled          - user cancellation interrupted the trial mid-flight
+'   interrupted        - the host process stopped before this trial reached a
+'                        terminal status, leaving the row stranded at 'running'.
+'                        NOT written by the pipeline: the web host reconciles
+'                        stale 'running' rows at startup. See
+'                        PostgresGateway.ReconcileInterruptedStudiesAsync.
 
 Public NotInheritable Class StudyExecution
 
@@ -21,6 +28,14 @@ Public NotInheritable Class StudyExecution
     Public Const StatusPersistFailed As String = "persist_failed"
     Public Const StatusFailed As String = "failed"           ' generic post-LLM, pre-persist failure (UMLS, scoring, etc.)
     Public Const StatusCancelled As String = "cancelled"
+
+    ' Reconciled, not observed: the host died mid-trial and left the row at
+    ' 'running', so NOTHING is known about the outcome - unlike StatusFailed,
+    ' which records a failure we actually saw. Written only by
+    ' PostgresGateway.ReconcileInterruptedStudiesAsync at web-host startup, once
+    ' the row is older than the configured threshold. This literal is persisted:
+    ' renaming it would be a data migration.
+    Public Const StatusInterrupted As String = "interrupted"
 
     Public Sub New(
             runId As Guid,

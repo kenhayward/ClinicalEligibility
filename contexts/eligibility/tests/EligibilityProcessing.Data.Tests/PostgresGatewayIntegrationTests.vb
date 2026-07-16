@@ -24,6 +24,243 @@ Public Class PostgresGatewayIntegrationTests
         _fixture = fixture
     End Sub
 
+    ' ============ ReconcileInterruptedStudiesAsync (orphaned 'running' rows) ============
+    '
+    ' A row stranded at 'running' by a killed host is invisible (counted as neither
+    ' success nor failure) AND permanently skipped (the batch anti-join has no status
+    ' filter). The reconcile marks it 'interrupted' so it surfaces and can be re-run.
+    ' The age threshold is the ONLY thing protecting a live CLI run's rows, so the
+    ' "young row untouched" test below is the load-bearing one.
+
+    ' Leaves a row at status='running' with the given started_at - i.e. exactly what a
+    ' killed host leaves behind. StartStudyAsync takes started_at from the caller, so
+    ' backdating a ghost needs no raw SQL.
+    Private Async Function SeedRunningRowAsync(nctId As String, startedAt As DateTimeOffset) As Task(Of Guid)
+        Dim runId = Guid.NewGuid()
+        Await _fixture.Gateway.StartStudyAsync(runId, nctId, startedAt, CancellationToken.None)
+        Return runId
+    End Function
+
+    Private Async Function ReadStudyAsync(nctId As String) As Task(Of (Status As String, Finished As Boolean, ErrorMessage As String))
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT status, finished_at IS NOT NULL, COALESCE(error_message, '') " &
+                                  "FROM public.eligibility_study WHERE nct_id = @n"
+                cmd.Parameters.AddWithValue("n", nctId)
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Await reader.ReadAsync()
+                    Return (reader.GetString(0), reader.GetBoolean(1), reader.GetString(2))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_marks_an_old_running_row_interrupted() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddHours(-10))
+
+        Dim reconciled = Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.FromHours(6), CancellationToken.None)
+
+        Assert.Equal(1, reconciled)
+        Dim row = Await ReadStudyAsync("NCT00000001")
+        Assert.Equal(StudyExecution.StatusInterrupted, row.Status)
+        Assert.True(row.Finished, "finished_at must be set so the row is terminal")
+        Assert.Contains("Interrupted", row.ErrorMessage)
+    End Function
+
+    ' THE load-bearing test. The CLI can be mid-trial against this same database and
+    ' RunGate cannot see it; the age gate is the only safeguard. If this ever fails,
+    ' the reconcile is eating live runs.
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_leaves_a_young_running_row_alone() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddMinutes(-30))
+
+        Dim reconciled = Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.FromHours(6), CancellationToken.None)
+
+        Assert.Equal(0, reconciled)
+        Dim row = Await ReadStudyAsync("NCT00000001")
+        Assert.Equal(StudyExecution.StatusRunning, row.Status)
+        Assert.False(row.Finished, "a live trial's finished_at must stay null")
+    End Function
+
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_leaves_terminal_rows_alone() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        ' One backdated row per terminal status - all well past the threshold.
+        Dim statuses = {StudyExecution.StatusSuccess, StudyExecution.StatusFailed,
+                        StudyExecution.StatusLlmFailed, StudyExecution.StatusParseEmpty,
+                        StudyExecution.StatusCancelled}
+        For i = 0 To statuses.Length - 1
+            Dim nct = "NCT" & (i + 1).ToString("D8")
+            Dim startedAt = DateTimeOffset.UtcNow.AddHours(-10)
+            Dim runId = Await SeedRunningRowAsync(nct, startedAt)
+            Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                    runId:=runId, nctId:=nct, startedAt:=startedAt, finishedAt:=startedAt.AddSeconds(2),
+                    status:=statuses(i), llmSucceeded:=True, llmFinishReason:="stop",
+                    llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                    parsedRecordCount:=0, persistedRowCount:=0, errorMessage:=""), CancellationToken.None)
+        Next
+
+        Dim reconciled = Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.FromHours(6), CancellationToken.None)
+
+        Assert.Equal(0, reconciled)
+        For i = 0 To statuses.Length - 1
+            Dim row = Await ReadStudyAsync("NCT" & (i + 1).ToString("D8"))
+            Assert.Equal(statuses(i), row.Status)
+        Next
+    End Function
+
+    ' Pins the COALESCE(NULLIF(...)): a row that already carries a diagnostic must keep
+    ' it - the reconcile explains the status, it does not overwrite evidence.
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_does_not_overwrite_an_existing_error_message() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim startedAt = DateTimeOffset.UtcNow.AddHours(-10)
+        Await SeedRunningRowAsync("NCT00000001", startedAt)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "UPDATE public.eligibility_study SET error_message = 'original diagnostic'"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+
+        Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(TimeSpan.FromHours(6), CancellationToken.None)
+
+        Dim row = Await ReadStudyAsync("NCT00000001")
+        Assert.Equal(StudyExecution.StatusInterrupted, row.Status)
+        Assert.Equal("original diagnostic", row.ErrorMessage)
+    End Function
+
+    ' The documented disable switch (Postgres:InterruptedStudyThresholdHours <= 0).
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_non_positive_age_is_a_no_op() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddHours(-500))
+
+        Assert.Equal(0, Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.Zero, CancellationToken.None))
+        Assert.Equal(0, Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.FromHours(-1), CancellationToken.None))
+        Assert.Equal(StudyExecution.StatusRunning, (Await ReadStudyAsync("NCT00000001")).Status)
+    End Function
+
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_is_idempotent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddHours(-10))
+
+        Assert.Equal(1, Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.FromHours(6), CancellationToken.None))
+        ' Second sweep finds nothing: 'interrupted' is terminal, not 'running'.
+        Assert.Equal(0, Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(
+                TimeSpan.FromHours(6), CancellationToken.None))
+    End Function
+
+    ' Pins the SELF-HEALING property. FinishStudyAsync deliberately has NO status
+    ' predicate, so a trial that was actually still alive when the sweep mislabelled it
+    ' corrects itself on completion. If someone "hardens" FinishStudyAsync with
+    ' `AND status = 'running'`, this test fails - and that change would turn a transient
+    ' mislabel into permanent corruption.
+    <SkippableFact>
+    Public Async Function FinishStudy_overwrites_a_mistakenly_interrupted_row() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim startedAt = DateTimeOffset.UtcNow.AddHours(-10)
+        Dim runId = Await SeedRunningRowAsync("NCT00000001", startedAt)
+        Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(TimeSpan.FromHours(6), CancellationToken.None)
+        Assert.Equal(StudyExecution.StatusInterrupted, (Await ReadStudyAsync("NCT00000001")).Status)
+
+        ' The trial was alive after all and finishes normally.
+        Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                runId:=runId, nctId:="NCT00000001", startedAt:=startedAt,
+                finishedAt:=DateTimeOffset.UtcNow, status:=StudyExecution.StatusSuccess,
+                llmSucceeded:=True, llmFinishReason:="stop",
+                llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                parsedRecordCount:=3, persistedRowCount:=3, errorMessage:=""), CancellationToken.None)
+
+        Assert.Equal(StudyExecution.StatusSuccess, (Await ReadStudyAsync("NCT00000001")).Status)
+    End Function
+
+    ' Pins "progression unchanged": an interrupted trial stays in the attempted set,
+    ' exactly like a failed one. Recovery is History re-run, not re-selection. If this
+    ' flips, forward batches would start reprocessing interrupted trials silently.
+    <SkippableFact>
+    Public Async Function ReconcileInterrupted_leaves_the_attempted_set_unchanged() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddHours(-10))
+        Dim before = (Await _fixture.Gateway.GetAttemptedNctIdsAsync(CancellationToken.None)).
+                OrderBy(Function(s) s).ToArray()
+
+        Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(TimeSpan.FromHours(6), CancellationToken.None)
+
+        Dim after = (Await _fixture.Gateway.GetAttemptedNctIdsAsync(CancellationToken.None)).
+                OrderBy(Function(s) s).ToArray()
+        Assert.Equal(before, after)
+        Assert.Equal({"NCT00000001"}, after)
+    End Function
+
+    ' The failed_other trap: failed_other is surfaced under the generic "failed" key, and
+    ' the dashboard links that line to History?status=failed which matches the literal
+    ' status. If 'interrupted' leaked into failed_other it would render as a failure with
+    ' an empty drill-through. Also guards the positional reader ordinals.
+    <SkippableFact>
+    Public Async Function DashboardMetrics_counts_interrupted_in_its_own_bucket_not_failed() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        ' One interrupted (via the real reconcile), one generic failed, one success.
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddHours(-10))
+        Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(TimeSpan.FromHours(6), CancellationToken.None)
+        For Each pair In {("NCT00000002", StudyExecution.StatusFailed), ("NCT00000003", StudyExecution.StatusSuccess)}
+            Dim startedAt = DateTimeOffset.UtcNow
+            Dim runId = Await SeedRunningRowAsync(pair.Item1, startedAt)
+            Await _fixture.Gateway.FinishStudyAsync(New StudyExecution(
+                    runId:=runId, nctId:=pair.Item1, startedAt:=startedAt, finishedAt:=startedAt.AddSeconds(1),
+                    status:=pair.Item2, llmSucceeded:=True, llmFinishReason:="stop",
+                    llmPromptTokens:=Nothing, llmCompletionTokens:=Nothing,
+                    parsedRecordCount:=0, persistedRowCount:=0, errorMessage:=""), CancellationToken.None)
+        Next
+
+        Dim m = Await _fixture.Gateway.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.Equal(1L, m.FailuresByStatus("interrupted"))
+        ' The generic bucket must NOT have absorbed the interrupted row.
+        Assert.Equal(1L, m.FailuresByStatus("failed"))
+        Assert.Equal(2L, m.StudiesFailedLatest)
+        Assert.Equal(1L, m.StudiesSuccessful)
+        ' The documented contract: the breakdown sums to the failure total.
+        Assert.Equal(m.StudiesFailedLatest, m.FailuresByStatus.Values.Sum())
+    End Function
+
+    ' Proves the dashboard's interrupted link lands on a populated page.
+    <SkippableFact>
+    Public Async Function GetStudies_can_filter_by_interrupted_status() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedRunningRowAsync("NCT00000001", DateTimeOffset.UtcNow.AddHours(-10))
+        Await _fixture.Gateway.ReconcileInterruptedStudiesAsync(TimeSpan.FromHours(6), CancellationToken.None)
+
+        Dim page = Await _fixture.Gateway.GetStudiesAsync(
+                New StudyFilter(status:=StudyExecution.StatusInterrupted),
+                sortBy:=Nothing, page:=1, pageSize:=10, CancellationToken.None)
+
+        Assert.Single(page.Rows)
+        Assert.Equal("NCT00000001", page.Rows(0).NctId)
+    End Function
+
     ' ============ Superseded study attempts (Tools tab: Remove superseded results) ============
     '
     ' Every test here runs against the Testcontainers Postgres from PostgresFixture.
