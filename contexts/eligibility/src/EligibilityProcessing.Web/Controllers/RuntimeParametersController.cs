@@ -1,5 +1,6 @@
 using System.Globalization;
 using EligibilityProcessing.Core;
+using EligibilityProcessing.Data;
 using EligibilityProcessing.Llm;
 using EligibilityProcessing.Umls;
 using EligibilityProcessing.Web.Auth;
@@ -7,6 +8,7 @@ using EligibilityProcessing.Web.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace EligibilityProcessing.Web.Controllers;
 
@@ -40,6 +42,7 @@ public class RuntimeParametersController : Controller
     private readonly IOptions<EmbeddingOptions> _embedding;
     private readonly IOptions<OrchestratorOptions> _orchestrator;
     private readonly IOptions<UmlsOptions> _umls;
+    private readonly IOptions<PostgresOptions> _postgres;
     private readonly IAuditWriter _audit;
     private readonly ILogger<RuntimeParametersController> _logger;
 
@@ -49,6 +52,7 @@ public class RuntimeParametersController : Controller
         IOptions<EmbeddingOptions> embedding,
         IOptions<OrchestratorOptions> orchestrator,
         IOptions<UmlsOptions> umls,
+        IOptions<PostgresOptions> postgres,
         IAuditWriter audit,
         ILogger<RuntimeParametersController> logger)
     {
@@ -57,6 +61,7 @@ public class RuntimeParametersController : Controller
         _embedding = embedding;
         _orchestrator = orchestrator;
         _umls = umls;
+        _postgres = postgres;
         _audit = audit;
         _logger = logger;
     }
@@ -80,6 +85,34 @@ public class RuntimeParametersController : Controller
         string.Equals(backend ?? "", "postgres", StringComparison.OrdinalIgnoreCase)
             ? "postgres (local umls.* store)"
             : "rest (UTS REST API)";
+
+    /// <summary>
+    /// Host/port/database of a Postgres connection string, for answering "is the
+    /// source a local AACT copy or a remote one?" at a glance.
+    /// <para>
+    /// SECURITY: the connection string carries credentials, so this deliberately
+    /// projects ONLY Host, Port, and Database. Username and Password are never
+    /// read, so they cannot leak into the response even if the parse succeeds.
+    /// A malformed string is reported as "(unparseable)" rather than echoed back,
+    /// since echoing it would put the password on screen.
+    /// </para>
+    /// </summary>
+    internal static string DescribeConnection(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return "(not set)";
+        try
+        {
+            var b = new NpgsqlConnectionStringBuilder(connectionString);
+            if (string.IsNullOrWhiteSpace(b.Host)) return "(no host)";
+            var db = string.IsNullOrWhiteSpace(b.Database) ? "?" : b.Database;
+            return $"{b.Host}:{b.Port}/{db}";
+        }
+        catch (Exception)
+        {
+            // Never echo the raw string - it contains the password.
+            return "(unparseable)";
+        }
+    }
 
     /// <summary>Current live values. Re-read on every call so the modal reflects
     /// the latest in-memory state. The secret ApiKey is never serialized.</summary>
@@ -123,7 +156,13 @@ public class RuntimeParametersController : Controller
                 // condition as the composition-root switch (no trim), so a stray
                 // space in Umls:Backend that silently reverts to REST shows here as
                 // "rest". Lets an operator confirm "am I really on postgres?".
-                umlsBackend = EffectiveUmlsBackend(_umls.Value.Backend)
+                umlsBackend = EffectiveUmlsBackend(_umls.Value.Backend),
+                // Which Postgres the trial selection actually reads from, so an
+                // operator can tell a local AACT copy from a remote one at a
+                // glance. Host/port/database only - see DescribeConnection; the
+                // credentials in the connection string are never projected.
+                sourceDatabase = DescribeConnection(_postgres.Value.ConnectionStringSource),
+                outputDatabase = DescribeConnection(_postgres.Value.ConnectionStringOutput)
             }
             // ApiKey deliberately omitted (secret).
         });

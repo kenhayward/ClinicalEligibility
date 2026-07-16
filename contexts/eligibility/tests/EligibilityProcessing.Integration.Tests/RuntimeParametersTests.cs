@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Net;
 using EligibilityProcessing.Core;
+using EligibilityProcessing.Data;
 using EligibilityProcessing.Llm;
 using EligibilityProcessing.Umls;
 using EligibilityProcessing.Web;
@@ -188,6 +189,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(orchestrator),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             audit,
             NullLogger<RuntimeParametersController>.Instance);
 
@@ -251,6 +253,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(new OrchestratorOptions()),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             new FakeAuditWriter(),
             NullLogger<RuntimeParametersController>.Instance));
 
@@ -267,6 +270,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(new OrchestratorOptions()),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             new FakeAuditWriter(),
             NullLogger<RuntimeParametersController>.Instance);
 
@@ -296,6 +300,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(new OrchestratorOptions()),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             new FakeAuditWriter(),
             NullLogger<RuntimeParametersController>.Instance));
 
@@ -315,6 +320,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(new OrchestratorOptions()),
             Options.Create(new UmlsOptions { Backend = configured }),
+            Options.Create(new PostgresOptions()),
             new FakeAuditWriter(),
             NullLogger<RuntimeParametersController>.Instance));
 
@@ -335,6 +341,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(orchestrator),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             new FakeAuditWriter(),
             NullLogger<RuntimeParametersController>.Instance);
 
@@ -419,6 +426,7 @@ public class RuntimeParametersTests
             Options.Create(new EmbeddingOptions()),
             Options.Create(new OrchestratorOptions()),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             audit,
             NullLogger<RuntimeParametersController>.Instance);
 
@@ -430,6 +438,7 @@ public class RuntimeParametersTests
             Options.Create(embedding),
             Options.Create(orchestrator ?? new OrchestratorOptions()),
             Options.Create(new UmlsOptions()),
+            Options.Create(new PostgresOptions()),
             new FakeAuditWriter(),
             NullLogger<RuntimeParametersController>.Instance);
 
@@ -488,5 +497,86 @@ public class RuntimeParametersTests
                     .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
             });
         }
+    }
+
+    // ===== DescribeConnection: the source/output database display =====
+    //
+    // This projects a connection string onto the panel, and connection strings
+    // carry passwords. Every test here is really the same test: the password must
+    // not come out the other side.
+
+    // Hosts here are RFC 5737 / RFC 2606 documentation examples on purpose - this
+    // is a public repository, so test fixtures must never carry a real
+    // deployment's addresses.
+    [Fact]
+    public void DescribeConnection_shows_host_port_database_only()
+    {
+        var actual = RuntimeParametersController.DescribeConnection(
+            "Host=192.0.2.10;Port=5432;Database=clinical;Username=postgres;Password=hunter2");
+
+        Assert.Equal("192.0.2.10:5432/clinical", actual);
+    }
+
+    [Fact]
+    public void DescribeConnection_never_leaks_credentials()
+    {
+        var actual = RuntimeParametersController.DescribeConnection(
+            "Host=aact-db.example.org;Port=5432;Database=aact;Username=secretuser;Password=sup3rs3cret!");
+
+        Assert.DoesNotContain("sup3rs3cret", actual, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secretuser", actual, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Password", actual, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("aact-db.example.org:5432/aact", actual);
+    }
+
+    // A malformed string must NOT be echoed back - echoing is exactly how a
+    // password would reach the screen.
+    [Fact]
+    public void DescribeConnection_does_not_echo_an_unparseable_string()
+    {
+        var actual = RuntimeParametersController.DescribeConnection(
+            "this is not a connection string Password=leakme");
+
+        Assert.DoesNotContain("leakme", actual, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("(unparseable)", actual);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void DescribeConnection_reports_unset_for_blank(string? value)
+    {
+        Assert.Equal("(not set)", RuntimeParametersController.DescribeConnection(value));
+    }
+
+    [Fact]
+    public void DescribeConnection_defaults_the_port_when_omitted()
+    {
+        // Npgsql defaults Port to 5432, so the display stays complete.
+        Assert.Equal("localhost:5432/clinical",
+            RuntimeParametersController.DescribeConnection("Host=localhost;Database=clinical"));
+    }
+
+    [Fact]
+    public void DescribeConnection_handles_a_missing_database()
+    {
+        Assert.Equal("localhost:5432/?",
+            RuntimeParametersController.DescribeConnection("Host=localhost"));
+    }
+
+    // The whole point of surfacing this: telling a local AACT copy from the
+    // remote one at a glance.
+    [Fact]
+    public void DescribeConnection_distinguishes_local_from_remote_source()
+    {
+        var local = RuntimeParametersController.DescribeConnection(
+            "Host=192.0.2.10;Database=clinical;Username=u;Password=p");
+        var remote = RuntimeParametersController.DescribeConnection(
+            "Host=aact-db.example.org;Database=aact;Username=u;Password=p");
+
+        Assert.NotEqual(local, remote);
+        Assert.StartsWith("192.0.2.10:", local);
+        Assert.StartsWith("aact-db.example.org:", remote);
     }
 }

@@ -1,7 +1,18 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 12, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 13, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.13",
+      "releaseDate": "2026-07-16",
+      "enhancements": [
+        "Dashboard: the Studies successful card now also shows roughly how many trials are left to process, so you can see the size of the remaining backlog at a glance. The figure is approximate - it is the number of AACT trials that pass the selection filter minus the number already attempted, rather than the exact anti-join the batch selector runs, which is far too slow for a page load. It is omitted entirely when there is no AACT source configured (for example the seeded quickstart), rather than showing a misleading zero.",
+        "Runtime Parameters: the panel now shows which Postgres the source (ctgov) and output databases actually point at, so you can tell a local AACT copy from a remote one without digging through the environment. Only host, port, and database name are shown - the credentials in the connection string are never displayed."
+      ],
+      "fixes": [
+        "Dashboard: the two batch buttons are now named 'Trigger Earliest' and 'Trigger Latest', matching the 'Earliest unprocessed' and 'Most recent unprocessed' fields above them. The previous 'Trigger batch' / 'Trigger recent' names did not make the pairing obvious."
+      ]
+    },
     {
       "version": "0.1.12",
       "releaseDate": "2026-07-16",

@@ -27,9 +27,9 @@
                            class="form-control" style="width: 7rem;" />
                 </div>
                 <button type="submit" class="btn btn-primary js-trigger-btn"
-                        disabled="@(runInProgress ? "disabled" : null)">Trigger batch</button>
+                        disabled="@(runInProgress ? "disabled" : null)">Trigger Earliest</button>
             </form>
-            @* Recent-direction trigger. Same plumbing as Trigger batch but
+            @* Recent-direction trigger. Same plumbing as Trigger Earliest but
                sets Direction=Recent so the orchestrator walks ctgov.eligibilities
                DESC by nct_id and picks the next N unprocessed from the most-
                recent end. Useful for catching up on newly-registered trials
@@ -41,7 +41,7 @@
                            class="form-control" style="width: 7rem;" />
                 </div>
                 <button type="submit" class="btn btn-primary js-trigger-btn"
-                        disabled="@(runInProgress ? "disabled" : null)">Trigger recent</button>
+                        disabled="@(runInProgress ? "disabled" : null)">Trigger Latest</button>
             </form>
             <form id="rerun-form" asp-action="Rerun" method="post" class="d-flex gap-2 align-items-end mb-0">
                 <div>
@@ -81,6 +81,16 @@ else
                     <div class="small text-muted">Studies successful</div>
                     <div class="fs-5 mb-0">@m.StudiesSuccessful.ToString("N0")</div>
                     <small class="text-muted">(latest attempt is success)</small>
+                    @* Backlog. Omitted entirely when there is no reachable AACT
+                       source (the seeded quickstart has no ctgov schema), rather
+                       than rendering a misleading zero. Approximate by design -
+                       see DashboardMetrics.TrialsRemaining. *@
+                    @if (m.TrialsRemaining.HasValue)
+                    {
+                        <div class="small text-muted mt-2">Trials remaining</div>
+                        <div class="fs-6 mb-0">~@m.TrialsRemaining.Value.ToString("N0")</div>
+                        <small class="text-muted" title="Selectable AACT trials minus trials already attempted. Approximate: the exact figure needs the batch selector's anti-join, which is too expensive for a page load.">(approx: source total - attempted)</small>
+                    }
                 </div>
             </div>
         </div>
