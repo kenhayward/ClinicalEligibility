@@ -47,6 +47,14 @@ Two mechanisms make this work and are worth knowing:
   environment **before** the host builds — so the standard environment-variable
   provider (source 5) overlays them onto the JSON. This works identically from
   Visual Studio (F5), `dotnet run`, and Docker.
+  - **An environment variable that is already set wins; `.env` never overwrites it**
+    (`NoClobber`). So `Postgres__ConnectionStringOutput=<somewhere> dotnet run -- migrate`
+    does what it says, even when run from inside the repo where a `.env` exists. This
+    matters because a developer `.env` usually points at production: before this was
+    pinned, DotNetEnv's clobbering default meant the file silently won and the command
+    talked to the wrong database, with no error and no log line. Nothing else changes -
+    with nothing exported, `.env` still supplies every value, and a container has no
+    `.env` at all.
 
 ### The double-underscore convention
 

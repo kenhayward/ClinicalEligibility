@@ -398,9 +398,21 @@ Public NotInheritable Class PipelineOrchestrator
                         trial.NctId)
             End If
 
-            ' --- Steps 7-11: per-criterion UMLS resolution. Timed: this sequential
-            ' remote-lookup loop is the suspected throughput ceiling, so its
-            ' per-trial wall clock feeds the Runs table's phase split. ---
+            ' --- Steps 7-11: per-criterion UMLS resolution. Timed: the per-trial wall
+            ' clock feeds the Runs table's phase split (eligibility_study.umls_ms).
+            '
+            ' This loop is NOT the throughput ceiling, despite being sequential and
+            ' looking like the obvious suspect. Measured across 240,350 production
+            ' trials: LLM 43,535 ms/trial (96.7%), this loop 1,467 ms/trial (3.3%),
+            ' persist 15 ms (0.0%). Resolving it to zero would buy 3%. The ceiling is
+            ' model-server slots - at cap 8 the runs measured 98.4% of the theoretical
+            ' LLM-bound floor, i.e. the orchestrator already keeps the model saturated.
+            '
+            ' Left sequential deliberately: parallelising it would add concurrency to
+            ' the 3% while the trial-level workers already keep the model saturated.
+            ' Re-check umls_ms against llm_ms before assuming otherwise - the data is
+            ' already in the table, and that query is how the numbers above were
+            ' obtained. ---
             Dim umlsWatch = Stopwatch.StartNew()
 
             ' Pass 1 — lexical resolution per criterion (local store / REST API).

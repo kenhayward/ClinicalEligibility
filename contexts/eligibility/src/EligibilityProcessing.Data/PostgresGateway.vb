@@ -3097,9 +3097,18 @@ ON CONFLICT (authoring_study_id) DO UPDATE SET
         Dim phaseFilter = If(filterPhase, "")
         Dim typeFilter = If(filterStudyType, "")
 
-        ' Exact KNN — no index — is well under 100 ms at the current corpus
-        ' size. The query vector is bound as text and cast to `vector`, which
-        ' avoids a Pgvector.Npgsql type-handler dependency.
+        ' Served by the HNSW index ix_eligibility_study_embedding_hnsw (vector_cosine_ops,
+        ' added in V8) - the `<=>` operator in the ORDER BY is what lets the planner use
+        ' it. Measured at 2.6-4 ms warm over a 281k-vector corpus.
+        '
+        ' NOTE: this comment previously claimed "exact KNN - no index". That was wrong -
+        ' the index predates the claim - and it sent at least one investigation chasing a
+        ' scan that does not exist. If you change the ORDER BY expression so it no longer
+        ' matches the index's operator class, the query silently degrades to a real exact
+        ' scan and this becomes a full pass over every embedding.
+        '
+        ' The query vector is bound as text and cast to `vector`, which avoids a
+        ' Pgvector.Npgsql type-handler dependency.
         '
         ' The phase / study_type filters use a "empty string disables" pattern
         ' inside the WHERE clause, so a single SQL shape covers all four
