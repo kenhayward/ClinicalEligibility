@@ -113,7 +113,7 @@ C#/VB options-class default applies (noted as "code default").
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `BaseUrl` | code default `http://localhost:8080/v1` | OpenAI-compatible endpoint. Usually set per-environment via `Llm__BaseUrl` in `.env`. |
+| `BaseUrl` | code default `http://localhost:8080/v1` | OpenAI-compatible endpoint. Set per-environment via `Llm__BaseUrl` in `.env`. **Points at the HAProxy pool** (`llm-proxy` compose service, `http://llm-proxy:8080/v1`) so the extraction call fans across the always-on GPU plus any intermittent ones currently up - see below. |
 | `Model` | code default `gemma-4-26B-A4B-it-Q8_0` | Chat-completions model name. Usually set via `.env`. |
 | `Temperature` | `0.3` | |
 | `MaxTokens` | `30000` | Completion-token cap. For **reasoning** models this budget covers *both* the reasoning trace *and* the JSON output — too low and the model is cut off mid-think (`finish_reason=length`, empty content). Must also satisfy `prompt + MaxTokens ≤ per-slot context`, and per-slot context = server `--ctx-size` ÷ `--parallel`. Raising `Pipeline:LlmConcurrencyCap` + server slots for throughput shrinks per-slot context, so size the two together (e.g. 128k ctx ÷ 8 slots = 16k/slot — lower `MaxTokens` accordingly, or quantize the KV cache to afford more ctx). |
@@ -128,6 +128,45 @@ C#/VB options-class default applies (noted as "code default").
 | `RetryDelaySeconds` | `5` | |
 | `ConcurrencyCap` | code default `8` | **Vestigial — not wired to anything.** The real parallelism throttle is `Pipeline:LlmConcurrencyCap` (below). Left only so existing config that sets `Llm:ConcurrencyCap` doesn't error; do not rely on it. |
 | `ApiKey` | — | **Secret** — see below. |
+
+#### The `llm-proxy` GPU pool (HAProxy)
+
+`Llm__BaseUrl` points at the `llm-proxy` compose service, which pools the always-on GPU
+with up to two intermittent ones. The variables below are read **only by
+`docker-compose.yml`** (passed into the proxy container), never by the app -
+`deploy/eligibility-pipeline/haproxy/haproxy.cfg` is the config.
+
+| Variable | Default | Notes |
+|-----|---------|-------|
+| `LLM_GPU_PRIMARY_ADDR` | `192.0.2.1:1234` | `host:port` of the always-on GPU. |
+| `LLM_GPU_PRIMARY_SLOTS` | `4` | Its concurrent-request capacity (llama.cpp `--parallel` / LM Studio max concurrent). Becomes HAProxy's per-server `maxconn`. |
+| `LLM_GPU_AUX1_ADDR` / `_SLOTS` | `192.0.2.2:1234` / `4` | First intermittent GPU. Leave unset to disable. |
+| `LLM_GPU_AUX2_ADDR` / `_SLOTS` | `192.0.2.3:1234` / `4` | Second intermittent GPU. |
+| `LLM_PROXY_PORT` | `8090` | Host port for the pool. Only needed for a local `dotnet run`; containers use the service name. |
+| `LLM_PROXY_STATS_PORT` | `8404` | Stats page (`http://<docker-host>:8404/`) - which GPUs are up and how loaded. No auth; LAN only. |
+
+Things that will bite, all verified rather than assumed:
+
+- **Every GPU must serve the same model with the same parameters.** Which one answers a
+  trial is arbitrary and nothing records it, so a mismatch makes extraction quality vary
+  by luck.
+- **`*_SLOTS` must be a non-empty number.** HAProxy silently accepts an empty `maxconn`
+  and treats it as *unlimited*, which would flood one card and defeat the point. Compose
+  supplies a default and `haproxy.cfg` refuses to start on an empty value, but a wrong
+  *number* is on you.
+- **`LlmNormalize__BaseUrl` and `Embedding__BaseUrl` must stay explicitly set.** Both
+  inherit `Llm__BaseUrl` when blank, which now means they would silently route through
+  the pool. Neither wants it - normalize is not throughput-critical, and the pool's GPUs
+  serve a chat model, not an embedding model.
+- **Set `Pipeline:LlmConcurrencyCap` for all GPUs up** and let HAProxy queue when the aux
+  ones are away. Over-subscription is benign (throughput stays slot-bound; only
+  per-request latency inflates), and it self-adjusts with no restart. The cost: `llm_ms`
+  then includes queue wait, so the phase-split telemetry gets muddier.
+- Unset aux GPUs default to unroutable RFC 5737 addresses: they sit `DOWN` in the stats
+  page and take no traffic. Nothing needs restarting when a GPU appears or vanishes -
+  active health checks handle it, and `resolvers dns` in the config is what lets a
+  *hostname*-configured GPU rejoin after being switched off (without it, HAProxy parks it
+  in `MAINT (resolution)` permanently).
 
 ### `LlmNormalize` — `normalize-umls` override · `appsettings.Shared.json`
 [`LlmNormalizeOptions.vb`](../../contexts/eligibility/src/EligibilityProcessing.Llm/LlmNormalizeOptions.vb)

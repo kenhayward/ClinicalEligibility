@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 18, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 19, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.19",
+      "releaseDate": "2026-07-16",
+      "enhancements": [
+        "The extraction pipeline can now use more than one GPU, including ones that are only available some of the time. A load balancer (HAProxy) runs as part of the stack and sits in front of the language-model servers; the pipeline talks to it instead of to a single machine. Each server is declared with its address and how many requests it can handle at once, and the balancer sends it no more than that, queueing the rest - so an occasional second or third GPU roughly multiplies throughput while it is switched on, and nothing needs restarting when one appears or disappears. Servers are checked continuously and taken out of rotation before any work is sent to them. A status page at port 8404 shows which are up and how busy each is. Configure the servers with LLM_GPU_* in .env; leave the extra ones out if you only have one. Every server must run the same model with the same settings, since which one answers a given trial is arbitrary. The normalization and embedding endpoints are unchanged and still address their servers directly."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.18",
       "releaseDate": "2026-07-16",

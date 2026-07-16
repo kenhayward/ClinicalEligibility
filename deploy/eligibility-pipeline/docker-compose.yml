@@ -30,6 +30,62 @@
 name: eligibility
 
 services:
+  # HAProxy in front of the chat-completions servers used by the EXTRACTION call.
+  # Pools the always-on GPU with up to two intermittent ones, so a run uses whatever
+  # capacity exists at that moment. Only Llm__BaseUrl points here: the normalize and
+  # embedding endpoints address their servers directly (see .env.example).
+  #
+  # Why a proxy instead of scaling the app: the pipeline is ~96.7% LLM time and already
+  # runs at ~98.4% of its LLM-bound floor, so one app process saturates whatever it
+  # points at. More throughput needs more model slots, not more workers.
+  #
+  # HAProxy rather than nginx for two reasons: active health checks (open-source nginx
+  # has none, so it can only discover an absent GPU by failing a real request), and
+  # per-server maxconn, which models llama.cpp's slot count exactly and queues the
+  # surplus instead of oversubscribing a card.
+  llm-proxy:
+    image: haproxy:3.0-alpine
+    container_name: eligibility-llm-proxy
+    restart: unless-stopped
+    ports:
+      # 8090: entry point, for a local `dotnet run` outside compose. Containers use
+      # the service name (http://llm-proxy:8080/v1) and need no published port.
+      - "${LLM_PROXY_PORT:-8090}:8080"
+      # Stats page: which GPUs are up and how loaded each is. No auth - LAN only.
+      - "${LLM_PROXY_STATS_PORT:-8404}:8404"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    environment:
+      # Address + SLOT COUNT per GPU. The slot count is that server's llama.cpp
+      # --parallel (or LM Studio max concurrent) and is what stops HAProxy
+      # oversubscribing it.
+      #
+      # The :-defaults are load-bearing: `maxconn ""` is silently accepted by HAProxy
+      # and means UNLIMITED, which would flood one GPU with every request and quietly
+      # defeat the whole design. haproxy.cfg also refuses to start on an empty value.
+      #
+      # Unset aux GPUs default to TEST-NET-1 (RFC 5737) addresses - guaranteed
+      # unroutable, so they sit permanently DOWN in the stats page and take no traffic
+      # until you fill them in. Nothing breaks while they are absent.
+      - LLM_GPU_PRIMARY_ADDR=${LLM_GPU_PRIMARY_ADDR:-192.0.2.1:1234}
+      - LLM_GPU_PRIMARY_SLOTS=${LLM_GPU_PRIMARY_SLOTS:-4}
+      - LLM_GPU_AUX1_ADDR=${LLM_GPU_AUX1_ADDR:-192.0.2.2:1234}
+      - LLM_GPU_AUX1_SLOTS=${LLM_GPU_AUX1_SLOTS:-4}
+      - LLM_GPU_AUX2_ADDR=${LLM_GPU_AUX2_ADDR:-192.0.2.3:1234}
+      - LLM_GPU_AUX2_SLOTS=${LLM_GPU_AUX2_SLOTS:-4}
+    # Only needed if a GPU runs on the Docker host itself - then use
+    # host.docker.internal:<port> as its address. LAN IPs need nothing special.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Config errors (including the empty-slot-count guard) must surface loudly rather
+    # than restart-looping in silence.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8404/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # Single web host serves both the dashboard (HTML + SignalR live feed) and
   # the production trigger surface (POST /trigger). They were originally split,
   # but the SignalR feed needs the orchestrator to run in the same process as
