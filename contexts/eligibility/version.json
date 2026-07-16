@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 17, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 18, "releaseDate": "2026-07-16" },
   "releases": [
+    {
+      "version": "0.1.18",
+      "releaseDate": "2026-07-16",
+      "enhancements": [],
+      "fixes": [
+        "Settings given on the command line are no longer silently ignored. The .env file is loaded into the environment at start-up, and it was overwriting values that had already been set - so running something like `Postgres__ConnectionStringOutput=... dotnet run -- migrate` from inside the repository used whatever .env said instead of what was asked for, with no error and no log line to say so. Since a developer .env usually points at the production database, a command aimed at a test database could quietly reach production. An already-set value now wins and .env fills in only what is missing. Nothing else changes: with nothing set, .env still supplies every value as before, and containers have no .env at all."
+      ]
+    },
     {
       "version": "0.1.17",
       "releaseDate": "2026-07-16",
