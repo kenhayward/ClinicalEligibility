@@ -115,6 +115,18 @@ Public Module CompositionRoot
                     Return CType(sp.GetRequiredService(Of IPostgresGateway)(), PostgresGateway)
                 End Function)
 
+        ' Cross-process batch lock. SCOPED, matching the per-run scope both hosts create
+        ' (Web's BatchRunner and the CLI's run command): each acquisition holds its own
+        ' connection for the whole run, so one instance per run is exactly right. A
+        ' singleton would be wrong - two runs would share one lock object and its single
+        ' connection field.
+        services.AddScoped(Of PostgresRunLock)(
+                Function(sp As IServiceProvider) As PostgresRunLock
+                    Return New PostgresRunLock(
+                            sp.GetRequiredKeyedService(Of NpgsqlDataSource)(OutputDataSourceKey),
+                            sp.GetRequiredService(Of ILogger(Of PostgresRunLock))())
+                End Function)
+
         ' --- LLM typed HttpClient with retry pipeline ---
         services.AddHttpClient(Of ILlmClient, LlmClient)("llamacpp",
                 Sub(client As HttpClient)
