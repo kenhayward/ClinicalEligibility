@@ -136,11 +136,19 @@
                     @await Html.PartialAsync("_UserMenu")
                 </ul>
             </nav>
-            @* Authoring is a full-width master-detail tab (its own collapsible sidebar
-               manages horizontal space), so it uses container-fluid; every other view
-               keeps the centered fixed-width container. *@
+            @* Two tabs are full-width. Authoring is a master-detail shell whose own
+               collapsible sidebar manages horizontal space; the Dashboard is a
+               fixed-canvas layout that has to fit one screen, and a centered
+               container would letterbox it on the 1920-wide display it targets.
+               Every other view keeps the centered fixed-width container. *@
+            @{
+                var fluidLayout =
+                    string.Equals(currentController, "Authoring", StringComparison.OrdinalIgnoreCase)
+                    || (string.Equals(currentController, "Home", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(currentAction, "Index", StringComparison.OrdinalIgnoreCase));
+            }
             <div class="ep-main">
-                <div class="@(string.Equals(currentController, "Authoring", StringComparison.OrdinalIgnoreCase) ? "container-fluid" : "container")">
+                <div class="@(fluidLayout ? "container-fluid" : "container")">
                     <main role="main" class="py-3">
                         @RenderBody()
                     </main>

@@ -1,0 +1,96 @@
+@model EligibilityProcessing.Web.Models.DashboardViewModel
+@*
+    Dashboard header: title + the pipeline control toolbar.
+
+    Self-contained (it resolves its own authorization) so Index composes rather
+    than threads flags through.
+
+    The trigger/run/cancel controls need PipelineOps (Owner / Administrator).
+    Everyone else still gets a toolbar - Reload plus a Read-only chip - because
+    an empty header row reads as something broken rather than as something not
+    permitted. The gate here is cosmetic; HomeController re-checks the policy on
+    every action, so hiding the button is not what makes it safe.
+*@
+@{
+    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
+
+    // Initial disabled state for the trigger buttons: a run is in flight when the
+    // most recent run is still "running", OR when a maintenance tool job holds the
+    // shared gate (Tools tab). The SignalR Batch*/ToolJob* events keep this in sync
+    // after load (see the script section in Index).
+    //
+    // Server-rendered rather than left to the client: resolved after the fetch,
+    // the buttons would paint enabled and then snap disabled, and a fast operator
+    // would already have clicked.
+    var runInProgress = Model.MostRecentRun?.Status == "running"
+        || !string.IsNullOrEmpty(Model.BusyActivity);
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+    <div>
+        <div class="fw-bold" style="font-size: 1.2rem; line-height: 1.2;">Pipeline overview</div>
+        <div class="epk">Eligibility Processing &middot; live</div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        @if (canRunPipeline)
+        {
+            @* Each control is a pill: its count/input sits on the same rounded
+               surface as its button, so the number is visibly an argument TO the
+               action rather than a stray field near it. *@
+            @* No visible <label>: the button already says "Earliest" right next
+               to the field, so a label would just stutter it. The accessible
+               name lives on aria-label instead, which is what a screen reader
+               announces and what the visible text cannot carry here. *@
+            <form id="trigger-form" asp-action="Trigger" method="post"
+                  class="d-flex align-items-center gap-2 mb-0 border rounded-3 ps-2 pe-1 py-1">
+                <input id="trigger-count" name="count" type="number" min="1" value="10"
+                       class="form-control form-control-sm ep-num" style="width: 4.5rem;"
+                       aria-label="Number of earliest unprocessed trials to process" />
+                @* aria-label carries the full "Trigger Earliest" name: the visible
+                   label is shortened to fit the pill, but the accessible name must
+                   still say which direction this triggers. *@
+                <button type="submit" class="btn btn-sm btn-primary js-trigger-btn"
+                        aria-label="Trigger Earliest" title="Process the earliest unprocessed trials"
+                        disabled="@(runInProgress ? "disabled" : null)">Earliest</button>
+            </form>
+
+            @* Recent-direction trigger. Same plumbing as Trigger Earliest but
+               sets Direction=Recent so the orchestrator walks ctgov.eligibilities
+               DESC by nct_id and picks the next N unprocessed from the most-
+               recent end. Useful for catching up on newly-registered trials
+               without disturbing the forward backlog. *@
+            <form id="trigger-recent-form" asp-action="TriggerRecent" method="post"
+                  class="d-flex align-items-center gap-2 mb-0 border rounded-3 ps-2 pe-1 py-1">
+                <input id="trigger-recent-count" name="count" type="number" min="1" value="100"
+                       class="form-control form-control-sm ep-num" style="width: 4.5rem;"
+                       aria-label="Number of most recent unprocessed trials to process" />
+                <button type="submit" class="btn btn-sm btn-primary js-trigger-btn"
+                        aria-label="Trigger Latest" title="Process the most recently registered unprocessed trials"
+                        disabled="@(runInProgress ? "disabled" : null)">Latest</button>
+            </form>
+
+            <form id="rerun-form" asp-action="Rerun" method="post"
+                  class="d-flex align-items-center gap-2 mb-0 border rounded-3 ps-2 pe-1 py-1">
+                <input id="rerun-nctId" name="nctId" type="text" placeholder="NCT12345678"
+                       class="form-control form-control-sm" style="width: 8rem;"
+                       aria-label="NCT ID to re-run" />
+                <button type="submit" class="btn btn-sm btn-outline-primary js-trigger-btn"
+                        aria-label="Run Trial" title="Re-process a single trial by NCT ID"
+                        disabled="@(runInProgress ? "disabled" : null)">Run Trial</button>
+            </form>
+
+            @* Deliberately never disabled and NOT .js-trigger-btn: cancelling is
+               the one control an operator needs precisely WHILE a run holds the
+               gate, so it must stay live exactly when the others go dead. *@
+            <form id="cancel-form" asp-action="Cancel" method="post" class="mb-0">
+                <button type="submit" class="btn btn-sm btn-outline-danger"
+                        title="Cancel the run currently in progress">Cancel</button>
+            </form>
+        }
+        else
+        {
+            <span class="badge text-bg-secondary" title="Running the pipeline needs the Owner or Administrator role.">Read-only</span>
+        }
+    </div>
+</div>

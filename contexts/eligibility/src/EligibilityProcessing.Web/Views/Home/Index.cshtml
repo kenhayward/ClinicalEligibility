@@ -1,309 +1,47 @@
 @model EligibilityProcessing.Web.Models.DashboardViewModel
 @{
     ViewData["Title"] = "Dashboard";
-    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
-
-    // Duration as mm:ss — TotalMinutes so a >1h pace still reads correctly.
-    string FormatMmSs(TimeSpan ts) =>
-        $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}";
-
-    // Initial disabled state for the trigger buttons: a run is in flight when the
-    // most recent run is still "running", OR when a maintenance tool job holds the
-    // shared gate (Tools tab). The SignalR Batch*/ToolJob* events keep this in sync
-    // after load (see the script section).
-    var runInProgress = Model.MostRecentRun?.Status == "running"
-        || !string.IsNullOrEmpty(Model.BusyActivity);
 }
+@*
+    Composition only - each region is its own partial:
+      _DashboardToolbar  header + pipeline controls (resolves its own authorization)
+      _DashboardRunCard  most-recent-run ring + stat grid
+      _DashboardMetrics  resolution gauge, failures donut, KPI tiles
+      _DashboardActivity live SignalR feed
 
-@if (canRunPipeline)
-{
-<div class="card mb-4">
-    <div class="card-body">
-        <div class="d-flex flex-wrap gap-3 align-items-end mb-0">
-            <form id="trigger-form" asp-action="Trigger" method="post" class="d-flex gap-2 align-items-end mb-0">
-                <div>
-                    <label for="trigger-count" class="form-label small text-muted mb-1">Earliest unprocessed</label>
-                    <input id="trigger-count" name="count" type="number" min="1" value="10"
-                           class="form-control" style="width: 7rem;" />
-                </div>
-                <button type="submit" class="btn btn-primary js-trigger-btn"
-                        disabled="@(runInProgress ? "disabled" : null)">Trigger Earliest</button>
-            </form>
-            @* Recent-direction trigger. Same plumbing as Trigger Earliest but
-               sets Direction=Recent so the orchestrator walks ctgov.eligibilities
-               DESC by nct_id and picks the next N unprocessed from the most-
-               recent end. Useful for catching up on newly-registered trials
-               without disturbing the forward backlog. *@
-            <form id="trigger-recent-form" asp-action="TriggerRecent" method="post" class="d-flex gap-2 align-items-end mb-0">
-                <div>
-                    <label for="trigger-recent-count" class="form-label small text-muted mb-1">Most recent unprocessed</label>
-                    <input id="trigger-recent-count" name="count" type="number" min="1" value="100"
-                           class="form-control" style="width: 7rem;" />
-                </div>
-                <button type="submit" class="btn btn-primary js-trigger-btn"
-                        disabled="@(runInProgress ? "disabled" : null)">Trigger Latest</button>
-            </form>
-            <form id="rerun-form" asp-action="Rerun" method="post" class="d-flex gap-2 align-items-end mb-0">
-                <div>
-                    <label for="rerun-nctId" class="form-label small text-muted mb-1">NCT ID</label>
-                    <input id="rerun-nctId" name="nctId" type="text" placeholder="NCT12345678"
-                           class="form-control" style="width: 11rem;" />
-                </div>
-                <button type="submit" class="btn btn-outline-primary js-trigger-btn"
-                        disabled="@(runInProgress ? "disabled" : null)">Run Trial</button>
-            </form>
-            <form id="cancel-form" asp-action="Cancel" method="post" class="mb-0">
-                <button type="submit" class="btn btn-outline-danger">Cancel current run</button>
-            </form>
+    Watermark / MAX(nct_id) card was removed once mixed-direction batches were
+    introduced - MAX could jump into the recent NCT_ID range after a Recent run,
+    so the number stopped being a meaningful "how far through the catalogue"
+    signal. The studies-successful + rows-persisted tiles tell the same story
+    without the misleading peak indicator.
+*@
+
+<div class="ep-dash">
+    <partial name="_DashboardToolbar" model="Model" />
+
+    @if (Model.HasError)
+    {
+        @* The dashboard stays usable when Postgres is down: the controller
+           catches and renders the message here rather than 500ing (spec section
+           6.4). The live feed below still runs - SignalR does not touch the DB. *@
+        <div class="alert alert-warning mb-0" role="alert">
+            <strong>Backend unavailable.</strong> @Model.ErrorMessage
+        </div>
+    }
+
+    <div class="ep-dash-row">
+        <div class="ep-dash-left">
+            @if (!Model.HasError)
+            {
+                <partial name="_DashboardRunCard" model="Model.MostRecentRun" />
+                <partial name="_DashboardMetrics" model="@(Model.Metrics ?? EligibilityProcessing.Core.DashboardMetrics.Empty)" />
+            }
+        </div>
+        <div class="ep-dash-live">
+            <partial name="_DashboardActivity" />
         </div>
     </div>
 </div>
-}
-
-@if (Model.HasError)
-{
-    <div class="alert alert-warning" role="alert">
-        <strong>Backend unavailable.</strong> @Model.ErrorMessage
-    </div>
-}
-else
-{
-    var m = Model.Metrics ?? EligibilityProcessing.Core.DashboardMetrics.Empty;
-    @* Watermark / MAX(nct_id) card was removed once mixed-direction batches
-       were introduced — MAX could jump into the recent NCT_ID range after a
-       Recent run, so the number stopped being a meaningful "how far through
-       the catalogue" signal. The studies-successful + rows-persisted cards
-       below tell the same story without the misleading peak indicator. *@
-    <div class="row g-2 mb-3">
-        <div class="col-md-4 col-lg">
-            <div class="card h-100">
-                <div class="card-body py-2 px-3">
-                    <div class="small text-muted">Studies successful</div>
-                    <div class="fs-5 mb-0">@m.StudiesSuccessful.ToString("N0")</div>
-                    <small class="text-muted">(latest attempt is success)</small>
-                    @* Backlog. Omitted entirely when there is no reachable AACT
-                       source (the seeded quickstart has no ctgov schema), rather
-                       than rendering a misleading zero. Approximate by design -
-                       see DashboardMetrics.TrialsRemaining. *@
-                    @if (m.TrialsRemaining.HasValue)
-                    {
-                        <div class="small text-muted mt-2">Trials remaining</div>
-                        <div class="fs-6 mb-0">~@m.TrialsRemaining.Value.ToString("N0")</div>
-                        <small class="text-muted" title="Selectable AACT trials minus trials already attempted. Approximate: the exact figure needs the batch selector's anti-join, which is too expensive for a page load.">(approx: source total - attempted)</small>
-                    }
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 col-lg">
-            <div class="card h-100">
-                <div class="card-body py-2 px-3">
-                    <div class="small text-muted">Eligibility rows persisted</div>
-                    <div class="fs-5 mb-0">@m.EligibilityRowCount.ToString("N0")</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 col-lg">
-            <div class="card h-100">
-                <div class="card-body py-2 px-3">
-                    <div class="small text-muted">Studies failed</div>
-                    @* One line per failure status (latest attempt per nct_id)
-                       that actually has a non-zero count. The count links to
-                       the History tab pre-filtered to that status — History's
-                       default hide-superseded view uses the same latest-attempt
-                       grouping, so the filtered list matches this count. *@
-                    @{
-                        @* "interrupted" is the host-died-mid-trial bucket, reconciled
-                           at startup. It is in this list because it must be visible
-                           somewhere - the whole point is that these trials were
-                           previously counted as neither success nor failure - and the
-                           failure card is the only "needs attention" surface. It is
-                           not a failure OF the trial, which is why History badges it
-                           amber rather than red. *@
-                        var failureTypes = new[]
-                        {
-                            "llm_failed", "parse_invalid_json", "persist_failed", "failed", "interrupted"
-                        };
-                        var activeFailures = failureTypes
-                            .Select(s => (Status: s,
-                                          Count: m.FailuresByStatus.TryGetValue(s, out var c) ? c : 0L))
-                            .Where(f => f.Count > 0)
-                            .ToList();
-                    }
-                    @* Embedding backlog is rendered alongside the failure
-                       breakdown so the card surfaces every "studies needing
-                       attention" bucket in one place. Not a failure — styled
-                       neutral rather than red, and not linkable (the only way
-                       to clear it is the embed-studies CLI command, which
-                       has no dashboard trigger). *@
-                    <div style="font-size: .85rem; line-height: 1.5;">
-                        @if (activeFailures.Count == 0)
-                        {
-                            <div class="d-flex justify-content-between">
-                                <span class="text-muted">latest failures</span>
-                                <span class="fw-semibold">0</span>
-                            </div>
-                        }
-                        else
-                        {
-                            @foreach (var f in activeFailures)
-                            {
-                                <div class="d-flex justify-content-between">
-                                    <span class="text-muted">@f.Status</span>
-                                    <a asp-action="History" asp-route-status="@f.Status"
-                                       class="text-danger fw-semibold text-decoration-none"
-                                       title="View these studies in History">@f.Count.ToString("N0")</a>
-                                </div>
-                            }
-                        }
-                        @* parse_empty is a valid terminal state, not a failure
-                           (LLM returned valid JSON with zero criteria), so it is
-                           excluded from the failure counts above and styled
-                           neutral rather than red. Always shown — a rising
-                           parse_empty count can signal a prompt/model regression
-                           worth noticing even though no individual trial broke.
-                           Links to History filtered to the parse_empty status. *@
-                        <div class="d-flex justify-content-between"
-                             title="Latest attempt returned valid JSON but zero criteria. A valid 'no eligibility criteria' outcome, not a failure.">
-                            <span class="text-muted">parse_empty</span>
-                            <a asp-action="History" asp-route-status="parse_empty"
-                               class="fw-semibold text-body-secondary text-decoration-none"
-                               title="View these studies in History">@m.ParseEmpty.ToString("N0")</a>
-                        </div>
-                        <div class="d-flex justify-content-between"
-                             title="Studies with eligibility rows but no row in eligibility_study_embedding. Run `dotnet run --project src/EligibilityProcessing.Cli -- embed-studies` to backfill.">
-                            <span class="text-muted">without embeddings</span>
-                            <span class="fw-semibold text-body-secondary">@m.StudiesWithoutEmbeddings.ToString("N0")</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 col-lg">
-            <div class="card h-100">
-                <div class="card-body py-2 px-3">
-                    <div class="small text-muted">UMLS resolution rate</div>
-                    <div class="fs-5 mb-0">@m.ResolutionRate.ToString("P1")</div>
-                    <small class="text-muted">(non-null concept_code / total rows)</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 col-lg">
-            <div class="card h-100">
-                <div class="card-body py-2 px-3">
-                    <div class="small text-muted">Tokens used</div>
-                    @{
-                        // Pricing: $5 per 1M prompt tokens, $25 per 1M completion
-                        // tokens. Decimal arithmetic so the cents don't drift.
-                        var promptCost = (decimal)m.PromptTokens / 1_000_000m * 5m;
-                        var completionCost = (decimal)m.CompletionTokens / 1_000_000m * 25m;
-                        var totalTokens = m.PromptTokens + m.CompletionTokens;
-                        var totalCost = promptCost + completionCost;
-                    }
-                    <div class="small mb-0">
-                        Prompt: @m.PromptTokens.ToString("N0")
-                        <span class="text-muted">($@promptCost.ToString("N2"))</span>
-                    </div>
-                    <div class="small mb-0">
-                        Completion: @m.CompletionTokens.ToString("N0")
-                        <span class="text-muted">($@completionCost.ToString("N2"))</span>
-                    </div>
-                    <div class="small mb-0 fw-semibold">
-                        Total: @totalTokens.ToString("N0")
-                        <span class="text-muted">($@totalCost.ToString("N2"))</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <h2 class="h4 mt-5">Most recent run</h2>
-    @if (Model.MostRecentRun is null)
-    {
-        <p class="text-muted">No runs have been recorded yet.</p>
-    }
-    else
-    {
-        var run = Model.MostRecentRun;
-        var elapsed = (run.EndedAt ?? DateTimeOffset.UtcNow) - run.StartedAt;
-        var timePerStudy = run.StudiesProcessed > 0
-            ? FormatMmSs(elapsed / run.StudiesProcessed)
-            : "—";
-        DateTimeOffset? estimatedFinish =
-            run.EndedAt
-            ?? (run.StudiesProcessed > 0
-                ? run.StartedAt + (elapsed / run.StudiesProcessed) * run.StudyCount
-                : (DateTimeOffset?)null);
-        var statusBadge = run.Status switch
-        {
-            "success" => "bg-success",
-            "failed" => "bg-danger",
-            "running" => "bg-info",
-            _ => "bg-secondary"
-        };
-        <table class="table table-sm">
-            <tbody>
-                <tr>
-                    <th scope="row" class="w-auto">Run ID</th>
-                    @* Link to the Studies tab filtered by this run. Same
-                       pattern as the Runs tab's clickable run id — pass
-                       hideSuperseded=false so trials whose latest attempt
-                       is a later run still appear, instead of being hidden
-                       by the default filter. *@
-                    <td colspan="3">
-                        <a asp-action="History" asp-route-runId="@run.RunId"
-                           asp-route-hideSuperseded="false"
-                           class="text-decoration-none"
-                           title="View all studies from this run">
-                            <code>@run.RunId</code>
-                        </a>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row" class="w-auto">Status</th>
-                    <td><span class="badge @statusBadge">@run.Status</span></td>
-                    <th scope="row" class="w-auto">Started</th>
-                    <td>@run.StartedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")</td>
-                </tr>
-                <tr>
-                    <th scope="row" class="w-auto">Trigger source</th>
-                    <td>@run.TriggerSource</td>
-                    <th scope="row" class="w-auto">Studies processed</th>
-                    <td>@run.StudiesProcessed / @run.StudyCount</td>
-                </tr>
-                <tr>
-                    <th scope="row" class="w-auto">Rows persisted</th>
-                    <td>@run.RowsPersisted</td>
-                    <th scope="row" class="w-auto">Resolution rate</th>
-                    <td>@run.ResolutionRate.ToString("P1")</td>
-                </tr>
-                <tr>
-                    <th scope="row" class="w-auto">Time per study</th>
-                    <td>@timePerStudy</td>
-                    <th scope="row" class="w-auto">Estimated finish</th>
-                    <td>
-                        @if (estimatedFinish is null)
-                        {
-                            <text>—</text>
-                        }
-                        else
-                        {
-                            <span class="local-datetime"
-                                  data-utc="@estimatedFinish.Value.UtcDateTime.ToString("o")">
-                                @estimatedFinish.Value.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
-                            </span>
-                        }
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-    }
-}
-
-<h2 class="h4 mt-5">Live activity</h2>
-<p class="text-muted">Streamed via SignalR (<code>/hubs/progress</code>). Shows trial-level events as the orchestrator runs.</p>
-<ul id="activity-log" class="list-group" style="max-height: 320px; overflow-y: auto;">
-    <li class="list-group-item text-muted" id="activity-empty">Waiting for events.</li>
-</ul>
 
 @section Scripts {
     <script src="~/lib/microsoft-signalr/signalr.min.js" asp-append-version="true"></script>
@@ -315,7 +53,7 @@ else
             function appendEvent(label, badge, text) {
                 if (empty) { empty.remove(); }
                 const li = document.createElement("li");
-                li.className = "list-group-item d-flex align-items-center gap-2";
+                li.className = "list-group-item d-flex align-items-center gap-2 small px-0";
                 const time = document.createElement("span");
                 time.className = "text-muted small font-monospace";
                 time.textContent = new Date().toLocaleTimeString();
@@ -323,6 +61,7 @@ else
                 tag.className = "badge " + badge;
                 tag.textContent = label;
                 const body = document.createElement("span");
+                body.className = "text-body-secondary text-truncate";
                 body.textContent = text;
                 li.append(time, tag, body);
                 log.prepend(li);
@@ -378,7 +117,7 @@ else
 
             connection.start().catch((err) => console.error("SignalR connect failed:", err));
 
-            // Render "Estimated finish" in the viewer's local time; show the
+            // Render "Est. finish" in the viewer's local time; show the
             // date too when the finish is not today.
             document.querySelectorAll(".local-datetime").forEach(function (el) {
                 const iso = el.getAttribute("data-utc");

@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 24, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 25, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.25",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "The dashboard is redesigned around the numbers you actually watch. The most recent run now shows a progress ring and its key figures at a glance, UMLS resolution is a gauge, and failures are a donut you can read at a distance - every slice links straight through to that status in History. Studies successful, rows persisted and token use sit along the bottom, and the live activity feed moves to a column of its own that scrolls on its own rather than pushing the page around. On a 1920x1080 screen the whole thing fits without scrolling; on smaller windows it scrolls normally rather than hiding anything.",
+        "Parse-empty and the embeddings backlog are shown next to the failures rather than counted as failures. Parse-empty is a valid outcome - the model answered and there were no criteria to extract - and it is common enough that counting it as a failure would have made two thirds of the failure chart something that never broke. Interrupted trials stay amber rather than red, matching History, because the trial did not fail: the host stopped before it reached an outcome.",
+        "If you do not have permission to run the pipeline you now see a Read-only marker instead of an empty toolbar."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.24",
       "releaseDate": "2026-07-17",

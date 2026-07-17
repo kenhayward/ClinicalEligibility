@@ -150,6 +150,164 @@ html {
   display: block;
 }
 
+/* ===== Dashboard =====
+   Two columns: a content stack that flexes, and a fixed-width live feed.
+
+   The single-screen goal is conditional on purpose. Pinning the row to the
+   viewport unconditionally would CLIP on a short window - the failure mode is
+   content you cannot reach, which is worse than a scrollbar. So the height is
+   only pinned when there is demonstrably room for it; below that the row falls
+   back to its natural height and the page scrolls like any other. */
+.ep-dash {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+}
+
+/* The OUTER row only (content stack + live feed). Its height is pinned below,
+   so it must not be reused for the inner tile rows - they would each inherit a
+   full viewport of height and the page would scroll to several screens. */
+.ep-dash-row {
+  display: flex;
+  gap: .8rem;
+  align-items: stretch;
+}
+
+/* Inner rows (gauge + donut, KPI tiles). Same flex shape, deliberately a
+   different class so the viewport pin never reaches them. */
+.ep-tile-row {
+  display: flex;
+  gap: .8rem;
+  align-items: stretch;
+  flex: none;
+}
+
+.ep-dash-left {
+  flex: 1 1 auto;
+  min-width: 0;          /* let the tiles shrink rather than stretch the row */
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+}
+
+.ep-dash-live {
+  width: 392px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tall AND wide enough to be worth it - the design targets 1920x1080. The
+   budget is viewport minus footer (60px), the page's .py-3 (2rem) and the
+   dashboard header row. */
+@media (min-height: 880px) and (min-width: 1400px) {
+  .ep-dash-row {
+    height: calc(100vh - 60px - 2rem - 4.5rem);
+  }
+}
+
+/* Narrow: the 392px feed stops being a sidebar and becomes a row below, and the
+   tile rows stack rather than squeezing a donut and its legend into nothing. */
+@media (max-width: 1199.98px) {
+  .ep-dash-row,
+  .ep-tile-row {
+    flex-direction: column;
+  }
+
+  .ep-dash-live {
+    width: auto;
+  }
+}
+
+.epcard {
+  border-radius: 13px;
+}
+
+.epk {
+  font-size: .72rem;
+  color: var(--bs-secondary-color);
+  letter-spacing: .01em;
+}
+
+/* Aligned digits: without tabular-nums a live-updating figure jitters its own
+   width as the glyphs change. */
+.ep-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Rings, gauges, donuts, pies =====
+   All one shape: a conic-gradient disc with a card-coloured hole punched in the
+   middle. Callers set --ep-sweep/--ep-color (or --ep-gradient outright, for the
+   multi-segment failure donut) plus width/height inline, because those are
+   computed from the data. */
+.ep-ring {
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--ep-gradient,
+      conic-gradient(var(--ep-color, var(--bs-primary)) 0 var(--ep-sweep, 0%),
+                     var(--bs-secondary-bg) 0));
+}
+
+.ep-ring-hole {
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+}
+
+/* Pulsing dot on the RUNNING badge - the one piece of motion on the page, so it
+   reads as "this is live" rather than as decoration. Honours reduced-motion:
+   the badge text already says "running", so the animation is purely
+   supplementary and safe to drop. */
+.ep-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ep-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ep-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ep-pulse-dot {
+    animation: none;
+  }
+}
+
+/* Legend swatch for the failure donut. */
+.ep-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+  display: inline-block;
+}
+
+/* ===== Live activity feed =====
+   Scrolls inside its own card rather than growing the page - which is what
+   keeps a long run from defeating the single-screen layout above. min-height:0
+   is load-bearing: a flex child's default min-height:auto refuses to shrink
+   below its content, so the list would push the card past the viewport and the
+   overflow would never engage. */
+.ep-activity-log {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  overflow-y: auto;
+}
+
+@media (min-height: 880px) and (min-width: 1400px) {
+  .ep-activity-log {
+    min-height: 0;
+  }
+}
+
 /* ===== Authoring dashboard tab (master-detail) =====
    Authoring is a dashboard tab (Views/Authoring/*, hosted in _Layout under
    container-fluid). A collapsible study-list sidebar sits left of the editor
