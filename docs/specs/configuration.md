@@ -388,7 +388,6 @@ The committed template is [`.env.example`](../../.env.example) — copy it to
 | `Postgres__ConnectionStringSource` | **Required** | Read-only access to AACT (`ctgov.eligibilities`). |
 | `Postgres__ConnectionStringOutput` | **Required** | Read/write access to the eligibility output DB. |
 
-> **Connection pool sizing.** Append `;Maximum Pool Size=N` to each connection string. Npgsql pools default to 100 connections *per data source*, so the web host plus every parallel CLI tool (`run` / `normalize-umls` / `embed-studies`) can collectively exceed the server's `max_connections` and trip `53300: sorry, too many clients already`. Cap each pool so the **sum across all processes** stays under the server limit (default 100, minus a few reserved). `~20` suits a CLI batch at the default concurrency (8); with a cap set, a busy worker waits for a free connection (up to `Timeout`, default 15s) instead of erroring. Raise the cap and `--concurrency` together only if you also raise the server's `max_connections`.
 | `Llm__BaseUrl` / `Llm__Model` | **Required** (env-specific) | Points the extraction client at your endpoint/model. |
 | `Llm__ApiKey` | If endpoint authenticates | Bearer token for the LLM endpoint (`none` for unauthenticated). |
 | `Umls__ApiKey` | **Required** for UMLS resolution | UTS REST API key. |
@@ -399,6 +398,28 @@ The committed template is [`.env.example`](../../.env.example) — copy it to
 | `Webhook__Secret` | Required to use `POST /trigger` | Shared secret for the `X-Eligibility-Token` header. |
 | `Auth__Google__ClientId` / `Auth__Google__ClientSecret` | Optional | "Sign in with Google" button (password sign-in works without). |
 | `Auth__CookieExpiryHours` | Optional | Override the 8-hour sliding cookie lifetime. |
+
+### Connection pool sizing
+
+Append `;Maximum Pool Size=N` to each connection string. Npgsql pools default to **100 connections per data source**, and each pool is per process - the web host and each CLI tool (`run` / `normalize-umls` / `embed-studies`) get their own. Uncapped, they can collectively exceed what the server allows.
+
+`Maximum Pool Size` is not only a ceiling: once the pool is full, a busy worker **waits** for a free connection (up to `Timeout`, default 15s) instead of opening a new one and erroring. That is what makes a small cap safe.
+
+**The source and output strings are sized against different limits. Do not just use the same number for both.**
+
+**Output (your own database) - sized against `max_connections`.** Exceeding it gives `53300: sorry, too many clients already`. Cap each pool so the **sum across every process** stays under the server limit (default 100, minus a few reserved). `~20` suits a CLI batch at the default concurrency (8). Raise the cap and `--concurrency` together only if you also raise `max_connections`.
+
+**Source (AACT) - sized against a per-role limit you cannot raise.** AACT enforces `ALTER ROLE <user> CONNECTION LIMIT n` on your account, [documented as 10 concurrent connections per user](https://aact.ctti-clinicaltrials.org/). Exceeding it gives a **different** error - `53300: too many connections for role "<user>"` - and no amount of tuning your own box fixes it, because the limit lives on AACT's.
+
+The pipeline can demand a source connection for each of the `Pipeline:LlmConcurrencyCap` (default 8) trials in flight, since the per-trial snapshot capture reads AACT, plus one for the dashboard's source count. A source pool above the role limit therefore fails **intermittently** - only when the burst crosses it - and succeeds on retry. It gets more likely as extraction throughput rises, because trials spend proportionally more of their time in the database phase.
+
+Set the source pool **at or below your role's limit, divided by the number of processes that use it**. `Maximum Pool Size=4` is a good default: `eligibility-web` and `eligibility-cli` share one connection string and each opens its own pool, so 4+4 stays under 10 and leaves headroom for an ad-hoc `psql` session. The cost is nil - snapshot capture takes ~50ms against a ~43s LLM call, so queuing for a source connection is invisible.
+
+Confirm your account's actual limit rather than assuming the documented 10 (`-1` means unlimited):
+
+```sql
+SELECT rolname, rolconnlimit FROM pg_roles WHERE rolname = current_user;
+```
 
 Connection-string format (Npgsql):
 `Host=…;Port=5432;Database=…;Username=…;Password=…`.
