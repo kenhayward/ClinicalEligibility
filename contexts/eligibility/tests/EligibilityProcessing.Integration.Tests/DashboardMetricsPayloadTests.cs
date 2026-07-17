@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using EligibilityProcessing.Core;
 using EligibilityProcessing.Web.Models;
@@ -154,6 +155,11 @@ public class DashboardMetricsPayloadTests
 
     // ===== resolution rate =====
 
+    // "90.2 %" with a space is InvariantCulture's percent pattern, and invariant
+    // is what production actually renders: the runtime image is aspnet:8.0-alpine,
+    // which ships no ICU and sets DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true.
+    // A Windows dev box would say "90.2%" - the dev box is the outlier here, not
+    // the server.
     [Fact]
     public void Resolution_rate_ships_raw_and_preformatted()
     {
@@ -161,7 +167,35 @@ public class DashboardMetricsPayloadTests
             Metrics(resolutionRate: 0.902), Array.Empty<RunMetrics>());
 
         Assert.Equal(0.902, payload.ResolutionRate);
-        Assert.Equal("90.2%", payload.ResolutionRateText);
+        Assert.Equal("90.2 %", payload.ResolutionRateText);
+    }
+
+    // The whole point of formatting server-side is that one corpus renders one
+    // way. That only holds if the culture is pinned rather than ambient - and
+    // ambient differs between an Alpine container (invariant), a Linux CI runner
+    // (invariant) and a Windows dev box (not). Forcing a culture whose
+    // separators are the OPPOSITE of invariant's proves the pin: de-DE would
+    // otherwise give "4.032.035" and "90,2 %".
+    [Fact]
+    public void Formatting_does_not_follow_the_ambient_culture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+
+            var payload = DashboardMetricsPayload.From(
+                Metrics(promptTokens: 418_200_000, resolutionRate: 0.902),
+                Array.Empty<RunMetrics>());
+
+            Assert.Equal("4,032,035", payload.EligibilityRowCountText);
+            Assert.Equal("90.2 %", payload.ResolutionRateText);
+            Assert.Equal("$2,091.00", payload.Tokens.PromptCostText);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     // ===== sparkline series =====

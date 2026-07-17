@@ -16,6 +16,18 @@ namespace EligibilityProcessing.Web.Models;
 /// N0/P1/N2 in JS and would silently swap the SERVER's culture for the VIEWER's
 /// browser locale - the separators would start following whoever is looking.
 /// </para>
+/// <para>
+/// Formatted with <see cref="CultureInfo.InvariantCulture"/> EXPLICITLY, never
+/// the ambient culture, so the same corpus renders the same everywhere. This is
+/// not hypothetical: the production runtime is `aspnet:8.0-alpine`, which ships
+/// no ICU and sets DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true, so the server's
+/// ambient culture there is already invariant - while a Windows dev box's is
+/// not. Left ambient, a rate renders "90.2 %" in the container and "90.2%" on
+/// the developer's machine, and CI (also invariant) disagrees with the
+/// developer who wrote the test. Invariant is chosen over a named culture
+/// precisely because it is what the container already produces: pinning it
+/// changes nothing on screen and stops the output depending on where it ran.
+/// </para>
 /// </summary>
 public sealed class DashboardMetricsPayload
 {
@@ -123,7 +135,7 @@ public sealed class DashboardMetricsPayload
             StudiesWithoutEmbeddings = m.StudiesWithoutEmbeddings,
             StudiesWithoutEmbeddingsText = N0(m.StudiesWithoutEmbeddings),
             ResolutionRate = m.ResolutionRate,
-            ResolutionRateText = m.ResolutionRate.ToString("P1"),
+            ResolutionRateText = m.ResolutionRate.ToString("P1", CultureInfo.InvariantCulture),
             SourceTrialTotal = m.SourceTrialTotal,
             SourceTrialTotalText = m.SourceTrialTotal.HasValue ? N0(m.SourceTrialTotal.Value) : null,
             TrialsRemaining = m.TrialsRemaining,
@@ -165,12 +177,12 @@ public sealed class DashboardMetricsPayload
         };
     }
 
-    private static string N0(long value) => value.ToString("N0");
+    private static string N0(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
     // "$" + N2, matching the view this replaced. Not C2: that would bring the
-    // server culture's own currency symbol along, and these are US list prices.
+    // culture's own currency symbol along, and these are US list prices.
     private static string Usd(decimal value) =>
-        "$" + value.ToString("N2", CultureInfo.CurrentCulture);
+        "$" + value.ToString("N2", CultureInfo.InvariantCulture);
 
     public sealed class FailureBucket
     {
