@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 19, "releaseDate": "2026-07-16" },
+  "current": { "major": 0, "minor": 1, "build": 20, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.20",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "Tools: a new 'Exact trials remaining' card calculates the real backlog on demand, for when you are close to draining the queue. It applies the same filter the pipeline uses when choosing trials, so it excludes trials that will never be processed. It takes around 26 seconds against the hosted AACT database, which is why it runs only when you press the button rather than on every page view."
+      ],
+      "fixes": [
+        "The dashboard loads in well under a second again, instead of taking around ten. Its 'trials remaining' figure was counting only the trials the pipeline would actually select, which sounds right but means reading the eligibility text of every trial in AACT - about 26 seconds over the internet, paid by whoever loaded the page after the figure went stale. It now counts all trials in AACT, which the database answers in about a fifth of a second. The trade is that the number is now roughly 0.3% high and settles near 1,700 rather than reaching zero, since it includes trials that can never be processed. The card was already marked approximate, and the new Tools card gives the exact number whenever it matters."
+      ]
+    },
     {
       "version": "0.1.19",
       "releaseDate": "2026-07-16",

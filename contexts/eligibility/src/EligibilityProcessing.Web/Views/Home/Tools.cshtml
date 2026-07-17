@@ -120,6 +120,44 @@
         </div>
     </div>
 
+    @* ---------------- exact-remaining ----------------
+       Read-only and user-initiated, so no _ToolJobPanel, no RunGate, no progress bar:
+       it is one (slow) query, not a background job. It is here rather than on the
+       dashboard precisely BECAUSE it is slow - see the card text. *@
+    <div class="col-12 col-lg-6">
+        <div class="card h-100" data-tool="exact-remaining">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h2 class="h5 mb-1">Exact trials remaining</h2>
+                        <p class="text-muted small mb-0">
+                            The dashboard's "trials remaining" is deliberately approximate: it
+                            counts every trial in AACT, including ones the pipeline would never
+                            select, so it overstates by roughly 0.3% and never reaches zero.
+                            Filtering costs about 26 seconds against the hosted AACT, so it is
+                            on demand here instead. Use it when the backlog is nearly drained.
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <div class="display-6 lh-1" data-remaining>&mdash;</div>
+                        <div class="text-muted small">not calculated</div>
+                    </div>
+                </div>
+
+                <div class="row g-2 align-items-end mt-2">
+                    <div class="col-12">
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="exact-remaining-btn">
+                            Calculate
+                        </button>
+                        <span id="exact-remaining-result" class="small ms-2 text-muted">
+                            Takes ~26s; the page stays usable.
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     @* ---------------- remove-superseded ----------------
        No _ToolJobPanel: this is a single DELETE, not a background job, so there is
        no progress to stream. The result line below stands in for the panel. *@
@@ -393,6 +431,51 @@
             }
             bindRun("normalize-form");
             bindRun("embed-form");
+
+            // Exact remaining trials. Not a job and not cached: one slow read-only query,
+            // fired only when asked. Deliberately does NOT touch refreshCounts() - that is
+            // for the cheap card headlines, and this number must never end up on a path
+            // that runs automatically.
+            (function bindExactRemaining() {
+                const btn = document.getElementById("exact-remaining-btn");
+                if (!btn) { return; }
+                const out = document.getElementById("exact-remaining-result");
+                const num = document.querySelector('[data-tool="exact-remaining"] [data-remaining]');
+                btn.addEventListener("click", async () => {
+                    btn.disabled = true;
+                    out.className = "small ms-2 text-muted";
+                    out.textContent = "Calculating (~26s)...";
+                    const started = Date.now();
+                    const tick = setInterval(() => {
+                        out.textContent = `Calculating... ${Math.round((Date.now() - started) / 1000)}s`;
+                    }, 1000);
+                    try {
+                        const r = await fetch("@Url.Action("ExactRemaining", "Home")", { headers: { "Accept": "application/json" } });
+                        const body = await r.json().catch(() => ({}));
+                        if (r.ok && body.available) {
+                            num.textContent = Number(body.remaining).toLocaleString();
+                            num.nextElementSibling.textContent = "trials remaining (exact)";
+                            out.className = "small ms-2 text-success";
+                            out.textContent =
+                                `${Number(body.selectable).toLocaleString()} selectable - ` +
+                                `${Number(body.attempted).toLocaleString()} attempted, in ` +
+                                `${(body.elapsedMs / 1000).toFixed(1)}s`;
+                        } else if (r.ok) {
+                            out.className = "small ms-2 text-warning";
+                            out.textContent = body.reason || "Unavailable.";
+                        } else {
+                            out.className = "small ms-2 text-danger";
+                            out.textContent = body.error || `Failed (HTTP ${r.status}).`;
+                        }
+                    } catch (e) {
+                        out.className = "small ms-2 text-danger";
+                        out.textContent = "Failed: " + e;
+                    } finally {
+                        clearInterval(tick);
+                        btn.disabled = false;
+                    }
+                });
+            })();
 
             // Remove superseded results. Not bindRun: this is a synchronous DELETE, not a
             // background job, so there is no ToolJobCompleted event to re-enable the UI or

@@ -496,6 +496,43 @@ Public Class PostgresGatewayIntegrationTests
         Assert.Equal(2L, actual)
     End Function
 
+    ' The counterpart, and the reason both exist: the dashboard's count is UNFILTERED
+    ' because filtering costs ~26s against the hosted AACT (no usable index, read-only
+    ' account) versus ~224ms for this. Same seeded rows as the test above: 2 selectable,
+    ' 5 not. If someone "fixes" this by adding the filter back, the dashboard silently
+    ' becomes a 26-second page again - this test is the tripwire.
+    <SkippableFact>
+    Public Async Function CountSourceTrials_is_unfiltered_and_counts_every_row() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim longEnough = New String("a"c, 60)
+        Await _fixture.InsertSourceTrialAsync("NCT00000001", longEnough)
+        Await _fixture.InsertSourceTrialAsync("NCT00000002", longEnough)
+        Await _fixture.InsertSourceTrialAsync("NCT00000003", Nothing)
+        Await _fixture.InsertSourceTrialAsync("NCT00000004", "too short")
+        Await _fixture.InsertSourceTrialAsync("NCT00000005", longEnough & " Please Contact the site")
+        Await _fixture.InsertSourceTrialAsync("NCT00000006", longEnough & " contact site for details")
+        Await _fixture.InsertSourceTrialAsync("NCT00000007", longEnough & " CONTACT STUDY team")
+
+        Dim total = Await _fixture.Gateway.CountSourceTrialsAsync(CancellationToken.None)
+        Dim selectable = Await _fixture.Gateway.CountSelectableSourceTrialsAsync(CancellationToken.None)
+
+        Assert.Equal(7L, total)         ' every row, filter or not
+        Assert.Equal(2L, selectable)    ' only the ones a batch would pick up
+    End Function
+
+    <SkippableFact>
+    Public Async Function CountSourceTrials_returns_nothing_when_source_is_absent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim noSource As New PostgresGateway(outputDataSource:=_fixture.DataSource, sourceDataSource:=Nothing)
+
+        Assert.False((Await noSource.CountSourceTrialsAsync(CancellationToken.None)).HasValue)
+        Assert.False((Await noSource.CountSelectableSourceTrialsAsync(CancellationToken.None)).HasValue)
+    End Function
+
     ' The backlog is source-total minus attempted, computed from two independent
     ' counts. Assert the whole chain end to end against a real database.
     <SkippableFact>
@@ -522,9 +559,39 @@ Public Class PostgresGatewayIntegrationTests
 
         Dim m = Await _fixture.Gateway.GetDashboardMetricsAsync(CancellationToken.None)
 
-        Assert.Equal(5L, m.SourceSelectableTotal)
+        Assert.Equal(5L, m.SourceTrialTotal)
         Assert.Equal(2L, m.StudiesAttempted)
         Assert.Equal(3L, m.TrialsRemaining)
+    End Function
+
+    ' Pins the deliberate inaccuracy, so nobody "fixes" it without deciding to. The
+    ' dashboard counts UNSELECTABLE trials too, which is why its backlog overstates by
+    ' ~0.29% in production and bottoms out near ~1,700 instead of 0. That is the price
+    ' of a 224ms page instead of a 26-second one; the Tools tab's exact figure is the
+    ' escape hatch.
+    <SkippableFact>
+    Public Async Function DashboardMetrics_backlog_deliberately_includes_unselectable_trials() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim longEnough = New String("a"c, 60)
+        ' 2 selectable...
+        Await _fixture.InsertSourceTrialAsync("NCT00000001", longEnough)
+        Await _fixture.InsertSourceTrialAsync("NCT00000002", longEnough)
+        ' ...and 3 the pipeline would never pick up.
+        Await _fixture.InsertSourceTrialAsync("NCT00000003", "too short")
+        Await _fixture.InsertSourceTrialAsync("NCT00000004", Nothing)
+        Await _fixture.InsertSourceTrialAsync("NCT00000005", longEnough & " please contact us")
+
+        Dim m = Await _fixture.Gateway.GetDashboardMetricsAsync(CancellationToken.None)
+
+        ' 5, not 2: the unselectable three are counted. With nothing attempted the
+        ' backlog reads 5 even though only 2 will ever be processed - the documented
+        ' overstatement, at exaggerated scale.
+        Assert.Equal(5L, m.SourceTrialTotal)
+        Assert.Equal(5L, m.TrialsRemaining)
+        ' The exact figure, meanwhile, tells the truth.
+        Assert.Equal(2L, Await _fixture.Gateway.CountSelectableSourceTrialsAsync(CancellationToken.None))
     End Function
 
     ' No AACT source at all - the seeded quickstart shape. A gateway with no source
@@ -554,7 +621,7 @@ Public Class PostgresGatewayIntegrationTests
         Dim noSource As New PostgresGateway(outputDataSource:=_fixture.DataSource, sourceDataSource:=Nothing)
         Dim m = Await noSource.GetDashboardMetricsAsync(CancellationToken.None)
 
-        Assert.False(m.SourceSelectableTotal.HasValue)
+        Assert.False(m.SourceTrialTotal.HasValue)
         Assert.False(m.TrialsRemaining.HasValue)
         ' The rest of the dashboard still works.
         Assert.Equal(1L, m.EligibilityRowCount)

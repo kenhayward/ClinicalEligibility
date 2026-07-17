@@ -385,6 +385,24 @@ Friend NotInheritable Class FakeGateway
         End Get
     End Property
 
+    ' --- exact (expensive) source count, Tools tab on-demand ---
+    Public Property SelectableSourceTotalToReturn As Long? = Nothing
+    Private _countSelectableSourceCalls As Integer
+
+    Public ReadOnly Property CountSelectableSourceCalls As Integer
+        Get
+            Return Volatile.Read(_countSelectableSourceCalls)
+        End Get
+    End Property
+
+    Public Function CountSelectableSourceTrialsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long?) _
+            Implements IPostgresGateway.CountSelectableSourceTrialsAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Interlocked.Increment(_countSelectableSourceCalls)
+        Return Task.FromResult(SelectableSourceTotalToReturn)
+    End Function
+
     Public Function CountSupersededStudiesAsync(
             cancellationToken As CancellationToken) As Task(Of Long) _
             Implements IPostgresGateway.CountSupersededStudiesAsync

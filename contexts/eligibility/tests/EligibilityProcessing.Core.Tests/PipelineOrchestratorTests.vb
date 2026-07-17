@@ -1125,6 +1125,12 @@ End Class
 Friend NotInheritable Class ThrowingGateway
     Implements IPostgresGateway
 
+    Public Function CountSelectableSourceTrialsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long?) _
+            Implements IPostgresGateway.CountSelectableSourceTrialsAsync
+        Throw New InvalidOperationException("boom")
+    End Function
+
     Public Function CountSupersededStudiesAsync(
             cancellationToken As CancellationToken) As Task(Of Long) _
             Implements IPostgresGateway.CountSupersededStudiesAsync

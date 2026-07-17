@@ -157,6 +157,28 @@ Public Interface IPostgresGateway
             cancellationToken As CancellationToken) As Task(Of Integer)
 
     ''' <summary>
+    ''' EXPENSIVE, ON-DEMAND ONLY. Count of AACT trials that pass the selection filter
+    ''' (spec section 2.3) - the trials a batch would actually consider. Nothing when
+    ''' there is no reachable AACT source.
+    ''' <para>
+    ''' ~26 SECONDS against Duke's hosted AACT: the three ILIKEs force a full read of
+    ''' the wide `criteria` column across ~593k rows over the internet, and the partial
+    ''' index that would make it cheap only exists when the source is co-located with
+    ''' the output database (it is not, and the account is read-only). NEVER call this
+    ''' from a page load - the dashboard uses the unfiltered count and accepts a 0.29%
+    ''' overstatement. This backs the Tools tab's explicit, user-initiated button.
+    ''' </para>
+    ''' <para>
+    ''' Not a true remaining count on its own: no anti-join against the attempted set
+    ''' (that would mean COPYing ~280k ids to the source). Callers subtract the
+    ''' attempted total, leaving a small drift for trials attempted but no longer
+    ''' selectable.
+    ''' </para>
+    ''' </summary>
+    Function CountSelectableSourceTrialsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long?)
+
+    ''' <summary>
     ''' Count of SUPERSEDED public.eligibility_study rows: every attempt that is not
     ''' the most recent one for its NCT_ID, regardless of status. Same projection the
     ''' Studies tab's "Hide superseded attempts" toggle uses
