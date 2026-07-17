@@ -60,6 +60,11 @@ public sealed class RunCardView
     /// <summary>0..1, clamped, denominator-guarded.</summary>
     public double ProgressFraction { get; init; }
 
+    /// <summary>Whole-percent progress, floored (not rounded). 4976/5000 is 99,
+    /// not 100 - the ring must not read complete until the run actually is.
+    /// Drives both the centre label and the ring sweep.</summary>
+    public int ProgressPct { get; init; }
+
     /// <summary>The ring centre label, e.g. "40 %".</summary>
     public string ProgressPctText { get; init; } = "";
 
@@ -86,6 +91,9 @@ public sealed class RunCardView
         var pct = run.StudyCount > 0
             ? Math.Clamp((double)run.StudiesProcessed / run.StudyCount, 0d, 1d)
             : 0d;
+        // Floor, not round: at 4976/5000 (99.52%) rounding would show 100% while
+        // the run is still going. Only a genuinely complete run reads 100%.
+        var pctWhole = (int)Math.Floor(pct * 100d);
 
         return new RunCardView
         {
@@ -111,7 +119,8 @@ public sealed class RunCardView
             StudiesProcessedText = $"{run.StudiesProcessed} / {run.StudyCount}",
             ShowRing = run.StudyCount > 1,
             ProgressFraction = pct,
-            ProgressPctText = pct.ToString("P0", inv)
+            ProgressPct = pctWhole,
+            ProgressPctText = pctWhole.ToString(inv) + " %"
         };
     }
 

@@ -52,8 +52,24 @@ public class RunCardViewTests
     {
         var v = RunCardView.From(Run(studyCount: 10, studiesProcessed: 4))!;
         Assert.Equal(0.4, v.ProgressFraction, 3);
+        Assert.Equal(40, v.ProgressPct);
         Assert.Equal("40 %", v.ProgressPctText);
         Assert.Equal("4 / 10", v.StudiesProcessedText);
+    }
+
+    // The percent is FLOORED, not rounded: near the end of a large run
+    // (4976/5000 = 99.52%) the ring must still read 99%, not a premature 100%.
+    // Only a genuinely complete run shows 100%.
+    [Fact]
+    public void Progress_percent_floors_so_100_means_complete()
+    {
+        var almost = RunCardView.From(Run(studyCount: 5000, studiesProcessed: 4976))!;
+        Assert.Equal(99, almost.ProgressPct);
+        Assert.Equal("99 %", almost.ProgressPctText);
+
+        var done = RunCardView.From(Run(studyCount: 5000, studiesProcessed: 5000))!;
+        Assert.Equal(100, done.ProgressPct);
+        Assert.Equal("100 %", done.ProgressPctText);
     }
 
     // A 0-study run must not divide by zero, and an overshoot must not draw a
