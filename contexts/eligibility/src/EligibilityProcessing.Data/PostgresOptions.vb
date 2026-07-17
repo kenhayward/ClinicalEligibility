@@ -21,6 +21,26 @@ Public Class PostgresOptions
     Public Property MaxStudyCount As Integer = 5000
 
     ''' <summary>
+    ''' Only log SQL commands that took at least this many milliseconds. 0 (the default)
+    ''' logs every command, which is the raw Npgsql behaviour.
+    ''' <para>
+    ''' Only relevant once SQL logging is on at all (Logging__LogLevel__Npgsql=Information
+    ''' or Logging__LogLevel__Default=Debug). Without it that logging is a firehose - one
+    ''' entry per command, thousands per batch, each spanning as many lines as its query
+    ''' has newlines - and an outlier is impossible to spot. With, say, 50 here you get
+    ''' one line per slow command and nothing else.
+    ''' </para>
+    ''' <para>
+    ''' Applies only to events Npgsql has actually timed (the "command execution
+    ''' completed" event). The Debug-level "Executing command" event has no duration yet
+    ''' and is always passed through - it is the only trace a HUNG query leaves, since a
+    ''' query that never finishes never reports a duration.
+    ''' </para>
+    ''' Config: Postgres:SlowCommandLogThresholdMs.
+    ''' </summary>
+    Public Property SlowCommandLogThresholdMs As Integer = 0
+
+    ''' <summary>
     ''' Age (hours) beyond which a status='running' eligibility_study row is assumed
     ''' orphaned by a killed host and reconciled to 'interrupted' at web-host startup.
     ''' 0 or less disables the reconcile entirely.

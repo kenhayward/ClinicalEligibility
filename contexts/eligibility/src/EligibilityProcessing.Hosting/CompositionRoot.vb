@@ -53,21 +53,6 @@ Public Module CompositionRoot
     Private Const OutputDataSourceKey As String = "output"
 
     ''' <summary>
-    ''' Builds an NpgsqlDataSource with the host's logger factory attached. That factory
-    ''' is the ONLY thing that lets Npgsql emit SQL at all: the previous
-    ''' <c>NpgsqlDataSource.Create()</c> wires no logging, so the <c>Npgsql</c> log
-    ''' category was dead no matter what level was configured. With this,
-    ''' <c>Logging__LogLevel__Npgsql=Debug</c> logs every command; at Information (the
-    ''' default) Npgsql stays silent, because it logs commands at Debug and connection
-    ''' open/close at Trace.
-    ''' </summary>
-    ''' <remarks>
-    ''' <c>EnableParameterLogging</c> is DELIBERATELY NOT SET, and should not be. It puts
-    ''' parameter VALUES in the log, and this app's parameters carry trial criteria text,
-    ''' raw LLM responses, user emails and password hashes. Command text alone shows what
-    ''' ran and cannot leak a secret.
-    ''' </remarks>
-    ''' <summary>
     ''' True when the operator has asked for verbose logging wholesale via
     ''' <c>Logging:LogLevel:Default</c> = Debug or Trace (env:
     ''' <c>Logging__LogLevel__Default=Debug</c>). That is treated as an explicit request
@@ -100,9 +85,38 @@ Public Module CompositionRoot
         logging.AddFilter(category, level)
     End Sub
 
-    Private Function BuildDataSource(connectionString As String, sp As IServiceProvider) As NpgsqlDataSource
+    ''' <summary>
+    ''' Builds an NpgsqlDataSource with the host's logger factory attached. That factory
+    ''' is the ONLY thing that lets Npgsql emit SQL at all: the previous
+    ''' <c>NpgsqlDataSource.Create()</c> wires no logging, so the <c>Npgsql</c> log
+    ''' category was dead no matter what level was configured. With this,
+    ''' <c>Logging__LogLevel__Npgsql=Debug</c> logs every command; at Information (the
+    ''' default) Npgsql stays silent, because it logs commands at Debug and connection
+    ''' open/close at Trace.
+    ''' </summary>
+    ''' <remarks>
+    ''' <c>EnableParameterLogging</c> is DELIBERATELY NOT SET, and should not be. It puts
+    ''' parameter VALUES in the log, and this app's parameters carry trial criteria text,
+    ''' raw LLM responses, user emails and password hashes. Command text alone shows what
+    ''' ran and cannot leak a secret.
+    ''' </remarks>
+    Private Function BuildDataSource(
+            connectionString As String,
+            sp As IServiceProvider,
+            slowCommandThresholdMs As Integer) As NpgsqlDataSource
+
+        Dim loggerFactory = sp.GetRequiredService(Of ILoggerFactory)()
+
+        ' Above 0, wrap the factory so Npgsql's command logging only reports commands at
+        ' or over the threshold, one line each. Wrapping HERE (rather than filtering
+        ' globally) keeps the effect to the data sources: nothing else in the app sees a
+        ' different logger. See SlowCommandLoggerFactory.
+        If slowCommandThresholdMs > 0 Then
+            loggerFactory = New SlowCommandLoggerFactory(loggerFactory, slowCommandThresholdMs)
+        End If
+
         Dim builder As New NpgsqlDataSourceBuilder(connectionString)
-        builder.UseLoggerFactory(sp.GetRequiredService(Of ILoggerFactory)())
+        builder.UseLoggerFactory(loggerFactory)
         Return builder.Build()
     End Function
 
@@ -161,12 +175,12 @@ Public Module CompositionRoot
                     ' "Exception while reading from stream". 0 => no timeout.
                     Dim sourceConn As New NpgsqlConnectionStringBuilder(opts.ConnectionStringSource) With {
                             .CommandTimeout = Math.Max(0, opts.SourceCommandTimeoutSeconds)}
-                    Return BuildDataSource(sourceConn.ConnectionString, sp)
+                    Return BuildDataSource(sourceConn.ConnectionString, sp, opts.SlowCommandLogThresholdMs)
                 End Function)
         services.AddKeyedSingleton(Of NpgsqlDataSource)(OutputDataSourceKey,
                 Function(sp As IServiceProvider, key As Object) As NpgsqlDataSource
                     Dim opts = sp.GetRequiredService(Of IOptions(Of PostgresOptions)).Value
-                    Return BuildDataSource(opts.ConnectionStringOutput, sp)
+                    Return BuildDataSource(opts.ConnectionStringOutput, sp, opts.SlowCommandLogThresholdMs)
                 End Function)
 
         services.AddSingleton(Of IPostgresGateway)(
