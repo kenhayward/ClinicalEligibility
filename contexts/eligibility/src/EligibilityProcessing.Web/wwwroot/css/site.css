@@ -342,6 +342,28 @@ html {
   }
 }
 
+/* ===== Sparklines =====
+   Inline SVG polylines, drawn by hydrate() from the last-7-runs series - no
+   charting library. The stroke follows the element's `color`, so a caller sets
+   text-success / text-primary and the line matches. preserveAspectRatio is set
+   to "none" on the svg so the fixed 0..100 x 0..32 viewBox stretches to the
+   card width; the 2px stroke is declared as non-scaling so it stays 2px and
+   does not smear when the x-axis is stretched. */
+.ep-spark {
+  display: block;
+  width: 100%;
+  height: 32px;
+}
+
+.ep-spark polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
 /* Legend swatch for the failure donut. */
 .ep-dot {
   width: 8px;
