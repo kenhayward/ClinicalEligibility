@@ -1,7 +1,19 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 27, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 28, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.28",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "The most-recent-run card now refreshes with the rest of the dashboard - on the Reload button and when a run or job finishes - instead of staying frozen until a full page reload. Its progress ring, rows persisted, resolution rate, status and estimated finish all update in place.",
+        "The refresh button moved to the top-left, ahead of the Pipeline overview title, and is now filled in the same blue as the progress dial so it is easy to find.",
+        "The live activity feed is wider, taking room from the failures, tokens and most-recent-run cards; the studies-successful and rows-persisted tiles keep their size.",
+        "Hovering a left-rail icon now shows a short description of that tab, not just its name.",
+        "The Runs, History, Analysis and Results pages use the same slim side margin as the dashboard, and each now has a title and a one-line description of what it shows. Tools keeps its centered layout."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.27",
       "releaseDate": "2026-07-17",

@@ -190,11 +190,43 @@ html {
   gap: .8rem;
 }
 
+/* Widened from 392px: the live feed is where an operator's attention sits during
+   a run, and it was the most cramped card. The left column is flex:1, so this
+   width comes straight out of it - the run card and the failures/tokens tiles
+   narrow to compensate, while the two fixed-basis KPI tiles (studies successful,
+   rows persisted) hold their width. */
 .ep-dash-live {
-  width: 392px;
+  width: 510px;
   flex: none;
   display: flex;
   flex-direction: column;
+}
+
+/* The one refresh affordance, filled with the run dial's blue (--bs-primary) so
+   it reads as the page's primary action rather than another grey control.
+   Deliberately NOT a .btn - Bootstrap's .btn-primary is overridden to a
+   different blue in _Layout.cshtml.css, and this must match the dial exactly. */
+.ep-reload-btn {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--bs-primary);
+  color: #fff;
+  cursor: pointer;
+  transition: filter .15s;
+}
+
+.ep-reload-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.ep-reload-btn:disabled {
+  opacity: .6;
+  cursor: default;
 }
 
 /* Tall AND wide enough to be worth it - the design targets 1920x1080. The

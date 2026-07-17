@@ -115,6 +115,13 @@ public sealed class DashboardMetricsPayload
     /// <summary>Most recent first. Feeds the sparklines.</summary>
     public IReadOnlyList<RunPoint> Runs { get; init; } = Array.Empty<RunPoint>();
 
+    /// <summary>The most-recent-run card's fields, so Reload and the
+    /// refresh-on-completion update that card too. Null when no runs exist.
+    /// This is <c>runs[0]</c> expanded - the run card needs StudyCount /
+    /// TriggerSource / the derived ring and ETA that a bare <see cref="RunPoint"/>
+    /// (built for the sparkline) does not carry.</summary>
+    public RunCardView? MostRecentRun { get; init; }
+
     public static DashboardMetricsPayload From(DashboardMetrics m, IReadOnlyList<RunMetrics> runs)
     {
         var promptCost = (decimal)m.PromptTokens / 1_000_000m * PromptUsdPerMillion;
@@ -173,7 +180,11 @@ public sealed class DashboardMetricsPayload
                 StudiesProcessed = r.StudiesProcessed,
                 RowsPersisted = r.RowsPersisted,
                 ResolutionRate = r.ResolutionRate
-            }).ToList()
+            }).ToList(),
+
+            // runs is newest-first (GetRecentRunsAsync orders started_at DESC),
+            // so runs[0] is the most recent - the same row the run card shows.
+            MostRecentRun = RunCardView.From(runs.Count > 0 ? runs[0] : null)
         };
     }
 

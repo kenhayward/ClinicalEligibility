@@ -80,17 +80,17 @@
                 </a>
                 <ul class="navbar-nav ep-rail-nav">
                     <li class="nav-item">
-                        <a class="@NavClass("Index")" asp-area="" asp-controller="Home" asp-action="Index" title="Dashboard">
+                        <a class="@NavClass("Index")" asp-area="" asp-controller="Home" asp-action="Index" title="Dashboard - pipeline health and live activity">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-dashboard"></use></svg><span class="visually-hidden">Dashboard</span>
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="@NavClass("Runs")" asp-area="" asp-controller="Home" asp-action="Runs" title="Runs">
+                        <a class="@NavClass("Runs")" asp-area="" asp-controller="Home" asp-action="Runs" title="Runs - history of pipeline batches and their throughput">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-runs"></use></svg><span class="visually-hidden">Runs</span>
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="@NavClass("History")" asp-area="" asp-controller="Home" asp-action="History" title="History">
+                        <a class="@NavClass("History")" asp-area="" asp-controller="Home" asp-action="History" title="History - per-trial audit log of every processing attempt">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-history"></use></svg><span class="visually-hidden">History</span>
                         </a>
                     </li>
@@ -99,17 +99,17 @@
                            this href to carry the last-viewed NCT ID from
                            sessionStorage, so the user lands back on the
                            same trial when they return to the Analysis tab. *@
-                        <a id="nav-analysis" class="@NavClass("Analysis")" asp-area="" asp-controller="Home" asp-action="Analysis" title="Analysis">
+                        <a id="nav-analysis" class="@NavClass("Analysis")" asp-area="" asp-controller="Home" asp-action="Analysis" title="Analysis - inspect a single trial's source data and extraction">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-analysis"></use></svg><span class="visually-hidden">Analysis</span>
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="@NavClass("Results")" asp-area="" asp-controller="Home" asp-action="Results" title="Results">
+                        <a class="@NavClass("Results")" asp-area="" asp-controller="Home" asp-action="Results" title="Results - browse and filter the extracted eligibility rows">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-results"></use></svg><span class="visually-hidden">Results</span>
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools" title="Tools">
+                        <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools" title="Tools - maintenance jobs: embeddings, UMLS normalize, cleanup">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-tools"></use></svg><span class="visually-hidden">Tools</span>
                         </a>
                     </li>
@@ -118,7 +118,7 @@
                            master-detail shell (study list + editor) inside the
                            dashboard layout, so it highlights on the Authoring
                            controller across all its actions (Index / Edit). *@
-                        <a class="@NavClassController("Authoring")" asp-area="" asp-controller="Authoring" asp-action="Index" title="Authoring">
+                        <a class="@NavClassController("Authoring")" asp-area="" asp-controller="Authoring" asp-action="Index" title="Authoring - design and refine new study criteria">
                             <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-authoring"></use></svg><span class="visually-hidden">Authoring</span>
                         </a>
                     </li>
@@ -142,10 +142,19 @@
                container would letterbox it on the 1920-wide display it targets.
                Every other view keeps the centered fixed-width container. *@
             @{
+                // Full-width (container-fluid) pages: Authoring (master-detail
+                // shell), and every Home tab EXCEPT Tools. The dashboard is a
+                // fixed-canvas layout that has to fit one screen; Runs / History /
+                // Analysis / Results are wide tables that read better with the
+                // same slim gutter rather than a centered column that wastes the
+                // sides. Tools stays centered - it is a narrow column of job cards
+                // that would look stranded stretched across a 1920 display.
+                var homeAction = string.Equals(currentController, "Home", StringComparison.OrdinalIgnoreCase)
+                    ? currentAction : "";
                 var fluidLayout =
                     string.Equals(currentController, "Authoring", StringComparison.OrdinalIgnoreCase)
-                    || (string.Equals(currentController, "Home", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(currentAction, "Index", StringComparison.OrdinalIgnoreCase));
+                    || (new[] { "Index", "Runs", "History", "Analysis", "Results" })
+                        .Any(a => string.Equals(homeAction, a, StringComparison.OrdinalIgnoreCase));
             }
             <div class="ep-main">
                 <div class="@(fluidLayout ? "container-fluid" : "container")">

@@ -146,7 +146,11 @@
 
 @* ---- KPI tiles ---- *@
 <div class="ep-tile-row">
-    <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
+    @* Fixed basis (not flex:1) so this holds its width when the live feed
+       widens - the shrink is meant to come from the tokens card beside it, not
+       from the two simple number tiles. Shrinks only if the row itself gets
+       genuinely tight (the 1200-1400px band), and stacks below 1200. *@
+    <div class="card epcard position-relative" style="flex: 0 1 22rem; min-width: 0;">
         <div class="card-body py-3 px-3">
             <div class="epk">Studies successful</div>
             <div class="fw-bold ep-num" style="font-size:1.45rem;" data-metric="studiesSuccessfulText">-</div>
@@ -177,7 +181,8 @@
         </div>
     </div>
 
-    <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
+    @* Fixed basis, same reasoning as the Studies successful tile above. *@
+    <div class="card epcard position-relative" style="flex: 0 1 22rem; min-width: 0;">
         <div class="card-body py-3 px-3">
             @* Corpus-wide, i.e. every row ever persisted - a different measure
                from the run card's per-run "Rows persisted". *@
@@ -204,7 +209,9 @@
         </div>
     </div>
 
-    <div class="card epcard position-relative" style="flex: 2 1 0; min-width: 0;">
+    @* Grows to fill whatever the two fixed tiles leave - so widening the live
+       feed narrows THIS card rather than the simple number tiles. *@
+    <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
             <div class="epk mb-2">Tokens used</div>
             <div class="d-flex align-items-center gap-3">

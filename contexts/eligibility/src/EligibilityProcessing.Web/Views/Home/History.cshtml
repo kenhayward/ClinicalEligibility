@@ -29,6 +29,9 @@
         b.HasValue ? (b.Value ? "true" : "false") : "";
 }
 
+<h1 class="h3 mb-1">History</h1>
+<p class="text-muted mb-3">Per-trial audit log - every processing attempt for every trial, with its status, timing and token counts.</p>
+
 @if (Model.HasError)
 {
     <div class="alert alert-warning" role="alert">
