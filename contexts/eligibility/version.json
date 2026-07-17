@@ -1,7 +1,16 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 30, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 31, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.31",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "On the failures card, parse-empty moved to the right-hand column with the other informational counts (it is a valid outcome, not a failure), and the divider above it is gone.",
+        "The tokens-used card gained a Per Study column (tokens on that line over studies successfully processed) and column headings - Total, Per Study, Cost - right-aligned above their numbers."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.30",
       "releaseDate": "2026-07-17",

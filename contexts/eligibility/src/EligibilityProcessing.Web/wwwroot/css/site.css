@@ -246,6 +246,22 @@ html {
   font-variant-numeric: tabular-nums;
 }
 
+/* Tokens card: label + three right-aligned number columns (Total / Per Study /
+   Cost) that line up under their headings. */
+.ep-tokens-grid {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 1px 14px;
+  align-items: baseline;
+}
+
+/* The Total row's rule spans the whole grid by bordering each of its cells. */
+.ep-tokens-total {
+  border-top: 1px solid var(--bs-border-color);
+  padding-top: 3px;
+  margin-top: 1px;
+}
+
 /* ===== Rings, gauges, donuts, pies =====
    All one shape: a conic-gradient disc with a card-coloured hole punched in the
    middle. Callers set --ep-sweep/--ep-color (or --ep-gradient outright, for the
