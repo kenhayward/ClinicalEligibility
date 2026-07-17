@@ -325,7 +325,9 @@
                 const ring = card.querySelector("[data-run-ring]");
                 if (ring) {
                     ring.hidden = !rc.showRing;
-                    ring.style.setProperty("--ep-sweep", Math.round(rc.progressFraction * 100) + "%");
+                    // Floored whole-percent (progressPct), so the ring closes only
+                    // at completion - matching the centre label.
+                    ring.style.setProperty("--ep-sweep", rc.progressPct + "%");
                 }
                 set("[data-run-pct]", rc.progressPctText);
                 set("[data-run-processed]", rc.studiesProcessedText);

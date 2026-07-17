@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 31, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 32, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.32",
+      "releaseDate": "2026-07-17",
+      "enhancements": [],
+      "fixes": [
+        "The most-recent-run progress ring showed 100% during the last 1% of a run (e.g. 4976 of 5000). The percentage is now floored, so the ring reads 100% and closes only when the run is actually complete."
+      ]
+    },
     {
       "version": "0.1.31",
       "releaseDate": "2026-07-17",

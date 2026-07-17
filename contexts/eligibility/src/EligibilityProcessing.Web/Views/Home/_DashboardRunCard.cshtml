@@ -47,8 +47,10 @@
             </div>
 
             <div class="d-flex align-items-center gap-4 flex-wrap">
+                @* Sweep uses the floored whole-percent (see RunCardView), so the
+                   ring only closes when the run is complete, matching the label. *@
                 <div class="ep-ring" data-run-ring hidden="@(v is null || !v.ShowRing)"
-                     style="width:132px;height:132px;--ep-sweep:@(((int)Math.Round((v?.ProgressFraction ?? 0) * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture))%;">
+                     style="width:132px;height:132px;--ep-sweep:@((v?.ProgressPct ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture))%;">
                     <div class="ep-ring-hole" style="width:100px;height:100px;">
                         <div>
                             <div class="fw-bold ep-num" style="font-size:1.5rem;line-height:1;" data-run-pct>@v?.ProgressPctText</div>
