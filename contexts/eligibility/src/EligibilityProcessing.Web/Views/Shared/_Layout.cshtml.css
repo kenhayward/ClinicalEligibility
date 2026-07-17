@@ -23,11 +23,14 @@ a {
   border-color: #1861ac;
 }
 
+/* Theme-aware: the hardcoded #e5e5e5 was invisible-to-glaring depending on the
+   colour scheme. The footer is the only element in this layout that still uses
+   them. */
 .border-top {
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--bs-border-color);
 }
 .border-bottom {
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--bs-border-color);
 }
 
 .box-shadow {
@@ -39,9 +42,14 @@ button.accept-policy {
   line-height: inherit;
 }
 
+/* Pinned to the bottom by the .ep-shell flex column (site.css), not by
+   position:absolute. The old absolute footer needed `html{position:relative}` +
+   `body{margin-bottom:60px}` to reserve its space; as a flex child it just sits
+   after the content row, which is also what lets it span under the nav rail.
+   The 60px line-height is load-bearing: site.css budgets Authoring's pane
+   height against it. */
 .footer {
-  position: absolute;
-  bottom: 0;
+  flex: none;
   width: 100%;
   white-space: nowrap;
   line-height: 60px;

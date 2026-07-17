@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 22, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 23, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.23",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "Navigation moved from a bar across the top to a slim icon rail down the left side, on every page. Each tab keeps its name for screen readers and on hover, and the tab you are on is a filled tile rather than an underline. This buys back vertical space for the pages that need it. Your account menu - About, Manage Accounts, Audit Trail, Runtime Parameters, the database seed and the Light/Dark/Auto theme picker - is unchanged and now sits on the avatar at the foot of the rail, opening to the right."
+      ],
+      "fixes": [
+        "The footer no longer relies on being positioned absolutely over a reserved strip of the page; it is part of the page layout, spans the full width beneath the rail, and its divider follows the light/dark theme instead of being a fixed light grey that all but vanished in dark mode."
+      ]
+    },
     {
       "version": "0.1.22",
       "releaseDate": "2026-07-17",

@@ -39,112 +39,128 @@
     </script>
 </head>
 <body>
-    @* sticky-top must sit on <header>, not <nav>, because position: sticky
-       only engages within its parent's height. The <nav>'s parent is
-       <header>, which is only as tall as the nav itself, so sticky there
-       has no scroll range to operate in. Putting it on <header> makes
-       <body> the containing block — sticky stays pinned for the full
-       document scroll. *@
-    <header class="sticky-top">
-        @* navbar-expand-sm controls the responsive collapse; bg-body-tertiary
-           is a Bootstrap 5.3 theme-aware utility that resolves to a near-white
-           in light mode and a dark grey in dark mode, replacing the old
-           hardcoded `navbar-light bg-white` combo which broke in dark mode. *@
-        <nav class="navbar navbar-expand-sm bg-body-tertiary border-bottom box-shadow mb-3">
-            <div class="container-fluid">
-                <a class="navbar-brand d-inline-flex align-items-center gap-2" asp-area="" asp-controller="Home" asp-action="Index"><img src="~/images/PlatformLogo.svg" asp-append-version="true" alt="" width="28" height="28" />Eligibility Processing</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                @{
-                    // Active-tab highlight: bold + bottom border. Drop the
-                    // hardcoded `text-dark` from the inactive case so the
-                    // theme's body color (light/dark) flows through.
-                    var currentAction = (ViewContext.RouteData.Values["action"]?.ToString() ?? "Index");
-                    var currentController = (ViewContext.RouteData.Values["controller"]?.ToString() ?? "Home");
-                    const string activeNav = "fw-semibold border-bottom border-2 border-primary";
-                    // Home-controller tabs: match on action, but only while on
-                    // the Home controller — otherwise an "Index" action on a
-                    // different controller (e.g. Authoring) would falsely light
-                    // the Dashboard tab.
-                    string NavClass(string action) =>
-                        "nav-link " + (string.Equals(currentController, "Home", StringComparison.OrdinalIgnoreCase)
-                            && string.Equals(currentAction, action, StringComparison.OrdinalIgnoreCase)
-                            ? activeNav
-                            : "");
-                    // Non-Home tabs (e.g. Authoring) light up on controller match,
-                    // across all their actions (Index, Edit, ...).
-                    string NavClassController(string controller) =>
-                        "nav-link " + (string.Equals(currentController, controller, StringComparison.OrdinalIgnoreCase)
-                            ? activeNav
-                            : "");
-                }
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="@NavClass("Index")" asp-area="" asp-controller="Home" asp-action="Index">Dashboard</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="@NavClass("Runs")" asp-area="" asp-controller="Home" asp-action="Runs">Runs</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="@NavClass("History")" asp-area="" asp-controller="Home" asp-action="History">History</a>
-                        </li>
-                        <li class="nav-item">
-                            @* id="nav-analysis" — script at the bottom rewrites
-                               this href to carry the last-viewed NCT ID from
-                               sessionStorage, so the user lands back on the
-                               same trial when they return to the Analysis tab. *@
-                            <a id="nav-analysis" class="@NavClass("Analysis")" asp-area="" asp-controller="Home" asp-action="Analysis">Analysis</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="@NavClass("Results")" asp-area="" asp-controller="Home" asp-action="Results">Results</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools">Tools</a>
-                        </li>
-                        <li class="nav-item">
-                            @* Authoring is a first-class dashboard tab. It renders a
-                               master-detail shell (study list + editor) inside the
-                               dashboard layout, so it highlights on the Authoring
-                               controller across all its actions (Index / Edit). *@
-                            <a class="@NavClassController("Authoring")" asp-area="" asp-controller="Authoring" asp-action="Index">Authoring</a>
-                        </li>
-                    </ul>
-                    @* User chip (signed-in only). The theme picker
-                       (Light / Dark / Auto) now lives inside that menu as
-                       a flyout — see _UserMenu.cshtml. Anonymous visitors
-                       have no theme switcher; the OS preference still
-                       resolves via the color-mode bootstrap in <head>. *@
-                    <ul class="navbar-nav mb-2 mb-sm-0 align-items-center">
-                        @await Html.PartialAsync("_UserMenu")
-                    </ul>
+    @await Html.PartialAsync("_IconSprite")
+    @{
+        // Active-tab highlight. The rail is icon-only, so the old
+        // bold+bottom-border treatment no longer applies - an active rail item
+        // is a filled primary tile instead (.ep-active). The MATCHING LOGIC is
+        // unchanged; only the emitted class strings differ.
+        var currentAction = (ViewContext.RouteData.Values["action"]?.ToString() ?? "Index");
+        var currentController = (ViewContext.RouteData.Values["controller"]?.ToString() ?? "Home");
+        const string activeNav = "ep-active";
+        // Home-controller tabs: match on action, but only while on
+        // the Home controller - otherwise an "Index" action on a
+        // different controller (e.g. Authoring) would falsely light
+        // the Dashboard tab.
+        string NavClass(string action) =>
+            "ep-nav-link " + (string.Equals(currentController, "Home", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(currentAction, action, StringComparison.OrdinalIgnoreCase)
+                ? activeNav
+                : "");
+        // Non-Home tabs (e.g. Authoring) light up on controller match,
+        // across all their actions (Index, Edit, ...).
+        string NavClassController(string controller) =>
+            "ep-nav-link " + (string.Equals(currentController, controller, StringComparison.OrdinalIgnoreCase)
+                ? activeNav
+                : "");
+    }
+    @* Shell: a min-height:100vh flex column whose footer is a SIBLING of the
+       rail+content row, so the footer spans the full width (under the rail too)
+       and pins to the bottom without the old position:absolute hack. *@
+    <div class="ep-shell">
+        <div class="ep-body">
+            @* Icon rail. Replaces the former top navbar on every page. Each item
+               carries a visible icon plus a .visually-hidden label: that is the
+               accessible name (and what a screen reader announces), and it keeps
+               the nav discoverable to text-based assertions. `title` gives the
+               sighted hover tooltip. *@
+            <nav class="ep-rail" aria-label="Main navigation">
+                <a class="ep-rail-logo" asp-area="" asp-controller="Home" asp-action="Index" title="Eligibility Processing">
+                    <img src="~/images/PlatformLogo.svg" asp-append-version="true" alt="Eligibility Processing" width="32" height="32" />
+                </a>
+                <ul class="navbar-nav ep-rail-nav">
+                    <li class="nav-item">
+                        <a class="@NavClass("Index")" asp-area="" asp-controller="Home" asp-action="Index" title="Dashboard">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-dashboard"></use></svg><span class="visually-hidden">Dashboard</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="@NavClass("Runs")" asp-area="" asp-controller="Home" asp-action="Runs" title="Runs">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-runs"></use></svg><span class="visually-hidden">Runs</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="@NavClass("History")" asp-area="" asp-controller="Home" asp-action="History" title="History">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-history"></use></svg><span class="visually-hidden">History</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        @* id="nav-analysis" - script at the bottom rewrites
+                           this href to carry the last-viewed NCT ID from
+                           sessionStorage, so the user lands back on the
+                           same trial when they return to the Analysis tab. *@
+                        <a id="nav-analysis" class="@NavClass("Analysis")" asp-area="" asp-controller="Home" asp-action="Analysis" title="Analysis">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-analysis"></use></svg><span class="visually-hidden">Analysis</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="@NavClass("Results")" asp-area="" asp-controller="Home" asp-action="Results" title="Results">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-results"></use></svg><span class="visually-hidden">Results</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="@NavClass("Tools")" asp-area="" asp-controller="Home" asp-action="Tools" title="Tools">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-tools"></use></svg><span class="visually-hidden">Tools</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        @* Authoring is a first-class dashboard tab. It renders a
+                           master-detail shell (study list + editor) inside the
+                           dashboard layout, so it highlights on the Authoring
+                           controller across all its actions (Index / Edit). *@
+                        <a class="@NavClassController("Authoring")" asp-area="" asp-controller="Authoring" asp-action="Index" title="Authoring">
+                            <svg class="ep-ico" aria-hidden="true" focusable="false"><use href="#ep-authoring"></use></svg><span class="visually-hidden">Authoring</span>
+                        </a>
+                    </li>
+                </ul>
+                @* Spacer pushes the user chip to the foot of the rail. *@
+                <div class="ep-rail-spacer"></div>
+                @* User chip (signed-in only). The theme picker
+                   (Light / Dark / Auto) lives inside that menu as
+                   a flyout - see _UserMenu.cshtml. Anonymous visitors
+                   have no theme switcher; the OS preference still
+                   resolves via the color-mode bootstrap in <head>.
+                   Kept inside a .navbar-nav <ul> because _UserMenu is an <li>
+                   and is written to expect that parent. *@
+                <ul class="navbar-nav ep-rail-user">
+                    @await Html.PartialAsync("_UserMenu")
+                </ul>
+            </nav>
+            @* Authoring is a full-width master-detail tab (its own collapsible sidebar
+               manages horizontal space), so it uses container-fluid; every other view
+               keeps the centered fixed-width container. *@
+            <div class="ep-main">
+                <div class="@(string.Equals(currentController, "Authoring", StringComparison.OrdinalIgnoreCase) ? "container-fluid" : "container")">
+                    <main role="main" class="py-3">
+                        @RenderBody()
+                    </main>
                 </div>
             </div>
-        </nav>
-    </header>
-    @* Authoring is a full-width master-detail tab (its own collapsible sidebar
-       manages horizontal space), so it uses container-fluid; every other view
-       keeps the centered fixed-width container. *@
-    <div class="@(string.Equals(currentController, "Authoring", StringComparison.OrdinalIgnoreCase) ? "container-fluid" : "container")">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
-    </div>
-
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            @{
-                var appVersion = EligibilityProcessing.Web.Versioning.AppVersion.GetInfo();
-            }
-            &copy; 2026 - Eligibility Processing
-            <span class="mx-1">&middot;</span>
-            v@(appVersion.Version) <span class="text-muted">(@appVersion.ReleaseDate)</span>
-            <span class="mx-1">&middot;</span>
-            <a href="/ReleaseNotes" target="_blank" rel="noreferrer">Release notes</a>
         </div>
-    </footer>
+
+        <footer class="border-top footer text-muted">
+            <div class="container-fluid px-4">
+                @{
+                    var appVersion = EligibilityProcessing.Web.Versioning.AppVersion.GetInfo();
+                }
+                &copy; 2026 - Eligibility Processing
+                <span class="mx-1">&middot;</span>
+                v@(appVersion.Version) <span class="text-muted">(@appVersion.ReleaseDate)</span>
+                <span class="mx-1">&middot;</span>
+                <a href="/ReleaseNotes" target="_blank" rel="noreferrer">Release notes</a>
+            </div>
+        </footer>
+    </div>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>

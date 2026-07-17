@@ -94,7 +94,9 @@ public class AuthoringControllerTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains(">Authoring</a>", body);                 // a normal in-dashboard nav tab
+        // A normal in-dashboard nav item. The rail is icon-only, so the label is
+        // the .visually-hidden accessible name rather than the link's own text.
+        Assert.Contains(">Authoring</span>", body);
         Assert.Matches("href=\"/Authoring(/Index)?\"", body);    // routed to the Authoring controller
         Assert.DoesNotContain("&#x2197;", body);                 // no longer an "opens in new tab" button
     }
@@ -119,7 +121,7 @@ public class AuthoringControllerTests
         Assert.Contains(">Studies<", body);
         // Rendered inside the dashboard layout (nav chrome present), not the old
         // standalone _AuthoringLayout page.
-        Assert.Contains(">Dashboard</a>", body);
+        Assert.Contains(">Dashboard</span>", body);
     }
 
     // ===== helpers =====
