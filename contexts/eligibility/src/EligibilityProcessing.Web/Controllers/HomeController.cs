@@ -41,16 +41,21 @@ public class HomeController : Controller
     {
         try
         {
-            // Cached (see ICorpusReadCache): a whole-corpus aggregate that only
-            // moves when a run persists trials. The most-recent-run read below
-            // stays live - it is cheap, and it is what makes a just-finished run
-            // show up immediately.
-            var metrics = await _corpusReads.GetDashboardMetricsAsync(cancellationToken);
+            // The corpus aggregate is NOT read here any more - the page fetches it
+            // from GET /Home/Metrics so it can paint immediately and show a
+            // skeleton over the ~700ms read, refresh itself when a run finishes,
+            // and give Reload something to do that isn't a page reload.
+            //
+            // This read stays server-side, and stays live/uncached, for three
+            // reasons: it is cheap; it is what makes a just-finished run appear
+            // immediately; and it is what decides whether the trigger buttons
+            // paint disabled. Resolved client-side, they would flash enabled and a
+            // fast operator would already have clicked. It is also the read that
+            // keeps this action's error path real - see the catch below.
             var recent = await _gateway.GetRecentRunsAsync(1, cancellationToken);
 
             return View(new DashboardViewModel
             {
-                Metrics = metrics,
                 MostRecentRun = recent.Count > 0 ? recent[0] : null,
                 BusyActivity = gate.CurrentActivity
             });

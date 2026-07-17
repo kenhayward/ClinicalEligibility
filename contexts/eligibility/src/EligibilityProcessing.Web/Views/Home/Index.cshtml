@@ -16,7 +16,10 @@
     without the misleading peak indicator.
 *@
 
-<div class="ep-dash">
+@* data-loading="1" from the start: the corpus figures are fetched, so the very
+   first paint has nothing real in the metric cards and the skeleton is honest
+   about it. hydrate() clears it. *@
+<div class="ep-dash" data-loading="1">
     <partial name="_DashboardToolbar" model="Model" />
 
     @if (Model.HasError)
@@ -29,12 +32,20 @@
         </div>
     }
 
+    @* Separate slot for a metrics-fetch failure. The alert above covers the
+       server-side run read; this covers GET /Home/Metrics failing on its own,
+       which can happen independently - and must, or the cards would sit under a
+       skeleton forever with no explanation. *@
+    <div id="metrics-error" class="alert alert-warning mb-0" role="alert" hidden>
+        <strong>Could not read the corpus figures.</strong> <span id="metrics-error-text"></span>
+    </div>
+
     <div class="ep-dash-row">
         <div class="ep-dash-left">
             @if (!Model.HasError)
             {
                 <partial name="_DashboardRunCard" model="Model.MostRecentRun" />
-                <partial name="_DashboardMetrics" model="@(Model.Metrics ?? EligibilityProcessing.Core.DashboardMetrics.Empty)" />
+                <partial name="_DashboardMetrics" />
             }
         </div>
         <div class="ep-dash-live">
@@ -49,6 +60,165 @@
         (function () {
             const log = document.getElementById("activity-log");
             const empty = document.getElementById("activity-empty");
+
+            // ===== corpus figures =====
+            // Fetched rather than server-rendered so the page paints at once and
+            // the ~700ms whole-corpus read happens behind a skeleton. See
+            // _DashboardMetrics: the STRUCTURE is already in the DOM, so this only
+            // fills in values - it never builds markup, and there is no second
+            // copy of the dashboard living in here.
+
+            const dash = document.querySelector(".ep-dash");
+            const errBox = document.getElementById("metrics-error");
+            const errText = document.getElementById("metrics-error-text");
+
+            // Walks "tokens.promptText" into the payload.
+            const dig = (obj, path) => path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+
+            // Only ever the latest request wins. Two completions landing close
+            // together (a batch finishing while a tool job ends) would otherwise
+            // race, and the SLOWER response would overwrite the newer figures.
+            let inFlight = null;
+
+            async function loadMetrics(fresh) {
+                if (inFlight) { inFlight.abort(); }
+                const ctl = new AbortController();
+                inFlight = ctl;
+                dash.setAttribute("data-loading", "1");
+                try {
+                    const res = await fetch(fresh ? "/Home/Metrics?fresh=true" : "/Home/Metrics",
+                                            { signal: ctl.signal, headers: { "Accept": "application/json" } });
+                    if (ctl.signal.aborted) { return; }
+
+                    // The endpoint answers JSON for every outcome it owns - it is
+                    // read-tolerant and reports backend trouble as { error }. So a
+                    // non-JSON body means we never reached it, and in practice that
+                    // means the auth cookie expired and this is the login page.
+                    // Without this check res.json() throws "Unexpected end of JSON
+                    // input", which tells the operator nothing about what to do.
+                    const contentType = res.headers.get("content-type") || "";
+                    if (!contentType.includes("application/json")) {
+                        showError("Could not reach the server - your session may have expired. Reload the page to sign in again.");
+                        return;
+                    }
+                    if (!res.ok) {
+                        showError(`The server returned HTTP ${res.status}.`);
+                        return;
+                    }
+
+                    const payload = await res.json();
+                    if (ctl.signal.aborted) { return; }
+                    if (payload.error) { showError(payload.error); return; }
+                    hydrate(payload);
+                    errBox.hidden = true;
+                } catch (err) {
+                    // An abort is this function superseding itself, not a failure -
+                    // and the request that replaced it owns the loading state now.
+                    if (err.name === "AbortError") { return; }
+                    showError(err.message ?? String(err));
+                } finally {
+                    // Always clear, even on failure: a skeleton that outlives its
+                    // request tells the user to keep waiting for something that is
+                    // never coming.
+                    if (inFlight === ctl) {
+                        dash.removeAttribute("data-loading");
+                        inFlight = null;
+                    }
+                }
+            }
+
+            function showError(message) {
+                errText.textContent = message;
+                errBox.hidden = false;
+            }
+
+            function hydrate(p) {
+                // Plain text values, addressed by their path into the payload.
+                document.querySelectorAll("[data-metric]").forEach((el) => {
+                    const v = dig(p, el.dataset.metric);
+                    el.textContent = (v === null || v === undefined) ? "-" : v;
+                });
+
+                // Resolution gauge: 0..1 -> sweep.
+                document.querySelectorAll("[data-ring-sweep]").forEach((el) => {
+                    const v = dig(p, el.dataset.ringSweep);
+                    el.style.setProperty("--ep-sweep", ((v ?? 0) * 100).toFixed(3) + "%");
+                });
+
+                // Failures donut. Counts land on their rows; the ring is rebuilt
+                // from those rows' own data-colour, so the palette is declared
+                // once in the markup rather than duplicated here.
+                const total = (p.failures ?? []).reduce((n, f) => n + f.count, 0);
+                const totalEl = document.querySelector("[data-failure-total]");
+                if (totalEl) { totalEl.textContent = total.toLocaleString(); }
+
+                const stops = [];
+                let acc = 0;
+                (p.failures ?? []).forEach((f) => {
+                    const row = document.querySelector(`[data-failure="${f.status}"]`);
+                    if (!row) { return; }
+                    const countEl = row.querySelector("[data-failure-count]");
+                    if (countEl) {
+                        countEl.textContent = f.countText;
+                        // Zero rows stay visible but recede - the row still has to
+                        // say the status exists.
+                        countEl.classList.toggle("text-body", f.count > 0);
+                        countEl.classList.toggle("text-body-secondary", f.count === 0);
+                    }
+                    if (f.count > 0 && total > 0) {
+                        const start = acc;
+                        acc += (f.count / total) * 100;
+                        stops.push(`${row.dataset.colour} ${start.toFixed(3)}% ${acc.toFixed(3)}%`);
+                    }
+                });
+                const donut = document.querySelector("[data-donut]");
+                if (donut) {
+                    // No slices -> a flat track disc. An empty conic-gradient
+                    // renders as a black circle.
+                    donut.style.setProperty("--ep-gradient",
+                        stops.length ? `conic-gradient(${stops.join(", ")})`
+                                     : "conic-gradient(var(--bs-secondary-bg) 0 100%)");
+                }
+
+                // Tokens pie: input's share of the total. Guard the divide for a
+                // corpus that has made no LLM calls yet.
+                const pie = document.querySelector("[data-pie]");
+                if (pie) {
+                    const t = p.tokens ?? {};
+                    pie.style.setProperty("--ep-gradient", t.total > 0
+                        ? `conic-gradient(var(--bs-primary) 0 ${(t.prompt / t.total * 100).toFixed(3)}%, var(--bs-warning) 0)`
+                        : "conic-gradient(var(--bs-secondary-bg) 0 100%)");
+                }
+
+                // Backlog. null means UNKNOWN (no reachable AACT - the seeded
+                // quickstart has no ctgov schema), not zero, so show the caption
+                // instead of a bar sitting at a confident 100%.
+                const backlog = document.querySelector("[data-backlog]");
+                const unknown = document.querySelector("[data-backlog-unknown]");
+                if (backlog && unknown) {
+                    const remaining = p.trialsRemaining;
+                    if (remaining === null || remaining === undefined) {
+                        backlog.hidden = true;
+                        unknown.hidden = false;
+                    } else {
+                        const universe = p.studiesSuccessful + remaining;
+                        const pct = universe > 0
+                            ? Math.min(100, Math.max(0, p.studiesSuccessful / universe * 100))
+                            : 0;
+                        const bar = backlog.querySelector("[data-backlog-bar]");
+                        if (bar) {
+                            bar.style.width = pct.toFixed(3) + "%";
+                            bar.setAttribute("aria-valuenow", Math.round(pct));
+                        }
+                        const txt = backlog.querySelector("[data-backlog-text]");
+                        // The "~" is load-bearing - the figure is approximate by
+                        // construction. See _DashboardMetrics.
+                        if (txt) { txt.textContent = "~" + p.trialsRemainingText; }
+                        backlog.hidden = false;
+                        unknown.hidden = true;
+                    }
+                }
+            }
 
             function appendEvent(label, badge, text) {
                 if (empty) { empty.remove(); }
@@ -92,14 +262,21 @@
             connection.on("TrialCompleted", (e) =>
                 appendEvent("Trial", e.succeeded ? "bg-success" : "bg-danger",
                     `${e.nctId}: ${e.succeeded ? `${e.rowCount} rows persisted` : "failed"}`));
+            @* The run just moved the corpus, so re-read. No ?fresh - the server
+               already dropped the cached aggregate before it sent this event
+               (SignalRPipelineHooks), so a normal read gets the new numbers and
+               the first client through repopulates the cache for everyone. *@
             connection.on("BatchCompleted", (e) => {
                 setTriggerButtonsDisabled(false);
                 appendEvent("Batch", e.status === "success" ? "bg-success" : "bg-danger",
                     `Completed run ${e.runId.substring(0, 8)} (${e.rowsPersisted} rows, ${(e.resolutionRate * 100).toFixed(1)}% resolved)`);
+                loadMetrics(false);
             });
             connection.on("BatchCancelled", (e) => {
                 setTriggerButtonsDisabled(false);
                 appendEvent("Batch", "bg-warning", `Cancelled run ${e.runId.substring(0, 8)}`);
+                // Cancelled still persisted whatever finished first.
+                loadMetrics(false);
             });
 
             // Maintenance tool jobs (Tools tab) share the same run gate, so they block
@@ -113,9 +290,35 @@
                 setTriggerButtonsDisabled(false);
                 const badge = e.status === "completed" ? "bg-success" : (e.status === "cancelled" ? "bg-warning" : "bg-danger");
                 appendEvent("Tool", badge, `${e.kind} ${e.status} (${e.processed}/${e.total})`);
+                // Tool jobs move these figures too - embed-studies changes the
+                // no-embeddings count, normalize-umls the resolution rate. Skip
+                // this and the Tools tab and the Dashboard disagree until the TTL
+                // expires, which reads as one of them being wrong.
+                loadMetrics(false);
             });
 
             connection.start().catch((err) => console.error("SignalR connect failed:", err));
+
+            // Reload: the one caller that bypasses the cache, because the user is
+            // explicitly asking for a re-read and would otherwise get the same
+            // cached numbers back - a loading flash that changes nothing, which
+            // reads as broken. Debounced: this is an uncached whole-corpus query
+            // and the button can be held down.
+            const reloadBtn = document.getElementById("metrics-reload");
+            if (reloadBtn) {
+                let cooling = false;
+                reloadBtn.addEventListener("click", () => {
+                    if (cooling) { return; }
+                    cooling = true;
+                    reloadBtn.disabled = true;
+                    loadMetrics(true).finally(() => {
+                        setTimeout(() => { cooling = false; reloadBtn.disabled = false; }, 1000);
+                    });
+                });
+            }
+
+            // First paint has no figures in it - go and get them.
+            loadMetrics(false);
 
             // Render "Est. finish" in the viewer's local time; show the
             // date too when the finish is not today.

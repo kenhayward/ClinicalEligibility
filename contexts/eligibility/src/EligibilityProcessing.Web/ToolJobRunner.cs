@@ -102,6 +102,17 @@ internal sealed class ToolJobRunner : BackgroundService
             }
 
             _state.Finish(status);
+
+            // Tool jobs move the dashboard's corpus figures, so drop the cached
+            // aggregate before announcing - same ordering reason as the pipeline
+            // hooks: the dashboard re-reads on this event, and announcing first
+            // would let that read pin the pre-job numbers for the rest of the TTL.
+            // embed-studies changes studies-without-embeddings; normalize-umls
+            // changes the resolution rate. Without this the Tools tab and the
+            // Dashboard disagree until the TTL expires, which reads as one of
+            // them being broken.
+            _services.GetRequiredService<ICorpusReadCache>().InvalidateDashboardMetrics();
+
             var view = _state.Current;
             await Send("ToolJobCompleted", new
             {

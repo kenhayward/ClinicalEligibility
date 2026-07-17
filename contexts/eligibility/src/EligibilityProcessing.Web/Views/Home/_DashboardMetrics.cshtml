@@ -1,100 +1,56 @@
-@model EligibilityProcessing.Core.DashboardMetrics
-@using System.Globalization
+@using EligibilityProcessing.Core
 @*
-    Corpus figures: UMLS resolution gauge, failures donut, and the KPI tiles.
+    Corpus figures: UMLS resolution gauge, failures donut, KPI tiles.
+
+    STRUCTURE is server-rendered; VALUES arrive from GET /Home/Metrics and are
+    filled in by hydrate() in Index. That split is deliberate: the buckets, their
+    colours, their labels and their History links are all known at render time
+    and never change, so only the numbers are worth a round trip. It also means
+    the client never builds DOM - it sets textContent and a few custom
+    properties - so there is no second copy of this markup living in JS.
+
+    Elements opt in via data-metric="<path into the payload>". Placeholder text
+    is "-" rather than 0: a zero that is really "not loaded yet" is a lie the
+    skeleton would otherwise be covering for.
+
+    The failure buckets and their colours.
+
+    parse_empty and the embeddings backlog are NOT here. parse_empty is a valid
+    terminal state (the model answered; there was nothing to extract) and would
+    be the largest slice of a chart it does not belong in; the backlog is not a
+    failure at all. Both render below the donut as neutral rows instead.
+
+    Colours track History's StatusBadge in meaning rather than in hex: History
+    paints all four hard failures the same red, which a donut cannot do and stay
+    readable, so these are a red FAMILY. The one distinction that carries real
+    meaning is preserved exactly - interrupted is amber, because the trial did
+    not fail; the host stopped before it reached any outcome.
+
+    Statuses come from the StudyExecution constants, not string literals - they
+    are persisted values, and the payload builds its buckets from the same
+    source, so the two cannot drift apart.
 *@
 @{
-    var m = Model;
-    var inv = CultureInfo.InvariantCulture;
-
-    // The failure buckets and their colours.
-    //
-    // parse_empty and the embeddings backlog are NOT here. parse_empty is a valid
-    // terminal state (the model answered; there was nothing to extract) and would
-    // be the largest slice of a chart it does not belong in; the backlog is not a
-    // failure at all. Both render below the donut as neutral rows instead.
-    //
-    // Colours track History's StatusBadge in meaning rather than in hex: History
-    // paints all four hard failures the same red, which a donut cannot do and stay
-    // readable, so these are a red FAMILY. The one distinction that carries real
-    // meaning is preserved exactly - interrupted is amber, because the trial did
-    // not fail; the host stopped before it reached any outcome.
     var buckets = new (string Status, string Label, string Colour)[]
     {
-        ("llm_failed",         "LLM failed",     "#b57ee5"),
-        ("parse_invalid_json", "Invalid JSON",   "var(--bs-danger)"),
-        ("persist_failed",     "Persist failed", "#e07a3f"),
-        ("failed",             "Failed",         "#a33a4d"),
-        ("interrupted",        "Interrupted",    "var(--bs-warning)")
+        (StudyExecution.StatusLlmFailed,        "LLM failed",     "#b57ee5"),
+        (StudyExecution.StatusParseInvalidJson, "Invalid JSON",   "var(--bs-danger)"),
+        (StudyExecution.StatusPersistFailed,    "Persist failed", "#e07a3f"),
+        (StudyExecution.StatusFailed,           "Failed",         "#a33a4d"),
+        (StudyExecution.StatusInterrupted,      "Interrupted",    "var(--bs-warning)")
     };
-
-    var rows = buckets
-        .Select(b => (b.Status, b.Label, b.Colour,
-                      Count: m.FailuresByStatus.TryGetValue(b.Status, out var c) ? c : 0L))
-        .ToList();
-    var failureTotal = rows.Sum(r => r.Count);
-
-    // Conic-gradient stops, accumulated. An all-zero corpus (a fresh deployment,
-    // or a genuinely clean one) has no slices at all, so fall back to a flat
-    // track disc rather than emitting an empty gradient, which renders as a
-    // black circle.
-    string donutGradient;
-    if (failureTotal == 0)
-    {
-        donutGradient = "conic-gradient(var(--bs-secondary-bg) 0 100%)";
-    }
-    else
-    {
-        var stops = new List<string>();
-        var acc = 0d;
-        foreach (var r in rows.Where(r => r.Count > 0))
-        {
-            var start = acc;
-            acc += (double)r.Count / failureTotal * 100d;
-            stops.Add($"{r.Colour} {start.ToString("0.###", inv)}% {acc.ToString("0.###", inv)}%");
-        }
-        donutGradient = $"conic-gradient({string.Join(", ", stops)})";
-    }
-
-    // Tokens split. Guard the divide: a corpus with no LLM calls yet has no
-    // share to show.
-    var totalTokens = m.TokensUsed;
-    var promptShare = totalTokens > 0 ? (double)m.PromptTokens / totalTokens * 100d : 0d;
-    var tokensGradient = totalTokens > 0
-        ? $"conic-gradient(var(--bs-primary) 0 {promptShare.ToString("0.###", inv)}%, var(--bs-warning) 0)"
-        : "conic-gradient(var(--bs-secondary-bg) 0 100%)";
-
-    // Pricing carried over verbatim from the pre-redesign view: $5 per 1M prompt,
-    // $25 per 1M completion, decimal so the cents don't drift. Inference runs on
-    // self-hosted GPUs, so this is a notional "what this would have cost to buy",
-    // not money spent.
-    var promptCost = (decimal)m.PromptTokens / 1_000_000m * 5m;
-    var completionCost = (decimal)m.CompletionTokens / 1_000_000m * 25m;
-    var totalCost = promptCost + completionCost;
-
-    // Backlog progress. TrialsRemaining is null when no AACT source is reachable
-    // (the seeded quickstart has no ctgov schema at all), and null means UNKNOWN,
-    // not zero - so the bar is omitted rather than drawn at a confident 100%.
-    double? donePct = null;
-    if (m.TrialsRemaining.HasValue)
-    {
-        var universe = m.StudiesSuccessful + m.TrialsRemaining.Value;
-        if (universe > 0)
-        {
-            donePct = Math.Clamp((double)m.StudiesSuccessful / universe * 100d, 0d, 100d);
-        }
-    }
 }
 
 <div class="ep-tile-row">
     @* ---- UMLS resolution gauge ---- *@
-    <div class="card epcard" style="flex: 1 1 0; min-width: 0;">
+    <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
         <div class="card-body py-3 px-3 d-flex flex-column align-items-center">
             <div class="epk align-self-start mb-2">UMLS resolution</div>
-            <div class="ep-ring" style="width:120px;height:120px;--ep-color:var(--bs-success);--ep-sweep:@((m.ResolutionRate * 100d).ToString("0.###", inv))%;">
+            <div class="ep-ring" data-ring-sweep="resolutionRate"
+                 style="width:120px;height:120px;--ep-color:var(--bs-success);--ep-sweep:0%;">
                 <div class="ep-ring-hole" style="width:88px;height:88px;">
                     <div>
-                        <div class="fw-bold ep-num" style="font-size:1.4rem;line-height:1;">@m.ResolutionRate.ToString("P1")</div>
+                        <div class="fw-bold ep-num" style="font-size:1.4rem;line-height:1;" data-metric="resolutionRateText">-</div>
                         <div class="epk">resolved</div>
                     </div>
                 </div>
@@ -106,38 +62,47 @@
                different measures. The per-run trend lives on the run card. *@
             <div class="epk mt-2 text-center">non-null concept_code / total rows</div>
         </div>
+        <div class="ep-skel">
+            <div class="card-body py-3 px-3 d-flex flex-column align-items-center">
+                <div class="ep-skel-bar align-self-start mb-3" style="width:6rem;"></div>
+                <div class="ep-skel-circle" style="width:120px;height:120px;"></div>
+                <div class="ep-skel-bar mt-3" style="width:9rem;"></div>
+            </div>
+        </div>
     </div>
 
     @* ---- Failures by type ---- *@
-    <div class="card epcard" style="flex: 1.4 1 0; min-width: 0;">
+    <div class="card epcard position-relative" style="flex: 1.4 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
             <div class="epk mb-2">Failures by type</div>
             <div class="d-flex align-items-center gap-3">
-                <div class="ep-ring" style="width:104px;height:104px;--ep-gradient:@donutGradient;">
+                @* The gradient is rebuilt on hydrate from the legend rows' own
+                   data-colour, so the palette is declared once, here. *@
+                <div class="ep-ring" data-donut style="width:104px;height:104px;--ep-gradient:conic-gradient(var(--bs-secondary-bg) 0 100%);">
                     <div class="ep-ring-hole" style="width:62px;height:62px;">
                         <div>
-                            <div class="fw-bold ep-num" style="font-size:1rem;line-height:1;">@failureTotal.ToString("N0")</div>
+                            <div class="fw-bold ep-num" style="font-size:1rem;line-height:1;" data-failure-total>-</div>
                             <div class="epk">total</div>
                         </div>
                     </div>
                 </div>
                 <div class="flex-grow-1" style="font-size:.78rem;line-height:1.7;min-width:0;">
-                    @foreach (var r in rows)
+                    @foreach (var b in buckets)
                     {
-                        @* Every bucket, including the zeros. Hiding a zero row
-                           would make "no failures of this kind" and "this kind is
-                           not tracked" look identical, and the row is the only
-                           place the status name appears at all. *@
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="ep-dot" style="background:@r.Colour;"></span>
+                        @* Every bucket, including the ones that will hydrate to
+                           zero. Hiding a zero row would make "no failures of this
+                           kind" and "this kind is not tracked" look identical, and
+                           the row is the only place the status name appears. *@
+                        <div class="d-flex align-items-center gap-2" data-failure="@b.Status" data-colour="@b.Colour">
+                            <span class="ep-dot" style="background:@b.Colour;"></span>
                             @* Friendly label, raw status in the tooltip - the link
                                targets the raw code, which is what History shows. *@
-                            <a asp-action="History" asp-route-status="@r.Status"
+                            <a asp-action="History" asp-route-status="@b.Status"
                                class="text-decoration-none text-body-secondary text-truncate"
-                               title="@r.Status - view these studies in History">@r.Label</a>
-                            <a asp-action="History" asp-route-status="@r.Status"
-                               class="ms-auto fw-bold ep-num text-decoration-none @(r.Count > 0 ? "text-body" : "text-body-secondary")"
-                               title="@r.Status - view these studies in History">@r.Count.ToString("N0")</a>
+                               title="@b.Status - view these studies in History">@b.Label</a>
+                            <a asp-action="History" asp-route-status="@b.Status"
+                               class="ms-auto fw-bold ep-num text-decoration-none text-body-secondary"
+                               title="@b.Status - view these studies in History" data-failure-count>-</a>
                         </div>
                     }
                     <hr class="my-1" />
@@ -148,16 +113,30 @@
                     <div class="d-flex align-items-center gap-2"
                          title="Latest attempt returned valid JSON but zero criteria. A valid 'no eligibility criteria' outcome, not a failure.">
                         <span class="text-body-secondary">Parse empty</span>
-                        <a asp-action="History" asp-route-status="parse_empty"
+                        <a asp-action="History" asp-route-status="@StudyExecution.StatusParseEmpty"
                            class="ms-auto fw-semibold ep-num text-body-secondary text-decoration-none"
-                           title="View these studies in History">@m.ParseEmpty.ToString("N0")</a>
+                           title="View these studies in History" data-metric="parseEmptyText">-</a>
                     </div>
                     <div class="d-flex align-items-center gap-2"
                          title="Studies with eligibility rows but no row in eligibility_study_embedding. Run the embed-studies job from the Tools tab to backfill.">
                         <span class="text-body-secondary">No embeddings</span>
                         @* Not a link: there is no History filter for "missing an
                            embedding" - it is an absence, not a status. *@
-                        <span class="ms-auto fw-semibold ep-num text-body-secondary">@m.StudiesWithoutEmbeddings.ToString("N0")</span>
+                        <span class="ms-auto fw-semibold ep-num text-body-secondary" data-metric="studiesWithoutEmbeddingsText">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="ep-skel">
+            <div class="card-body py-3 px-3">
+                <div class="ep-skel-bar mb-3" style="width:7rem;"></div>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="ep-skel-circle" style="width:104px;height:104px;"></div>
+                    <div class="flex-grow-1 d-flex flex-column gap-2">
+                        @for (var i = 0; i < 6; i++)
+                        {
+                            <div class="ep-skel-bar"></div>
+                        }
                     </div>
                 </div>
             </div>
@@ -167,64 +146,91 @@
 
 @* ---- KPI tiles ---- *@
 <div class="ep-tile-row">
-    <div class="card epcard" style="flex: 1 1 0; min-width: 0;">
+    <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
             <div class="epk">Studies successful</div>
-            <div class="fw-bold ep-num" style="font-size:1.45rem;">@m.StudiesSuccessful.ToString("N0")</div>
-            @if (donePct.HasValue)
-            {
+            <div class="fw-bold ep-num" style="font-size:1.45rem;" data-metric="studiesSuccessfulText">-</div>
+            @* Backlog bar. Hidden until hydrate proves there IS a backlog figure:
+               TrialsRemaining is null when no AACT source is reachable (the
+               seeded quickstart has no ctgov schema), and null means unknown, not
+               zero - a bar drawn at a confident 100% would be a lie. *@
+            <div data-backlog hidden>
                 <div class="progress mt-2" style="height:5px;">
-                    <div class="progress-bar bg-success" style="width:@donePct.Value.ToString("0.###", inv)%;"
-                         role="progressbar" aria-valuenow="@((int)donePct.Value)" aria-valuemin="0" aria-valuemax="100"></div>
+                    <div class="progress-bar bg-success" data-backlog-bar style="width:0%;"
+                         role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
                 @* The "~" is not decoration: the figure is source-total minus
                    attempted with no anti-join, so it overstates by the
                    never-selectable trials and bottoms out near ~1,700 rather
                    than 0. Tools -> exact count does the real arithmetic. *@
-                <div class="epk mt-1" title="Selectable AACT trials minus trials already attempted. Approximate: the exact figure needs the batch selector's anti-join, which is too expensive for a page load - run it on demand from the Tools tab.">~@m.TrialsRemaining!.Value.ToString("N0") remaining</div>
-            }
-            else
-            {
-                <div class="epk mt-2" title="No AACT source is reachable, so the size of the backlog is unknown. The seeded quickstart has no ctgov schema.">latest attempt is success</div>
-            }
+                <div class="epk mt-1" title="Selectable AACT trials minus trials already attempted. Approximate: the exact figure needs the batch selector's anti-join, which is too expensive for a page load - run it on demand from the Tools tab."><span data-backlog-text></span> remaining</div>
+            </div>
+            <div data-backlog-unknown class="epk mt-2" hidden
+                 title="No AACT source is reachable, so the size of the backlog is unknown. The seeded quickstart has no ctgov schema.">latest attempt is success</div>
+        </div>
+        <div class="ep-skel">
+            <div class="card-body py-3 px-3">
+                <div class="ep-skel-bar" style="width:7rem;"></div>
+                <div class="ep-skel-bar mt-2" style="width:9rem;height:1.4rem;"></div>
+                <div class="ep-skel-bar mt-3"></div>
+            </div>
         </div>
     </div>
 
-    <div class="card epcard" style="flex: 1 1 0; min-width: 0;">
+    <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
             @* Corpus-wide, i.e. every row ever persisted - a different measure
                from the run card's per-run "Rows persisted". *@
             <div class="epk">Eligibility rows persisted</div>
-            <div class="fw-bold ep-num" style="font-size:1.45rem;">@m.EligibilityRowCount.ToString("N0")</div>
+            <div class="fw-bold ep-num" style="font-size:1.45rem;" data-metric="eligibilityRowCountText">-</div>
+        </div>
+        <div class="ep-skel">
+            <div class="card-body py-3 px-3">
+                <div class="ep-skel-bar" style="width:9rem;"></div>
+                <div class="ep-skel-bar mt-2" style="width:11rem;height:1.4rem;"></div>
+            </div>
         </div>
     </div>
 
-    <div class="card epcard" style="flex: 2 1 0; min-width: 0;">
+    <div class="card epcard position-relative" style="flex: 2 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
             <div class="epk mb-2">Tokens used</div>
             <div class="d-flex align-items-center gap-3">
-                <div class="ep-ring" style="width:76px;height:76px;--ep-gradient:@tokensGradient;">
+                <div class="ep-ring" data-pie style="width:76px;height:76px;--ep-gradient:conic-gradient(var(--bs-secondary-bg) 0 100%);">
                     <div class="ep-ring-hole" style="width:0;height:0;"></div>
                 </div>
                 <div class="flex-grow-1" style="font-size:.78rem;min-width:0;">
                     <div class="d-flex align-items-center gap-2">
                         <span class="ep-dot" style="background:var(--bs-primary);"></span>
                         <span class="text-body-secondary">Input</span>
-                        <span class="ms-auto fw-semibold ep-num">@m.PromptTokens.ToString("N0")</span>
-                        <span class="text-body-secondary ep-num" style="width:6rem;text-align:right;">$@promptCost.ToString("N2")</span>
+                        <span class="ms-auto fw-semibold ep-num" data-metric="tokens.promptText">-</span>
+                        <span class="text-body-secondary ep-num" style="width:6rem;text-align:right;" data-metric="tokens.promptCostText">-</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
                         <span class="ep-dot" style="background:var(--bs-warning);"></span>
                         <span class="text-body-secondary">Output</span>
-                        <span class="ms-auto fw-semibold ep-num">@m.CompletionTokens.ToString("N0")</span>
-                        <span class="text-body-secondary ep-num" style="width:6rem;text-align:right;">$@completionCost.ToString("N2")</span>
+                        <span class="ms-auto fw-semibold ep-num" data-metric="tokens.completionText">-</span>
+                        <span class="text-body-secondary ep-num" style="width:6rem;text-align:right;" data-metric="tokens.completionCostText">-</span>
                     </div>
                     <hr class="my-1" />
                     <div class="d-flex align-items-center gap-2 fw-bold"
                          title="Priced at commercial list rates ($5 / $25 per 1M input / output tokens). Inference runs on self-hosted GPUs, so this is what the corpus would have cost to buy, not money spent.">
                         <span>Total</span>
-                        <span class="ms-auto ep-num">@totalTokens.ToString("N0")</span>
-                        <span class="ep-num" style="width:6rem;text-align:right;">$@totalCost.ToString("N2")</span>
+                        <span class="ms-auto ep-num" data-metric="tokens.totalText">-</span>
+                        <span class="ep-num" style="width:6rem;text-align:right;" data-metric="tokens.totalCostText">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="ep-skel">
+            <div class="card-body py-3 px-3">
+                <div class="ep-skel-bar mb-3" style="width:6rem;"></div>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="ep-skel-circle" style="width:76px;height:76px;"></div>
+                    <div class="flex-grow-1 d-flex flex-column gap-2">
+                        <div class="ep-skel-bar"></div>
+                        <div class="ep-skel-bar"></div>
+                        <div class="ep-skel-bar"></div>
                     </div>
                 </div>
             </div>
