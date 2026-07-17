@@ -300,6 +300,40 @@ deliberately uncached and always reads live.
 Standard ASP.NET Core logging filters and host filtering. Tune per environment
 in `appsettings.{Environment}.json`. No secrets.
 
+#### Seeing SQL and LLM/HTTP calls in the logs
+
+All off by default. Set any of these (env or `.env`) and read `docker compose logs`:
+
+| Variable | Shows |
+|-----|-------|
+| `Logging__LogLevel__Default=Debug` | **Everything below at once** - the one switch. |
+| `Logging__LogLevel__Npgsql=Information` | Every SQL command + duration (`Command execution completed (duration=16ms): SELECT ...`). |
+| `Logging__LogLevel__Npgsql=Debug` | Also logs each command as it *starts*, so a hung query is visible. |
+| `Logging__LogLevel__System.Net.Http.HttpClient=Information` | LLM / UMLS / embedding calls: URL, status, timing. |
+| `Logging__LogLevel__Polly=Information` | Retry attempts. |
+
+Two things make this work, and both are load-bearing:
+
+- **The data sources carry the host's `ILoggerFactory`** (`CompositionRoot.BuildDataSource`).
+  `NpgsqlDataSource.Create()` attaches none, so before this the `Npgsql` category was
+  dead no matter what level was set - there was nothing to turn on.
+- **The code-level pins are defaults, not overrides.** `CompositionRoot` pins `Npgsql`,
+  `System.Net.Http.HttpClient` and `Polly` to `Warning` **in code** (not only in
+  `appsettings.json`) so the suppression holds even when a host is launched from a
+  directory where `appsettings.json` is not found. But a code `AddFilter` **beats
+  configuration** for the same category, so pinning unconditionally made those
+  categories unreachable. Each pin is now skipped when configuration names that category
+  explicitly, or when `Logging:LogLevel:Default` is `Debug`/`Trace`. See
+  `DebugLoggingTests` for the matrix.
+
+**Parameter values are never logged**, deliberately: Npgsql's `EnableParameterLogging`
+is not enabled, because parameters here carry criteria text, raw LLM responses, user
+emails and password hashes. You get command text, not data.
+
+**This is a firehose.** HttpClient logging is per-request and Npgsql per-command; a real
+batch runs 8+ trials in flight and thousands of commands. It is for diagnosis, not for
+leaving on.
+
 ---
 
 ### `Postgres` — data-source tuning (non-secret) · (section absent from JSON → all code defaults)
