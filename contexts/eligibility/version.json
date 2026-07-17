@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 25, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 26, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.26",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "The dashboard figures now load in place and update themselves. The metric cards show a brief loading shimmer while the numbers are read, then fill in - so the page appears at once instead of waiting for the slowest query. When a run or a maintenance job finishes, the affected figures refresh on their own rather than waiting for you to reload. A Reload button re-reads everything on demand, bypassing the short-lived cache so it always reflects the current state. If the read fails - most often because your sign-in has expired - the dashboard now says so in plain language and stays usable, instead of showing a raw error or sitting under the shimmer forever."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.25",
       "releaseDate": "2026-07-17",

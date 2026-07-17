@@ -92,5 +92,15 @@
         {
             <span class="badge text-bg-secondary" title="Running the pipeline needs the Owner or Administrator role.">Read-only</span>
         }
+
+        @* Outside the PipelineOps gate on purpose: re-reading figures is a read,
+           and a read-only user watching a batch has more reason to refresh than
+           anyone. Bypasses the cache (see the fetch in Index), so it always costs
+           a real query - hence debounced there rather than here. *@
+        <button type="button" id="metrics-reload" class="btn btn-sm btn-outline-secondary"
+                title="Re-read the corpus figures, bypassing the cache">
+            <svg class="ep-ico" style="width:14px;height:14px;" aria-hidden="true" focusable="false"><use href="#ep-reload"></use></svg>
+            <span class="visually-hidden">Reload stats</span>
+        </button>
     </div>
 </div>

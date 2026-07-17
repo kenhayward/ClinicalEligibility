@@ -281,6 +281,67 @@ html {
   }
 }
 
+/* ===== Skeleton loading =====
+   The corpus aggregate is a ~700ms whole-table read, so the metric cards paint
+   as placeholder shapes and fill in when the fetch lands. Driven by
+   data-loading="1" on the dashboard root, which the fetch clears in a finally -
+   a skeleton that outlives its request is worse than no skeleton at all.
+
+   The overlay sits INSIDE its card and covers it, rather than replacing the
+   content: the real markup stays in the DOM underneath at its real size, so
+   nothing reflows when the overlay fades and the card cannot change height. */
+.ep-skel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: 13px;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .45s ease;
+}
+
+.ep-dash[data-loading="1"] .ep-skel {
+  opacity: 1;
+}
+
+.ep-skel-bar,
+.ep-skel-circle {
+  background: linear-gradient(90deg,
+      var(--bs-secondary-bg) 20%,
+      var(--bs-tertiary-bg) 40%,
+      var(--bs-secondary-bg) 60%);
+  background-size: 200% 100%;
+  animation: ep-shimmer 1.3s linear infinite;
+}
+
+.ep-skel-bar {
+  height: .7rem;
+  border-radius: 4px;
+}
+
+.ep-skel-circle {
+  border-radius: 50%;
+}
+
+@keyframes ep-shimmer {
+  0% { background-position: 150% 0; }
+  100% { background-position: -150% 0; }
+}
+
+/* The shimmer is decoration - it says "working", which the placeholder shapes
+   already say by existing. Drop the motion, keep the shapes. */
+@media (prefers-reduced-motion: reduce) {
+  .ep-skel-bar,
+  .ep-skel-circle {
+    animation: none;
+  }
+
+  .ep-skel {
+    transition: none;
+  }
+}
+
 /* Legend swatch for the failure donut. */
 .ep-dot {
   width: 8px;
