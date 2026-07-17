@@ -9,20 +9,20 @@ Public Class DashboardMetricsTests
 
     Private Shared Function Make(
             Optional studiesAttempted As Long = 0,
-            Optional sourceSelectableTotal As Long? = Nothing) As DashboardMetrics
+            Optional sourceTrialTotal As Long? = Nothing) As DashboardMetrics
         Return New DashboardMetrics(
                 eligibilityRowCount:=0, studiesSuccessful:=0, studiesFailedLatest:=0,
                 resolutionRate:=0.0, promptTokens:=0, completionTokens:=0,
                 failuresByStatus:=New Dictionary(Of String, Long)(),
                 studiesWithoutEmbeddings:=0, parseEmpty:=0,
                 studiesAttempted:=studiesAttempted,
-                sourceSelectableTotal:=sourceSelectableTotal)
+                sourceTrialTotal:=sourceTrialTotal)
     End Function
 
     <Fact>
     Public Sub TrialsRemaining_is_source_total_minus_attempted()
         ' The production shape: 585,855 selectable minus 282,247 attempted.
-        Dim m = Make(studiesAttempted:=282247, sourceSelectableTotal:=585855)
+        Dim m = Make(studiesAttempted:=282247, sourceTrialTotal:=585855)
         Assert.Equal(303608L, m.TrialsRemaining)
     End Sub
 
@@ -31,7 +31,7 @@ Public Class DashboardMetricsTests
     ' rather than claim a backlog of zero.
     <Fact>
     Public Sub TrialsRemaining_is_Nothing_when_source_total_is_unknown()
-        Dim m = Make(studiesAttempted:=1000, sourceSelectableTotal:=Nothing)
+        Dim m = Make(studiesAttempted:=1000, sourceTrialTotal:=Nothing)
         Assert.False(m.TrialsRemaining.HasValue)
     End Sub
 
@@ -40,19 +40,19 @@ Public Class DashboardMetricsTests
     ' attempted but no longer selectable). Must clamp, never render negative.
     <Fact>
     Public Sub TrialsRemaining_clamps_at_zero_when_attempted_exceeds_source_total()
-        Dim m = Make(studiesAttempted:=600000, sourceSelectableTotal:=585855)
+        Dim m = Make(studiesAttempted:=600000, sourceTrialTotal:=585855)
         Assert.Equal(0L, m.TrialsRemaining)
     End Sub
 
     <Fact>
     Public Sub TrialsRemaining_is_zero_when_everything_is_attempted()
-        Dim m = Make(studiesAttempted:=585855, sourceSelectableTotal:=585855)
+        Dim m = Make(studiesAttempted:=585855, sourceTrialTotal:=585855)
         Assert.Equal(0L, m.TrialsRemaining)
     End Sub
 
     <Fact>
     Public Sub TrialsRemaining_is_full_total_when_nothing_attempted()
-        Dim m = Make(studiesAttempted:=0, sourceSelectableTotal:=585855)
+        Dim m = Make(studiesAttempted:=0, sourceTrialTotal:=585855)
         Assert.Equal(585855L, m.TrialsRemaining)
     End Sub
 
@@ -61,7 +61,7 @@ Public Class DashboardMetricsTests
     Public Sub Empty_reports_no_remaining_and_no_attempted()
         Assert.False(DashboardMetrics.Empty.TrialsRemaining.HasValue)
         Assert.Equal(0L, DashboardMetrics.Empty.StudiesAttempted)
-        Assert.False(DashboardMetrics.Empty.SourceSelectableTotal.HasValue)
+        Assert.False(DashboardMetrics.Empty.SourceTrialTotal.HasValue)
     End Sub
 
 End Class

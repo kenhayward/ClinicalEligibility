@@ -399,6 +399,56 @@ public class HomeController : Controller
     }
 
     /// <summary>
+    /// The EXACT remaining-trials figure, on demand. Deliberately not on any page load:
+    /// the filtered source count takes ~26 seconds against Duke's hosted AACT (no
+    /// suitable index, and the account is read-only), which is exactly why the dashboard
+    /// shows a cheap unfiltered approximation instead.
+    /// <para>
+    /// Not cached: it is user-initiated, rarely used, and the whole point is that it is
+    /// current when you ask. Read-only, so no RunGate - it can safely run alongside a
+    /// batch, and it holds one source connection for the duration.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ExactRemaining(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var selectable = await _gateway.CountSelectableSourceTrialsAsync(cancellationToken);
+            var attempted = (await _gateway.GetAttemptedNctIdsAsync(cancellationToken)).Count;
+            sw.Stop();
+
+            if (selectable is null)
+            {
+                return Json(new { available = false, reason = "No reachable AACT source is configured." });
+            }
+
+            // Same subtraction the dashboard does, but from the FILTERED total, so the
+            // ~0.29% of never-selectable trials are gone. A residual drift remains for
+            // trials attempted but no longer selectable - see DashboardMetrics.
+            var remaining = Math.Max(0L, selectable.Value - attempted);
+            _logger.LogInformation(
+                "Exact remaining-trials computed in {ElapsedMs} ms: {Selectable} selectable - {Attempted} attempted = {Remaining}",
+                sw.ElapsedMilliseconds, selectable.Value, attempted, remaining);
+
+            return Json(new
+            {
+                available = true,
+                selectable = selectable.Value,
+                attempted,
+                remaining,
+                elapsedMs = sw.ElapsedMilliseconds
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Exact remaining-trials count failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// DESTRUCTIVE. Deletes every superseded eligibility_study attempt row, keeping
     /// the latest attempt per NCT_ID. Runs INLINE rather than as a background job:
     /// it is a single DELETE with no LLM calls, so there is no progress to stream

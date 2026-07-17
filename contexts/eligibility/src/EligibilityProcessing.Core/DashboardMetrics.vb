@@ -42,7 +42,7 @@ Public NotInheritable Class DashboardMetrics
             studiesWithoutEmbeddings As Long,
             parseEmpty As Long,
             Optional studiesAttempted As Long = 0,
-            Optional sourceSelectableTotal As Long? = Nothing)
+            Optional sourceTrialTotal As Long? = Nothing)
         Me.EligibilityRowCount = eligibilityRowCount
         Me.StudiesSuccessful = studiesSuccessful
         Me.StudiesFailedLatest = studiesFailedLatest
@@ -53,7 +53,7 @@ Public NotInheritable Class DashboardMetrics
         Me.StudiesWithoutEmbeddings = studiesWithoutEmbeddings
         Me.ParseEmpty = parseEmpty
         Me.StudiesAttempted = studiesAttempted
-        Me.SourceSelectableTotal = sourceSelectableTotal
+        Me.SourceTrialTotal = sourceTrialTotal
     End Sub
 
     Public ReadOnly Property EligibilityRowCount As Long
@@ -93,31 +93,44 @@ Public NotInheritable Class DashboardMetrics
     ' be picked up again by a normal batch, so it is not "remaining".
     Public ReadOnly Property StudiesAttempted As Long
 
-    ' Trials in the AACT source that pass the selection filter (spec section 2.3:
-    ' non-null criteria, >= 50 chars, no "please contact" / "contact site for" /
-    ' "contact study"). Nothing when there is no reachable AACT source - the
-    ' seeded quickstart has no ctgov schema at all - in which case TrialsRemaining
-    ' is also Nothing and the dashboard omits the figure rather than guessing.
-    Public ReadOnly Property SourceSelectableTotal As Long?
+    ' TOTAL rows in the AACT source - deliberately NOT filtered by the selection rules
+    ' (spec section 2.3). The filtered equivalent costs ~26s against Duke's hosted AACT
+    ' versus ~224ms for this, and it runs on every dashboard cache miss; the filter only
+    ' changes the number by ~0.29%. See PostgresGateway.CountSourceTrialsAsync.
+    '
+    ' Nothing when there is no reachable AACT source - the seeded quickstart has no
+    ' ctgov schema at all - in which case TrialsRemaining is also Nothing and the
+    ' dashboard omits the figure rather than guessing.
+    Public ReadOnly Property SourceTrialTotal As Long?
 
     ''' <summary>
-    ''' Approximate backlog: selectable source trials minus trials already
-    ''' attempted. Nothing when the source total is unknown.
+    ''' Approximate backlog: total source trials minus trials already attempted.
+    ''' Nothing when the source total is unknown.
     ''' <para>
-    ''' APPROXIMATE BY DESIGN. The exact figure would need the same anti-join the
-    ''' batch selector runs (COPY the attempted set to the source, then anti-join
-    ''' ~586k rows), which is far too expensive for a dashboard read. This
-    ''' subtracts two independent counts instead, which is off by the number of
-    ''' attempted trials that are NOT in the selectable set - trials whose criteria
-    ''' were later edited below 50 chars, or that AACT dropped entirely. That skews
-    ''' the figure DOWN (understating the backlog) and is small in practice.
-    ''' Clamped at 0 so the drift can never render a negative count.
+    ''' APPROXIMATE BY DESIGN, in two ways, both deliberate trades for page speed:
+    ''' </para>
+    ''' <para>
+    ''' 1. The source total is UNFILTERED, so this includes trials the pipeline would
+    ''' never select (empty / too-short / "please contact" criteria). That overstates
+    ''' the backlog by ~1,695 of ~593k (0.29%) and means the figure bottoms out near
+    ''' ~1,700 rather than 0. Filtering would cost ~26s per dashboard load against
+    ''' Duke's hosted AACT, which has no suitable index and no rights to add one.
+    ''' </para>
+    ''' <para>
+    ''' 2. There is no anti-join: the exact figure needs the one the batch selector
+    ''' runs (COPY the attempted set to the source, anti-join ~593k rows), far too slow
+    ''' for a page. Subtracting two independent counts is off by any attempted trial
+    ''' that is no longer selectable, which skews DOWN and is small.
+    ''' </para>
+    ''' <para>
+    ''' The Tools tab carries an exact, on-demand figure that removes (1) for when the
+    ''' backlog actually matters. Clamped at 0 so drift can never render negative.
     ''' </para>
     ''' </summary>
     Public ReadOnly Property TrialsRemaining As Long?
         Get
-            If Not SourceSelectableTotal.HasValue Then Return Nothing
-            Return Math.Max(0L, SourceSelectableTotal.Value - StudiesAttempted)
+            If Not SourceTrialTotal.HasValue Then Return Nothing
+            Return Math.Max(0L, SourceTrialTotal.Value - StudiesAttempted)
         End Get
     End Property
 

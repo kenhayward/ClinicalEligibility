@@ -1155,10 +1155,14 @@ SELECT
     -- inserting a column above this silently shifts every metric.
     (SELECT COUNT(*) FROM latest WHERE status = 'interrupted')                    AS failed_interrupted"
 
-        ' The selectable-source count lives in the OTHER database (ctgov.*), so it
-        ' cannot join the query below and needs its own round-trip. Read first so
-        ' the metrics object is constructed once, complete.
-        Dim sourceTotal = Await CountSelectableSourceTrialsAsync(cancellationToken).ConfigureAwait(False)
+        ' The source count lives in the OTHER database (ctgov.*), so it cannot join the
+        ' query below and needs its own round-trip. Read first so the metrics object is
+        ' constructed once, complete.
+        '
+        ' UNFILTERED on purpose: the filtered equivalent costs ~26s against Duke's
+        ' hosted AACT versus ~224ms here, and this runs on every dashboard cache miss.
+        ' See CountSourceTrialsAsync for the full reasoning and the 0.29% it costs.
+        Dim sourceTotal = Await CountSourceTrialsAsync(cancellationToken).ConfigureAwait(False)
 
         Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
             Using cmd = conn.CreateCommand()
@@ -1187,29 +1191,68 @@ SELECT
                             parseEmpty:=reader.GetInt64(10),
                             studiesWithoutEmbeddings:=reader.GetInt64(11),
                             studiesAttempted:=reader.GetInt64(12),
-                            sourceSelectableTotal:=sourceTotal)
+                            sourceTrialTotal:=sourceTotal)
                 End Using
             End Using
         End Using
     End Function
 
     ''' <summary>
-    ''' Count of AACT trials that pass the selection filter (spec section 2.3).
-    ''' Returns Nothing when there is no reachable AACT source, so the dashboard
-    ''' omits the backlog figure instead of showing a wrong one.
+    ''' TOTAL rows in ctgov.eligibilities - NO selection filter. Returns Nothing when
+    ''' there is no reachable AACT source, so the dashboard omits the backlog figure
+    ''' rather than showing a wrong one.
     ''' <para>
-    ''' The WHERE clause MUST stay aligned with SelectNextTrialsAsync's filter and
-    ''' with the partial index (SelectableSourceIndexName) - the index is what makes
-    ''' this an index-only count (~150 ms warm over ~586k rows) rather than a scan
-    ''' with three ILIKEs per row. Deliberately no anti-join against the attempted
-    ''' set: that would mean COPYing ~280k ids to the source per dashboard hit. The
-    ''' caller subtracts instead and labels the result approximate.
+    ''' WHY UNFILTERED, i.e. why the dashboard's backlog is deliberately a bit wrong:
+    ''' the filtered count (CountSelectableSourceTrialsAsync) costs ~26 SECONDS against
+    ''' the real AACT and this one costs ~224 ms - a 116x difference. The filter forces
+    ''' a full heap read of the wide `criteria` column for all ~593k rows (three ILIKEs
+    ''' plus LENGTH(TRIM(...))), and the partial index that makes it cheap
+    ''' (SelectableSourceIndexName) only ever exists on a CO-LOCATED source. Against
+    ''' Duke's hosted AACT there is no such index and the account cannot create one.
+    ''' </para>
+    ''' <para>
+    ''' The cost of being unfiltered: the filter only removes ~1,695 of ~593,328 rows
+    ''' (0.29%), so the dashboard's "trials remaining" overstates by roughly that and
+    ''' bottoms out near ~1,700 rather than 0. That is why the card is labelled approx
+    ''' and why the Tools tab carries an exact, on-demand figure for when the backlog
+    ''' actually matters.
     ''' </para>
     ''' </summary>
-    Friend Async Function CountSelectableSourceTrialsAsync(
+    Friend Async Function CountSourceTrialsAsync(
             cancellationToken As CancellationToken) As Task(Of Long?)
 
-        If _sourceDataSource Is Nothing Then Return Nothing
+        ' No WHERE at all: this is what makes it an index-only count rather than a
+        ' 26-second heap scan. See the remarks above before adding a predicate here.
+        Const sql As String = "SELECT COUNT(*) FROM ctgov.eligibilities"
+        Return Await CountSourceAsync(sql, cancellationToken).ConfigureAwait(False)
+    End Function
+
+    ''' <summary>
+    ''' Count of AACT trials that pass the selection filter (spec section 2.3) - the
+    ''' figure the pipeline would actually consider. Returns Nothing when there is no
+    ''' reachable AACT source.
+    ''' <para>
+    ''' EXPENSIVE AND ON-DEMAND ONLY: ~26 seconds against Duke's hosted AACT, because
+    ''' the three ILIKEs force a full read of the wide `criteria` column across ~593k
+    ''' rows over the internet, and the partial index that would make it cheap only
+    ''' exists when the source is co-located with the output database. Never call this
+    ''' on a page load - the dashboard uses CountSourceTrialsAsync (~224 ms) and accepts
+    ''' a 0.29% overstatement. This one backs the Tools tab's explicit "exact" button.
+    ''' </para>
+    ''' <para>
+    ''' Still not a true remaining count: there is deliberately no anti-join against the
+    ''' attempted set, because that means COPYing ~280k ids to the source. Callers
+    ''' subtract the attempted total instead, which leaves a small drift for trials that
+    ''' were attempted but are no longer selectable.
+    ''' </para>
+    ''' <para>
+    ''' The WHERE clause MUST stay aligned with SelectNextTrialsAsync's filter, or the
+    ''' number stops describing what a batch would pick up.
+    ''' </para>
+    ''' </summary>
+    Public Async Function CountSelectableSourceTrialsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long?) _
+            Implements IPostgresGateway.CountSelectableSourceTrialsAsync
 
         Const sql As String = "
 SELECT COUNT(*)
@@ -1219,6 +1262,17 @@ WHERE src.criteria IS NOT NULL
   AND src.criteria NOT ILIKE '%please contact%'
   AND src.criteria NOT ILIKE '%contact site for%'
   AND src.criteria NOT ILIKE '%contact study%'"
+        Return Await CountSourceAsync(sql, cancellationToken).ConfigureAwait(False)
+    End Function
+
+    ' Shared plumbing for both source counts: the absent-source probe, the round-trip,
+    ' and the non-fatal contract. Keeps the two SQL texts as the only difference between
+    ' the cheap dashboard count and the expensive exact one.
+    Private Async Function CountSourceAsync(
+            sql As String,
+            cancellationToken As CancellationToken) As Task(Of Long?)
+
+        If _sourceDataSource Is Nothing Then Return Nothing
 
         Try
             ' Probe first: to_regclass returns NULL rather than raising when the
@@ -1242,7 +1296,7 @@ WHERE src.criteria IS NOT NULL
             ' Non-fatal: the backlog figure is a nice-to-have on a page that must
             ' render even when the source DB is down. Drop it rather than 500 the
             ' whole dashboard.
-            _logger.LogDebug(ex, "Selectable-source-trial count failed; omitting the remaining-trials figure")
+            _logger.LogDebug(ex, "Source-trial count failed; omitting the remaining-trials figure")
             Return Nothing
         End Try
     End Function
