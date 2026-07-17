@@ -125,6 +125,11 @@
                         <polyline data-spark="resolution" points=""></polyline>
                     </svg>
                 </div>
+                @* The per-run rate under each point (oldest left, newest right).
+                   hydrate fills one cell per run; space-between spreads them to
+                   sit roughly beneath the polyline vertices. *@
+                <div class="d-flex justify-content-between ep-num mt-1"
+                     style="font-size:.62rem;color:var(--bs-secondary-color);" data-spark-values="resolution"></div>
             </div>
         </div>
     </div>

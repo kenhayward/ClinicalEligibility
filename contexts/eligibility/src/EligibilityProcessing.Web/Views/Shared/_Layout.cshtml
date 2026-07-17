@@ -189,15 +189,10 @@
         (function () {
             const setter = window.__themeSetter;
             if (!setter) return;
-            // label + buttons live in _UserMenu.cshtml, which only renders for
-            // signed-in users. On pages that include _Layout without those
-            // elements (none today, but cheap to guard) we skip the UI bits.
-            const label = document.getElementById("bd-theme-label");
+            // The theme buttons live in _UserMenu.cshtml, which only renders for
+            // signed-in users, so guard for their absence.
             const buttons = document.querySelectorAll("[data-bs-theme-value]");
             function updateUi(theme) {
-                if (label) {
-                    label.textContent = theme === "dark" ? "Dark" : theme === "auto" ? "Auto" : "Light";
-                }
                 buttons.forEach(b => {
                     const active = b.dataset.bsThemeValue === theme;
                     b.classList.toggle("active", active);
@@ -219,31 +214,6 @@
             window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
                 if ((setter.stored() || "auto") === "auto") setter.apply("auto");
             });
-
-            // Theme flyout (nested inside the user menu). Bootstrap 5 dropped
-            // native nested dropdowns, so we drive open/close by hand: click
-            // toggles .show; selecting a theme closes the flyout but leaves
-            // the parent open (the parent has data-bs-auto-close="outside");
-            // when the parent closes we reset the flyout state.
-            const subToggle = document.getElementById("theme-submenu-toggle");
-            if (subToggle) {
-                const subMenu = subToggle.nextElementSibling;
-                const setOpen = (open) => {
-                    subMenu.classList.toggle("show", open);
-                    subToggle.setAttribute("aria-expanded", open ? "true" : "false");
-                };
-                subToggle.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    setOpen(!subMenu.classList.contains("show"));
-                });
-                subMenu.querySelectorAll("[data-bs-theme-value]").forEach(b => {
-                    b.addEventListener("click", () => setOpen(false));
-                });
-                const parent = document.getElementById("user-menu-toggle");
-                if (parent) {
-                    parent.addEventListener("hidden.bs.dropdown", () => setOpen(false));
-                }
-            }
         })();
     </script>
     @* Carry the last-viewed Analysis NCT ID forward across tab switches.

@@ -1,7 +1,21 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 29, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 30, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.30",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "Theme options (Light / Dark / Auto) now sit directly in the account menu instead of a sub-menu that could mis-align.",
+        "The resolution-rate trend on the run card now prints each run's rate under its point on the line.",
+        "Studies remaining now shows a percentage alongside the count.",
+        "The eligibility-rows card shows rows per study (total rows over studies successfully processed).",
+        "The failures card gained a second column - unresolved concepts, studies without embeddings and superseded results - the same maintenance counts as the Tools tab.",
+        "The Runs page is paginated: the newest 16 runs with controls for older pages, and the title shows the range and total (e.g. Runs 1-16 of 20,000).",
+        "The nav rail and footer now stay fixed while only the page content scrolls."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.29",
       "releaseDate": "2026-07-17",

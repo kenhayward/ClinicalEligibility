@@ -13,8 +13,6 @@ namespace EligibilityProcessing.Web.Controllers;
 [Authorize]
 public class HomeController : Controller
 {
-    private const int RecentRunsLimit = 50;
-
     /// <summary>Runs behind the dashboard sparklines ("last 7 runs"). Small on
     /// purpose - it is a shape-at-a-glance, and a longer window would flatten the
     /// recent movement it exists to show.</summary>
@@ -70,17 +68,32 @@ public class HomeController : Controller
         }
     }
 
-    public async Task<IActionResult> Runs(CancellationToken cancellationToken)
+    private const int RunsPageSize = 16;
+
+    public async Task<IActionResult> Runs(int page, CancellationToken cancellationToken)
     {
         try
         {
-            var runs = await _gateway.GetRecentRunsAsync(RecentRunsLimit, cancellationToken);
-            return View(new RunsViewModel { Runs = runs });
+            var total = await _gateway.CountRunsAsync(cancellationToken);
+            // Clamp the page into range so a hand-edited ?page= lands somewhere
+            // real rather than showing an empty table past the end.
+            var totalPages = (int)Math.Max(1, Math.Ceiling(total / (double)RunsPageSize));
+            var currentPage = Math.Clamp(page < 1 ? 1 : page, 1, totalPages);
+            var offset = (currentPage - 1) * RunsPageSize;
+
+            var runs = await _gateway.GetRunsPageAsync(RunsPageSize, offset, cancellationToken);
+            return View(new RunsViewModel
+            {
+                Runs = runs,
+                Page = currentPage,
+                PageSize = RunsPageSize,
+                TotalRuns = total
+            });
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load runs history");
-            return View(new RunsViewModel { ErrorMessage = ex.Message });
+            return View(new RunsViewModel { ErrorMessage = ex.Message, PageSize = RunsPageSize });
         }
     }
 

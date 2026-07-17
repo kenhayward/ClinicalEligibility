@@ -86,6 +86,15 @@
                 inFlight = ctl;
                 dash.setAttribute("data-loading", "1");
                 try {
+                    // The maintenance-backlog counts on the failures card come from
+                    // the same endpoint the Tools tab uses. Fetched in parallel and
+                    // best-effort - it must not block or fail the main figures - so
+                    // hydrate the counts here, before awaiting the metrics below.
+                    fetch("/Home/ToolCounts", { signal: ctl.signal, headers: { "Accept": "application/json" } })
+                        .then((r) => r.json())
+                        .then((tc) => { if (!ctl.signal.aborted) { hydrateToolCounts(tc); } })
+                        .catch(() => { /* leave the counts at their last value */ });
+
                     const res = await fetch(fresh ? "/Home/Metrics?fresh=true" : "/Home/Metrics",
                                             { signal: ctl.signal, headers: { "Accept": "application/json" } });
                     if (ctl.signal.aborted) { return; }
@@ -132,6 +141,19 @@
                 errBox.hidden = false;
             }
 
+            // The maintenance-backlog counts (failures card, 2nd column) from
+            // /Home/ToolCounts. Read-tolerant: an empty object on a backend hiccup
+            // just leaves the previous values in place.
+            function hydrateToolCounts(tc) {
+                const set = (name, val) => {
+                    const el = document.querySelector(`[data-tool="${name}"]`);
+                    if (el && typeof val === "number") { el.textContent = val.toLocaleString(); }
+                };
+                set("normalize", tc.normalizeRemaining);
+                set("embed", tc.embedRemaining);
+                set("superseded", tc.supersededCount);
+            }
+
             function hydrate(p) {
                 // Plain text values, addressed by their path into the payload.
                 document.querySelectorAll("[data-metric]").forEach((el) => {
@@ -144,6 +166,15 @@
                     const v = dig(p, el.dataset.ringSweep);
                     el.style.setProperty("--ep-sweep", ((v ?? 0) * 100).toFixed(3) + "%");
                 });
+
+                // Rows per study: total rows over studies successfully processed,
+                // to the nearest whole row. Guard the divide before the first run.
+                const rps = document.querySelector("[data-rows-per-study]");
+                if (rps) {
+                    rps.textContent = p.studiesSuccessful > 0
+                        ? Math.round(p.eligibilityRowCount / p.studiesSuccessful).toLocaleString()
+                        : "-";
+                }
 
                 // Failures donut. Counts land on their rows; the ring is rebuilt
                 // from those rows' own data-colour, so the palette is declared
@@ -214,6 +245,10 @@
                         // The "~" is load-bearing - the figure is approximate by
                         // construction. See _DashboardMetrics.
                         if (txt) { txt.textContent = "~" + p.trialsRemainingText; }
+                        // Remaining as a share of the known universe - the
+                        // complement of the progress bar.
+                        const pctEl = backlog.querySelector("[data-backlog-pct]");
+                        if (pctEl) { pctEl.textContent = "(" + Math.round(100 - pct) + "%)"; }
                         backlog.hidden = false;
                         unknown.hidden = true;
                     }
@@ -223,7 +258,10 @@
                 // order); charts read left-to-right in time, so reverse for
                 // drawing while keeping the raw order for the delta.
                 const runs = (p.runs ?? []).slice();
-                drawSpark("resolution", runs.map((r) => r.resolutionRate).reverse());
+                const resolutionSeries = runs.map((r) => r.resolutionRate).reverse();
+                drawSpark("resolution", resolutionSeries);
+                // Per-run rate under each vertex (oldest left), one decimal.
+                drawSparkValues("resolution", resolutionSeries.map((v) => (v * 100).toFixed(1)));
                 // Rows per 100 trials, not the raw per-run total: runs have
                 // different study counts, so normalizing makes the yield
                 // comparable. Guard the divide for a run with nothing processed.
@@ -332,6 +370,19 @@
                 });
                 poly.setAttribute("points", points.join(" "));
                 block.hidden = false;
+            }
+
+            // Fills the value row under a sparkline, one cell per point, so the
+            // numbers sit roughly beneath the vertices (space-between in markup).
+            function drawSparkValues(name, values) {
+                const row = document.querySelector(`[data-spark-values="${name}"]`);
+                if (!row) { return; }
+                row.textContent = "";
+                values.forEach((val) => {
+                    const span = document.createElement("span");
+                    span.textContent = val;
+                    row.appendChild(span);
+                });
             }
 
             // A pp delta for the resolution sparkline: newest run minus the one
