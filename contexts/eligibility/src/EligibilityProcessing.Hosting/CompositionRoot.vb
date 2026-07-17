@@ -52,6 +52,60 @@ Public Module CompositionRoot
     Private Const SourceDataSourceKey As String = "source"
     Private Const OutputDataSourceKey As String = "output"
 
+    ''' <summary>
+    ''' Builds an NpgsqlDataSource with the host's logger factory attached. That factory
+    ''' is the ONLY thing that lets Npgsql emit SQL at all: the previous
+    ''' <c>NpgsqlDataSource.Create()</c> wires no logging, so the <c>Npgsql</c> log
+    ''' category was dead no matter what level was configured. With this,
+    ''' <c>Logging__LogLevel__Npgsql=Debug</c> logs every command; at Information (the
+    ''' default) Npgsql stays silent, because it logs commands at Debug and connection
+    ''' open/close at Trace.
+    ''' </summary>
+    ''' <remarks>
+    ''' <c>EnableParameterLogging</c> is DELIBERATELY NOT SET, and should not be. It puts
+    ''' parameter VALUES in the log, and this app's parameters carry trial criteria text,
+    ''' raw LLM responses, user emails and password hashes. Command text alone shows what
+    ''' ran and cannot leak a secret.
+    ''' </remarks>
+    ''' <summary>
+    ''' True when the operator has asked for verbose logging wholesale via
+    ''' <c>Logging:LogLevel:Default</c> = Debug or Trace (env:
+    ''' <c>Logging__LogLevel__Default=Debug</c>). That is treated as an explicit request
+    ''' to stop suppressing the chatty third-party categories, so one switch surfaces
+    ''' SQL + HTTP + Polly rather than needing three.
+    ''' </summary>
+    Friend Function IsVerboseLoggingRequested(configuration As IConfiguration) As Boolean
+        Dim level = configuration("Logging:LogLevel:Default")
+        Return String.Equals(level, "Debug", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(level, "Trace", StringComparison.OrdinalIgnoreCase)
+    End Function
+
+    ''' <summary>
+    ''' Applies a code-level default filter for <paramref name="category"/>, UNLESS the
+    ''' operator has overridden it - either for that exact category, or wholesale via a
+    ''' Debug/Trace default. The point is that the code pin is a fallback for hosts
+    ''' launched where appsettings.json is not found, not a gag that configuration cannot
+    ''' undo.
+    ''' </summary>
+    Friend Sub AddDefaultCategoryFilter(
+            logging As ILoggingBuilder,
+            configuration As IConfiguration,
+            verbose As Boolean,
+            category As String,
+            level As LogLevel)
+
+        If verbose Then Return
+        ' An explicit entry for this category (appsettings or env) always wins.
+        If configuration($"Logging:LogLevel:{category}") IsNot Nothing Then Return
+        logging.AddFilter(category, level)
+    End Sub
+
+    Private Function BuildDataSource(connectionString As String, sp As IServiceProvider) As NpgsqlDataSource
+        Dim builder As New NpgsqlDataSourceBuilder(connectionString)
+        builder.UseLoggerFactory(sp.GetRequiredService(Of ILoggerFactory)())
+        Return builder.Build()
+    End Function
+
     <Extension>
     Public Function AddEligibilityPipeline(
             services As IServiceCollection,
@@ -67,11 +121,26 @@ Public Module CompositionRoot
         ' appsettings.json relative to the current directory, so a CLI run from
         ' the repo root never loads the file-based filters. Warning+ still lets a
         ' real retry / failure / handled fault through.
+        ' ...but as DEFAULTS, not as overrides. A code AddFilter WINS over configuration
+        ' for the same category (rules are matched most-specific-first, and ours are added
+        ' after the host has bound the Logging section), so pinning unconditionally made
+        ' these three categories unreachable: no appsettings entry and no environment
+        ' variable could ever turn them back on. That is why "show me the SQL" was
+        ' impossible - the Npgsql category was pinned shut in code, and separately the
+        ' data sources had no logger factory at all, so there was nothing to unpin.
+        '
+        ' Each pin is now skipped when the operator has said otherwise:
+        '   Logging__LogLevel__Npgsql=Debug                     -> SQL (per category)
+        '   Logging__LogLevel__System.Net.Http.HttpClient=Information -> LLM/UMLS calls
+        '   Logging__LogLevel__Default=Debug                    -> all three at once
+        ' With nothing set, every pin applies exactly as before, from any launch
+        ' directory. See DebugLoggingTests for the matrix.
+        Dim verbose = IsVerboseLoggingRequested(configuration)
         services.AddLogging(
             Sub(logging)
-                logging.AddFilter("Polly", LogLevel.Warning)
-                logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning)
-                logging.AddFilter("Npgsql", LogLevel.Warning)
+                AddDefaultCategoryFilter(logging, configuration, verbose, "Polly", LogLevel.Warning)
+                AddDefaultCategoryFilter(logging, configuration, verbose, "System.Net.Http.HttpClient", LogLevel.Warning)
+                AddDefaultCategoryFilter(logging, configuration, verbose, "Npgsql", LogLevel.Warning)
             End Sub)
 
         ' --- options binding ---
@@ -92,12 +161,12 @@ Public Module CompositionRoot
                     ' "Exception while reading from stream". 0 => no timeout.
                     Dim sourceConn As New NpgsqlConnectionStringBuilder(opts.ConnectionStringSource) With {
                             .CommandTimeout = Math.Max(0, opts.SourceCommandTimeoutSeconds)}
-                    Return NpgsqlDataSource.Create(sourceConn.ConnectionString)
+                    Return BuildDataSource(sourceConn.ConnectionString, sp)
                 End Function)
         services.AddKeyedSingleton(Of NpgsqlDataSource)(OutputDataSourceKey,
                 Function(sp As IServiceProvider, key As Object) As NpgsqlDataSource
                     Dim opts = sp.GetRequiredService(Of IOptions(Of PostgresOptions)).Value
-                    Return NpgsqlDataSource.Create(opts.ConnectionStringOutput)
+                    Return BuildDataSource(opts.ConnectionStringOutput, sp)
                 End Function)
 
         services.AddSingleton(Of IPostgresGateway)(
@@ -304,14 +373,25 @@ Public Module CompositionRoot
                             embeddingClient:=sp.GetRequiredService(Of IEmbeddingClient)())
                 End Function)
 
-        ' Disable the framework's per-request HttpClient logging (the
-        ' "Start/Send/Received/End processing HTTP request" lines that AddHttpClient
-        ' wires at Information level on every LLM/UMLS call). It floods CLI output
-        ' (esp. parallel normalize-umls) and the app already logs its own meaningful
-        ' events + failures. Removing the builder filter is the canonical way to turn
-        ' it off in code, so it doesn't depend on a deployed appsettings log-level.
-        ' MUST run after all AddHttpClient calls (a later one would re-add the filter).
-        services.RemoveAll(Of IHttpMessageHandlerBuilderFilter)()
+        ' The framework's per-request HttpClient logging (the
+        ' "Start/Send/Received/End processing HTTP request" lines AddHttpClient wires at
+        ' Information on every LLM / UMLS / embedding call) is now suppressed by LOG
+        ' LEVEL rather than by ripping the builder filter out of DI.
+        '
+        ' It used to be `services.RemoveAll(Of IHttpMessageHandlerBuilderFilter)()`,
+        ' deliberately, so the noise could not depend on a deployed appsettings level.
+        ' The cost of that was absolute: the logging could never be turned back ON, so
+        ' there was no way to see an LLM call in the logs when diagnosing one. The
+        ' `"System.Net.Http.HttpClient": "Warning"` entry in each host's appsettings.json
+        ' silences it just as effectively for the default case (the lines are Information,
+        ' so Warning drops them), while leaving the door open:
+        '
+        '   Logging__LogLevel__System.Net.Http.HttpClient=Information
+        '
+        ' turns the per-request lines back on without a rebuild. Keep that Warning entry:
+        ' remove it and every host floods, especially a parallel normalize-umls run.
+        '
+        ' The filter is intentionally left registered. Nothing to do here.
 
         Return services
     End Function

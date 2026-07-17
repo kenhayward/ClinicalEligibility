@@ -27,4 +27,10 @@
     <TargetFramework>net8.0</TargetFramework>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- DebugLoggingTests asserts the log-filter composition (a code AddFilter beats
+         config, so the pins must be conditional). Testing that needs the helpers. -->
+    <InternalsVisibleTo Include="EligibilityProcessing.Data.Tests" />
+  </ItemGroup>
+
 </Project>

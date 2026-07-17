@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 20, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 21, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.21",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "You can now see the database queries and language-model calls in the logs when diagnosing something. Setting Logging__LogLevel__Default=Debug turns on all of it; Logging__LogLevel__Npgsql=Information shows every SQL command with its duration, and Logging__LogLevel__System.Net.Http.HttpClient=Information shows each call to the model server with its URL, status and timing. Everything stays off by default and the logs are unchanged unless you ask. Note this is a firehose during a real run - thousands of commands and one line per model call - so it is for diagnosis rather than leaving on. Query parameters are deliberately never logged, because they carry criteria text, model responses and account details."
+      ],
+      "fixes": [
+        "Log levels for the database, model-server and retry categories were impossible to change. They were pinned to Warning in code as well as in configuration, and a code-level pin silently overrides configuration - so no setting could turn them back on, and nothing reported that. On top of that the database connections were never given a logger at all, so there was no database logging to enable in the first place. The pins are now defaults that any explicit setting overrides, and the connections carry the logger. With nothing configured the logs are exactly as quiet as before, from any launch directory."
+      ]
+    },
     {
       "version": "0.1.20",
       "releaseDate": "2026-07-17",
