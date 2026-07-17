@@ -53,6 +53,22 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    // The dashboard's figures moved behind a JSON endpoint. It is read-tolerant
+    // by design - it answers 200 with an { error } body rather than 500ing - so
+    // pin that this tolerance does NOT extend to serving corpus counts to an
+    // anonymous caller.
+    [Fact]
+    public async Task Metrics_endpoint_rejects_unauthenticated_callers()
+    {
+        using var factory = new AnonFactory();
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync("/Home/Metrics");
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("/Account/Login", response.Headers.Location!.ToString());
+    }
+
     [Fact]
     public async Task Login_page_is_reachable_unauthenticated()
     {

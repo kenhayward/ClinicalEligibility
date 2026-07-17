@@ -15,6 +15,11 @@ public class HomeController : Controller
 {
     private const int RecentRunsLimit = 50;
 
+    /// <summary>Runs behind the dashboard sparklines ("last 7 runs"). Small on
+    /// purpose - it is a shape-at-a-glance, and a longer window would flatten the
+    /// recent movement it exists to show.</summary>
+    private const int SparklineRunCount = 7;
+
     private readonly IPostgresGateway _gateway;
     private readonly ICorpusReadCache _corpusReads;
     private readonly IAuditWriter _audit;
@@ -374,6 +379,51 @@ public class HomeController : Controller
     [HttpGet]
     public IActionResult ToolState([FromServices] ToolJobState toolState)
         => Json(toolState.Current);
+
+    /// <summary>
+    /// The dashboard's corpus figures as JSON, so the page can render its numbers
+    /// client-side: that is what lets it show a skeleton while the ~700ms aggregate
+    /// resolves, refresh itself when a run or tool job finishes, and give the Reload
+    /// button something to do that isn't a full page reload.
+    /// <para>
+    /// <paramref name="fresh"/> drops the cached aggregate first. Without it, Reload
+    /// inside the cache TTL (default 60s) returns the identical numbers - the UI would
+    /// flash a loading state and change nothing, which reads as broken rather than as
+    /// cached. It is a user-triggerable uncached whole-corpus read, so callers should
+    /// debounce it; the TTL still throttles the follow-ups, because this invalidates
+    /// and then repopulates rather than reading around the cache.
+    /// </para>
+    /// <para>
+    /// Read-tolerant, like <see cref="ToolCounts"/>: returns <c>{ error }</c> with a 200
+    /// rather than a 500, so the page can render the message inline and stay usable while
+    /// the DB recovers (spec section 6.4). Authorization is the controller's default
+    /// [Authorize] - these are the same corpus figures the dashboard already shows, so no
+    /// tighter policy than seeing the dashboard itself.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> Metrics(bool fresh, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (fresh)
+            {
+                _corpusReads.InvalidateDashboardMetrics();
+            }
+
+            var metrics = await _corpusReads.GetDashboardMetricsAsync(cancellationToken);
+            // Uncached and cheap, unlike the aggregate above - and the series has to be
+            // live or a just-finished run would be missing from its own sparkline.
+            var runs = await _gateway.GetRecentRunsAsync(SparklineRunCount, cancellationToken);
+
+            return Json(DashboardMetricsPayload.From(metrics, runs));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read dashboard metrics");
+            return Json(new { error = ex.Message });
+        }
+    }
 
     /// <summary>The current "remaining work" counts as JSON, so the Tools tab can
     /// refresh the card numbers after a job (or a pipeline batch) finishes without a

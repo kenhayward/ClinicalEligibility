@@ -74,6 +74,13 @@ Public NotInheritable Class CorpusReadCache
         Return fresh
     End Function
 
+    Public Sub InvalidateDashboardMetrics() Implements ICorpusReadCache.InvalidateDashboardMetrics
+        ' No-op when disabled: there is nothing stored to drop, and Remove on a
+        ' cache we never write to would be misleading rather than wrong.
+        If Not IsEnabled Then Return
+        _cache.Remove(MetricsKey)
+    End Sub
+
     Public Async Function GetEligibilityFilterOptionsAsync(
             maxDropdownSize As Integer,
             cancellationToken As CancellationToken) As Task(Of EligibilityFilterOptions) _
