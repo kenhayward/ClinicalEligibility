@@ -18,7 +18,7 @@
     var v = RunCardView.From(Model);
 }
 
-<div class="card epcard" data-run-card>
+<div class="card epcard position-relative" data-run-card>
     <div class="card-body py-3 px-3">
         @* No-runs state and the populated card are both present; hydrate() toggles
            between them so a brand-new deployment's first completed run can appear
@@ -61,7 +61,12 @@
                     <div class="row g-3">
                         <div class="col-4">
                             <div class="epk">Started</div>
-                            <div class="fw-semibold ep-num" style="font-size:.85rem;" data-run-started>@v?.StartedText</div>
+                            @* Localized by the .local-datetime script, same as Est.
+                               finish, so both read in the viewer's zone and format. *@
+                            <div class="fw-semibold ep-num" style="font-size:.85rem;">
+                                <span class="local-datetime" data-run-started
+                                      data-utc="@(v?.StartedUtc)">@v?.StartedText</span>
+                            </div>
                         </div>
                         <div class="col-4">
                             <div class="epk">Trigger source</div>
@@ -119,6 +124,34 @@
                     <svg class="ep-spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
                         <polyline data-spark="resolution" points=""></polyline>
                     </svg>
+                </div>
+                @* The per-run rate under each point (oldest left, newest right).
+                   hydrate fills one cell per run; space-between spreads them to
+                   sit roughly beneath the polyline vertices. *@
+                <div class="d-flex justify-content-between ep-num mt-1"
+                     style="font-size:.62rem;color:var(--bs-secondary-color);" data-spark-values="resolution"></div>
+            </div>
+        </div>
+    </div>
+    @* Skeleton overlay, so this card shimmers with the rest while the fetch is in
+       flight - it was the one card that refreshed with no loading state, which
+       read as odd next to the others. Mirrors the ring + stat-grid shape. *@
+    <div class="ep-skel">
+        <div class="card-body py-3 px-3">
+            <div class="ep-skel-bar mb-3" style="width:9rem;"></div>
+            <div class="d-flex align-items-center gap-4">
+                <div class="ep-skel-circle" style="width:132px;height:132px;"></div>
+                <div class="flex-grow-1 d-flex flex-column gap-3" style="min-width:18rem;">
+                    <div class="d-flex gap-3">
+                        <div class="ep-skel-bar" style="flex:1;"></div>
+                        <div class="ep-skel-bar" style="flex:1;"></div>
+                        <div class="ep-skel-bar" style="flex:1;"></div>
+                    </div>
+                    <div class="d-flex gap-3">
+                        <div class="ep-skel-bar" style="flex:1;"></div>
+                        <div class="ep-skel-bar" style="flex:1;"></div>
+                        <div class="ep-skel-bar" style="flex:1;"></div>
+                    </div>
                 </div>
             </div>
         </div>

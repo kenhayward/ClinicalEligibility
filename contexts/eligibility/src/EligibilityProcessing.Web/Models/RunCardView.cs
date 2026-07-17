@@ -32,6 +32,10 @@ public sealed class RunCardView
     /// <summary>Whether to pulse the RUNNING dot - true only while in flight.</summary>
     public bool IsRunning { get; init; }
 
+    /// <summary>ISO-8601 UTC for the .local-datetime script to localize, so
+    /// Started and Est. finish render in the same viewer-local zone and format.
+    /// StartedText is the pre-JS fallback only.</summary>
+    public string StartedUtc { get; init; } = "";
     public string StartedText { get; init; } = "";
     public string TriggerSource { get; init; } = "";
     public string RowsPersistedText { get; init; } = "";
@@ -95,6 +99,7 @@ public sealed class RunCardView
                 _ => "bg-secondary"
             },
             IsRunning = run.Status == "running",
+            StartedUtc = run.StartedAt.UtcDateTime.ToString("o", inv),
             StartedText = run.StartedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", inv),
             TriggerSource = run.TriggerSource,
             RowsPersistedText = run.RowsPersisted.ToString("N0", inv),
@@ -110,7 +115,9 @@ public sealed class RunCardView
         };
     }
 
-    // Duration as mm:ss - TotalMinutes so a >1h pace still reads correctly.
+    // Duration as mm:ss.f - tenths of a second, because at a 3-4s average per
+    // study whole seconds lose the resolution that matters. TotalMinutes (not
+    // Minutes) so a >1h pace still reads correctly.
     private static string FormatMmSs(TimeSpan ts) =>
-        $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}";
+        $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds / 100:D1}";
 }

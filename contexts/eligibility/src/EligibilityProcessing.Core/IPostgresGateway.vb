@@ -274,6 +274,17 @@ Public Interface IPostgresGateway
             limit As Integer,
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of RunMetrics))
 
+    ''' <summary>A page of runs (newest first), for the paginated Runs tab.
+    ''' Same shape as GetRecentRunsAsync with an OFFSET.</summary>
+    Function GetRunsPageAsync(
+            limit As Integer,
+            offset As Integer,
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of RunMetrics))
+
+    ''' <summary>Total row count of public.eligibility_run, for the Runs tab's
+    ''' "showing X-Y of N" and pagination bounds.</summary>
+    Function CountRunsAsync(cancellationToken As CancellationToken) As Task(Of Long)
+
     ''' <summary>
     ''' Returns one page of rows from public.eligibility matching
     ''' <paramref name="filter"/>. Empty fields on the filter are ignored.

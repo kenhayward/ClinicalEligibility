@@ -1251,6 +1251,17 @@ Friend NotInheritable Class ThrowingGateway
         Return Task.FromResult(CType(Array.Empty(Of RunMetrics)(), IReadOnlyList(Of RunMetrics)))
     End Function
 
+    Public Function GetRunsPageAsync(
+            limit As Integer, offset As Integer, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of RunMetrics)) _
+            Implements IPostgresGateway.GetRunsPageAsync
+        Return Task.FromResult(CType(Array.Empty(Of RunMetrics)(), IReadOnlyList(Of RunMetrics)))
+    End Function
+
+    Public Function CountRunsAsync(cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.CountRunsAsync
+        Return Task.FromResult(0L)
+    End Function
+
     Public Function SearchEligibilityAsync(
             filter As EligibilityFilter, sortBy As String, page As Integer, pageSize As Integer, cancellationToken As CancellationToken) As Task(Of EligibilityResultPage) _
             Implements IPostgresGateway.SearchEligibilityAsync

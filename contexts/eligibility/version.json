@@ -1,7 +1,35 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 28, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 30, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.30",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "Theme options (Light / Dark / Auto) now sit directly in the account menu instead of a sub-menu that could mis-align.",
+        "The resolution-rate trend on the run card now prints each run's rate under its point on the line.",
+        "Studies remaining now shows a percentage alongside the count.",
+        "The eligibility-rows card shows rows per study (total rows over studies successfully processed).",
+        "The failures card gained a second column - unresolved concepts, studies without embeddings and superseded results - the same maintenance counts as the Tools tab.",
+        "The Runs page is paginated: the newest 16 runs with controls for older pages, and the title shows the range and total (e.g. Runs 1-16 of 20,000).",
+        "The nav rail and footer now stay fixed while only the page content scrolls."
+      ],
+      "fixes": []
+    },
+    {
+      "version": "0.1.29",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "Dashboard header now reads Clinical Eligibility Encoding, with Pipeline overview as the subtitle.",
+        "The live activity feed is a fixed-height rolling ticker showing the newest 16 events, instead of growing as a run streams messages in.",
+        "The most-recent-run card now shows the loading shimmer while it refreshes, matching the other cards.",
+        "Start and estimated-finish times on the run card are shown in your local time zone in a single dd-MMM-yyyy HH:mm format, and time-per-study is now reported to a tenth of a second - useful as the average drops to a few seconds.",
+        "The rows trend on the eligibility-rows card is now rows per 100 trials rather than a raw per-run total, so runs of different sizes are comparable.",
+        "Token costs are labelled At equivalent foundation model prices, since inference runs on self-hosted hardware and the real cost is electricity.",
+        "Footer now reads Ken Hayward."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.28",
       "releaseDate": "2026-07-17",

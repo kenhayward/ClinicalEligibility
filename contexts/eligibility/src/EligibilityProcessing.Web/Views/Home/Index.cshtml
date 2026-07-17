@@ -86,6 +86,15 @@
                 inFlight = ctl;
                 dash.setAttribute("data-loading", "1");
                 try {
+                    // The maintenance-backlog counts on the failures card come from
+                    // the same endpoint the Tools tab uses. Fetched in parallel and
+                    // best-effort - it must not block or fail the main figures - so
+                    // hydrate the counts here, before awaiting the metrics below.
+                    fetch("/Home/ToolCounts", { signal: ctl.signal, headers: { "Accept": "application/json" } })
+                        .then((r) => r.json())
+                        .then((tc) => { if (!ctl.signal.aborted) { hydrateToolCounts(tc); } })
+                        .catch(() => { /* leave the counts at their last value */ });
+
                     const res = await fetch(fresh ? "/Home/Metrics?fresh=true" : "/Home/Metrics",
                                             { signal: ctl.signal, headers: { "Accept": "application/json" } });
                     if (ctl.signal.aborted) { return; }
@@ -132,6 +141,19 @@
                 errBox.hidden = false;
             }
 
+            // The maintenance-backlog counts (failures card, 2nd column) from
+            // /Home/ToolCounts. Read-tolerant: an empty object on a backend hiccup
+            // just leaves the previous values in place.
+            function hydrateToolCounts(tc) {
+                const set = (name, val) => {
+                    const el = document.querySelector(`[data-tool="${name}"]`);
+                    if (el && typeof val === "number") { el.textContent = val.toLocaleString(); }
+                };
+                set("normalize", tc.normalizeRemaining);
+                set("embed", tc.embedRemaining);
+                set("superseded", tc.supersededCount);
+            }
+
             function hydrate(p) {
                 // Plain text values, addressed by their path into the payload.
                 document.querySelectorAll("[data-metric]").forEach((el) => {
@@ -144,6 +166,15 @@
                     const v = dig(p, el.dataset.ringSweep);
                     el.style.setProperty("--ep-sweep", ((v ?? 0) * 100).toFixed(3) + "%");
                 });
+
+                // Rows per study: total rows over studies successfully processed,
+                // to the nearest whole row. Guard the divide before the first run.
+                const rps = document.querySelector("[data-rows-per-study]");
+                if (rps) {
+                    rps.textContent = p.studiesSuccessful > 0
+                        ? Math.round(p.eligibilityRowCount / p.studiesSuccessful).toLocaleString()
+                        : "-";
+                }
 
                 // Failures donut. Counts land on their rows; the ring is rebuilt
                 // from those rows' own data-colour, so the palette is declared
@@ -214,6 +245,10 @@
                         // The "~" is load-bearing - the figure is approximate by
                         // construction. See _DashboardMetrics.
                         if (txt) { txt.textContent = "~" + p.trialsRemainingText; }
+                        // Remaining as a share of the known universe - the
+                        // complement of the progress bar.
+                        const pctEl = backlog.querySelector("[data-backlog-pct]");
+                        if (pctEl) { pctEl.textContent = "(" + Math.round(100 - pct) + "%)"; }
                         backlog.hidden = false;
                         unknown.hidden = true;
                     }
@@ -223,8 +258,15 @@
                 // order); charts read left-to-right in time, so reverse for
                 // drawing while keeping the raw order for the delta.
                 const runs = (p.runs ?? []).slice();
-                drawSpark("resolution", runs.map((r) => r.resolutionRate).reverse());
-                drawSpark("rows", runs.map((r) => r.rowsPersisted).reverse());
+                const resolutionSeries = runs.map((r) => r.resolutionRate).reverse();
+                drawSpark("resolution", resolutionSeries);
+                // Per-run rate under each vertex (oldest left), one decimal.
+                drawSparkValues("resolution", resolutionSeries.map((v) => (v * 100).toFixed(1)));
+                // Rows per 100 trials, not the raw per-run total: runs have
+                // different study counts, so normalizing makes the yield
+                // comparable. Guard the divide for a run with nothing processed.
+                drawSpark("rows", runs.map((r) =>
+                    r.studiesProcessed > 0 ? r.rowsPersisted / r.studiesProcessed * 100 : 0).reverse());
                 drawDelta("resolution",
                     runs.length >= 2 ? (runs[0].resolutionRate - runs[1].resolutionRate) : null);
 
@@ -275,7 +317,10 @@
                 show("[data-run-processed-stat]", !rc.showRing);
                 set("[data-run-processed-2]", rc.studiesProcessedText);
 
-                set("[data-run-started]", rc.startedText);
+                // Started is a .local-datetime span - set the UTC and localize,
+                // rather than writing the raw text.
+                const started = card.querySelector("[data-run-started]");
+                if (started) { started.setAttribute("data-utc", rc.startedUtc); localizeDatetime(started); }
                 set("[data-run-trigger]", rc.triggerSource);
                 set("[data-run-rows]", rc.rowsPersistedText);
                 set("[data-run-resolution]", rc.resolutionRateText);
@@ -327,6 +372,19 @@
                 block.hidden = false;
             }
 
+            // Fills the value row under a sparkline, one cell per point, so the
+            // numbers sit roughly beneath the vertices (space-between in markup).
+            function drawSparkValues(name, values) {
+                const row = document.querySelector(`[data-spark-values="${name}"]`);
+                if (!row) { return; }
+                row.textContent = "";
+                values.forEach((val) => {
+                    const span = document.createElement("span");
+                    span.textContent = val;
+                    row.appendChild(span);
+                });
+            }
+
             // A pp delta for the resolution sparkline: newest run minus the one
             // before, in percentage points, coloured by direction. Hidden when
             // there is nothing to compare against.
@@ -356,7 +414,9 @@
                 body.textContent = text;
                 li.append(time, tag, body);
                 log.prepend(li);
-                while (log.children.length > 50) { log.removeChild(log.lastChild); }
+                // Rolling ticker: keep only the newest 16 so the panel holds a
+                // steady height during a long run instead of growing without bound.
+                while (log.children.length > 16) { log.removeChild(log.lastChild); }
             }
 
             // Enable/disable all the run-start buttons together. Only one run can
@@ -441,23 +501,19 @@
             // First paint has no figures in it - go and get them.
             loadMetrics(false);
 
-            // Render a .local-datetime span in the viewer's local time; show the
-            // date too when it is not today. Reused by the run-card refresh, which
-            // rewrites the Est. finish and needs to re-localize it.
+            // Render a .local-datetime span in the viewer's local time, as
+            // dd-MMM-yyyy HH:mm - one format for Started and Est. finish so they
+            // read the same. Reused by the run-card refresh to re-localize both.
+            const EP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
             function localizeDatetime(el) {
                 const iso = el.getAttribute("data-utc");
                 if (!iso) { return; }
                 const d = new Date(iso);
                 if (isNaN(d.getTime())) { return; }
-                const now = new Date();
                 const p = (n) => String(n).padStart(2, "0");
-                const time = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-                const sameDay = d.getFullYear() === now.getFullYear()
-                    && d.getMonth() === now.getMonth()
-                    && d.getDate() === now.getDate();
-                el.textContent = sameDay
-                    ? time
-                    : d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + time;
+                el.textContent = p(d.getDate()) + "-" + EP_MONTHS[d.getMonth()] + "-" + d.getFullYear()
+                    + " " + p(d.getHours()) + ":" + p(d.getMinutes());
             }
             document.querySelectorAll(".local-datetime").forEach(localizeDatetime);
 

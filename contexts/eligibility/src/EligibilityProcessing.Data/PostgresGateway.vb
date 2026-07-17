@@ -1010,12 +1010,21 @@ ON CONFLICT (nct_id) DO UPDATE
 
     ' ============ GetRecentRunsAsync (output DB) ============
 
-    Public Async Function GetRecentRunsAsync(
+    Public Function GetRecentRunsAsync(
             limit As Integer,
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of RunMetrics)) _
             Implements IPostgresGateway.GetRecentRunsAsync
+        Return GetRunsPageAsync(limit, 0, cancellationToken)
+    End Function
+
+    Public Async Function GetRunsPageAsync(
+            limit As Integer,
+            offset As Integer,
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of RunMetrics)) _
+            Implements IPostgresGateway.GetRunsPageAsync
         ' Clamp to keep a misbehaving caller from asking for a million rows.
         Dim cappedLimit = Math.Min(Math.Max(limit, 1), 500)
+        Dim cappedOffset = Math.Max(offset, 0)
         ' completion_tokens is summed from eligibility_study (eligibility_run does
         ' not store a token total) via a single grouped LEFT JOIN, so the Runs
         ' table can show aggregate decode throughput (tokens ÷ wall clock). The
@@ -1038,13 +1047,14 @@ LEFT JOIN (
     GROUP BY run_id
 ) t ON t.run_id = r.run_id
 ORDER BY r.started_at DESC
-LIMIT @limit"
+LIMIT @limit OFFSET @offset"
 
         Dim runs As New List(Of RunMetrics)
         Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
             Using cmd = conn.CreateCommand()
                 cmd.CommandText = Sql
                 cmd.Parameters.Add(New NpgsqlParameter("limit", NpgsqlDbType.Integer) With {.Value = cappedLimit})
+                cmd.Parameters.Add(New NpgsqlParameter("offset", NpgsqlDbType.Integer) With {.Value = cappedOffset})
                 Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
                     While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
                         runs.Add(New RunMetrics(
@@ -1070,6 +1080,18 @@ LIMIT @limit"
             End Using
         End Using
         Return runs
+    End Function
+
+    Public Async Function CountRunsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.CountRunsAsync
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT COUNT(*) FROM public.eligibility_run"
+                Dim result = Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False)
+                Return If(result Is Nothing OrElse result Is DBNull.Value, 0L, CLng(result))
+            End Using
+        End Using
     End Function
 
     ' ============ GetDashboardMetricsAsync (output DB) ============

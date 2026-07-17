@@ -86,43 +86,61 @@
                         </div>
                     </div>
                 </div>
-                <div class="flex-grow-1" style="font-size:.78rem;line-height:1.7;min-width:0;">
-                    @foreach (var b in buckets)
-                    {
-                        @* Every bucket, including the ones that will hydrate to
-                           zero. Hiding a zero row would make "no failures of this
-                           kind" and "this kind is not tracked" look identical, and
-                           the row is the only place the status name appears. *@
-                        <div class="d-flex align-items-center gap-2" data-failure="@b.Status" data-colour="@b.Colour">
-                            <span class="ep-dot" style="background:@b.Colour;"></span>
-                            @* Friendly label, raw status in the tooltip - the link
-                               targets the raw code, which is what History shows. *@
-                            <a asp-action="History" asp-route-status="@b.Status"
-                               class="text-decoration-none text-body-secondary text-truncate"
-                               title="@b.Status - view these studies in History">@b.Label</a>
-                            <a asp-action="History" asp-route-status="@b.Status"
-                               class="ms-auto fw-bold ep-num text-decoration-none text-body-secondary"
-                               title="@b.Status - view these studies in History" data-failure-count>-</a>
+                @* Two columns right of the pie: trial OUTCOMES on the left
+                   (failures + parse-empty), maintenance BACKLOGS on the right
+                   (the same three counts the Tools tab shows). *@
+                <div class="flex-grow-1 d-flex gap-4" style="font-size:.78rem;line-height:1.7;min-width:0;">
+                    <div style="flex:1;min-width:0;">
+                        @foreach (var b in buckets)
+                        {
+                            @* Every bucket, including the ones that hydrate to
+                               zero. Hiding a zero row would make "no failures of
+                               this kind" and "this kind is not tracked" look
+                               identical, and the row is the only place the status
+                               name appears. *@
+                            <div class="d-flex align-items-center gap-2" data-failure="@b.Status" data-colour="@b.Colour">
+                                <span class="ep-dot" style="background:@b.Colour;"></span>
+                                @* Friendly label, raw status in the tooltip - the
+                                   link targets the raw code, which History shows. *@
+                                <a asp-action="History" asp-route-status="@b.Status"
+                                   class="text-decoration-none text-body-secondary text-truncate"
+                                   title="@b.Status - view these studies in History">@b.Label</a>
+                                <a asp-action="History" asp-route-status="@b.Status"
+                                   class="ms-auto fw-bold ep-num text-decoration-none text-body-secondary"
+                                   title="@b.Status - view these studies in History" data-failure-count>-</a>
+                            </div>
+                        }
+                        <hr class="my-1" />
+                        @* Not a failure - a valid outcome, but a RISING count can
+                           signal a prompt/model regression worth noticing. *@
+                        <div class="d-flex align-items-center gap-2"
+                             title="Latest attempt returned valid JSON but zero criteria. A valid 'no eligibility criteria' outcome, not a failure.">
+                            <span class="text-body-secondary">Parse empty</span>
+                            <a asp-action="History" asp-route-status="@StudyExecution.StatusParseEmpty"
+                               class="ms-auto fw-semibold ep-num text-body-secondary text-decoration-none"
+                               title="View these studies in History" data-metric="parseEmptyText">-</a>
                         </div>
-                    }
-                    <hr class="my-1" />
-                    @* Not failures - shown here because this is the "needs
-                       attention" surface and there is nowhere else for them.
-                       parse_empty is a valid outcome, but a RISING count can
-                       signal a prompt/model regression worth noticing. *@
-                    <div class="d-flex align-items-center gap-2"
-                         title="Latest attempt returned valid JSON but zero criteria. A valid 'no eligibility criteria' outcome, not a failure.">
-                        <span class="text-body-secondary">Parse empty</span>
-                        <a asp-action="History" asp-route-status="@StudyExecution.StatusParseEmpty"
-                           class="ms-auto fw-semibold ep-num text-body-secondary text-decoration-none"
-                           title="View these studies in History" data-metric="parseEmptyText">-</a>
                     </div>
-                    <div class="d-flex align-items-center gap-2"
-                         title="Studies with eligibility rows but no row in eligibility_study_embedding. Run the embed-studies job from the Tools tab to backfill.">
-                        <span class="text-body-secondary">No embeddings</span>
-                        @* Not a link: there is no History filter for "missing an
-                           embedding" - it is an absence, not a status. *@
-                        <span class="ms-auto fw-semibold ep-num text-body-secondary" data-metric="studiesWithoutEmbeddingsText">-</span>
+
+                    @* Maintenance backlogs. Same values as the Tools tab (fetched
+                       from /Home/ToolCounts); cleared by the jobs there, so these
+                       are counts, not links. *@
+                    <div style="flex:1;min-width:0;">
+                        <div class="d-flex align-items-center gap-2"
+                             title="Distinct extracted concepts still unresolved to a UMLS CUI. Cleared by the normalize-umls job on the Tools tab.">
+                            <span class="text-body-secondary text-truncate">Unresolved concepts</span>
+                            <span class="ms-auto fw-semibold ep-num text-body-secondary" data-tool="normalize">-</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2"
+                             title="Studies with eligibility rows but no embedding for the configured model. Cleared by the embed-studies job on the Tools tab.">
+                            <span class="text-body-secondary text-truncate">Without embeddings</span>
+                            <span class="ms-auto fw-semibold ep-num text-body-secondary" data-tool="embed">-</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2"
+                             title="Older superseded attempt rows kept behind the latest attempt per trial. Cleared by the remove-superseded action on the Tools tab.">
+                            <span class="text-body-secondary text-truncate">Superseded results</span>
+                            <span class="ms-auto fw-semibold ep-num text-body-secondary" data-tool="superseded">-</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -167,7 +185,10 @@
                    attempted with no anti-join, so it overstates by the
                    never-selectable trials and bottoms out near ~1,700 rather
                    than 0. Tools -> exact count does the real arithmetic. *@
-                <div class="epk mt-1" title="Selectable AACT trials minus trials already attempted. Approximate: the exact figure needs the batch selector's anti-join, which is too expensive for a page load - run it on demand from the Tools tab."><span data-backlog-text></span> remaining</div>
+                @* The percentage is the remaining share of the known universe
+                   (successful + remaining) - the complement of the progress bar
+                   above. *@
+                <div class="epk mt-1" title="Selectable AACT trials minus trials already attempted. Approximate: the exact figure needs the batch selector's anti-join, which is too expensive for a page load - run it on demand from the Tools tab."><span data-backlog-text></span> remaining <span data-backlog-pct></span></div>
             </div>
             <div data-backlog-unknown class="epk mt-2" hidden
                  title="No AACT source is reachable, so the size of the backlog is unknown. The seeded quickstart has no ctgov schema.">latest attempt is success</div>
@@ -188,12 +209,16 @@
                from the run card's per-run "Rows persisted". *@
             <div class="epk">Eligibility rows persisted</div>
             <div class="fw-bold ep-num" style="font-size:1.45rem;" data-metric="eligibilityRowCountText">-</div>
-            @* Per-run rows, NOT the cumulative figure above - the caption says so,
-               because the same word ("rows") on the same card would otherwise
-               read as a sparkline of the big number, which never goes down.
-               Hidden until hydrate has two runs to draw. *@
+            @* Yield: total rows over studies successfully processed, to the
+               nearest whole row. Computed on hydrate from the two figures above. *@
+            <div class="epk mt-1"><span class="ep-num fw-semibold text-body" data-rows-per-study>-</span> rows per study</div>
+            @* Rows per 100 trials, NOT the cumulative figure above and NOT raw
+               per-run totals - runs have different study counts, so raw totals
+               make a small run look worse than a big one. Normalizing to 100
+               trials makes the yield comparable across runs. Hidden until hydrate
+               has two runs to draw. *@
             <div class="mt-2" data-spark-block="rows" hidden>
-                <div class="epk mb-1">rows per run - last 7</div>
+                <div class="epk mb-1">rows per 100 trials - last 7 runs</div>
                 <div class="text-primary">
                     <svg class="ep-spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
                         <polyline data-spark="rows" points=""></polyline>
@@ -213,7 +238,10 @@
        feed narrows THIS card rather than the simple number tiles. *@
     <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
-            <div class="epk mb-2">Tokens used</div>
+            <div class="epk">Tokens used</div>
+            @* The costs below are notional: inference runs on self-hosted GPUs, so
+               the real spend is electricity, not per-token API billing. *@
+            <div class="fst-italic mb-2" style="font-size:.68rem;color:var(--bs-secondary-color);">At equivalent foundation model prices.</div>
             <div class="d-flex align-items-center gap-3">
                 <div class="ep-ring" data-pie style="width:76px;height:76px;--ep-gradient:conic-gradient(var(--bs-secondary-bg) 0 100%);">
                     <div class="ep-ring-hole" style="width:0;height:0;"></div>

@@ -230,6 +230,22 @@ Friend NotInheritable Class FakeGateway
         Return Task.FromResult(CType(Array.Empty(Of RunMetrics)(), IReadOnlyList(Of RunMetrics)))
     End Function
 
+    Public Function GetRunsPageAsync(
+            limit As Integer,
+            offset As Integer,
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of RunMetrics)) _
+            Implements IPostgresGateway.GetRunsPageAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Return Task.FromResult(CType(Array.Empty(Of RunMetrics)(), IReadOnlyList(Of RunMetrics)))
+    End Function
+
+    Public Function CountRunsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long) _
+            Implements IPostgresGateway.CountRunsAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Return Task.FromResult(0L)
+    End Function
+
     Public Function SearchEligibilityAsync(
             filter As EligibilityFilter,
             sortBy As String,

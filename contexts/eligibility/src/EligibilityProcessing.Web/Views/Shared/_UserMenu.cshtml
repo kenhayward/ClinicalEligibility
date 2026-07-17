@@ -55,23 +55,16 @@
                 <li><button class="dropdown-item" type="button" id="create-seed-btn">Database seed &amp; embeddings</button></li>
                 <li><hr class="dropdown-divider" /></li>
             }
-            @* Theme flyout. Bootstrap 5 dropped native nested dropdowns, so this
-               is a hand-rolled .dropdown-submenu - site.css positions the nested
-               menu to the RIGHT of the parent, because the parent itself now
-               hangs off the nav rail on the left edge of the viewport.
-               #bd-theme-label is kept from the original navbar dropdown so the
-               existing wiring in _Layout.cshtml continues to update it. *@
-            <li class="dropdown-submenu">
-                <button class="dropdown-item dropdown-toggle" type="button"
-                        id="theme-submenu-toggle" aria-haspopup="true" aria-expanded="false">
-                    Theme: <span id="bd-theme-label">Auto</span>
-                </button>
-                <ul class="dropdown-menu" aria-labelledby="theme-submenu-toggle">
-                    <li><button type="button" class="dropdown-item" data-bs-theme-value="light">Light</button></li>
-                    <li><button type="button" class="dropdown-item" data-bs-theme-value="dark">Dark</button></li>
-                    <li><button type="button" class="dropdown-item" data-bs-theme-value="auto">Auto</button></li>
-                </ul>
-            </li>
+            @* Theme options, inline. Formerly a hand-rolled .dropdown-submenu
+               flyout, which mis-positioned against the short menu on the rail.
+               The menu is short, so the three options just sit in it directly.
+               The wiring in _Layout.cshtml keys off [data-bs-theme-value] and
+               marks the active one; the flyout-specific script there no-ops now
+               the submenu toggle is gone. *@
+            <li><h6 class="dropdown-header">Theme</h6></li>
+            <li><button type="button" class="dropdown-item" data-bs-theme-value="light">Light</button></li>
+            <li><button type="button" class="dropdown-item" data-bs-theme-value="dark">Dark</button></li>
+            <li><button type="button" class="dropdown-item" data-bs-theme-value="auto">Auto</button></li>
             <li><hr class="dropdown-divider" /></li>
             <li>
                 <form method="post" asp-controller="Account" asp-action="Logout">

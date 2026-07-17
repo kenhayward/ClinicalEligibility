@@ -99,6 +99,26 @@ public class RunCardViewTests
         Assert.Equal("-", v.TimePerStudyText);
     }
 
+    // Time per study carries tenths of a second: at a 3-4s average, whole
+    // seconds hide the movement that matters. 50 studies over 5m17.0s = 6.34s
+    // each -> 00:06.3.
+    [Fact]
+    public void Time_per_study_shows_tenths_of_a_second()
+    {
+        var ended = new DateTimeOffset(2026, 7, 17, 10, 5, 17, TimeSpan.Zero);
+        var v = RunCardView.From(Run(50, 50, status: "success", endedAt: ended))!;
+        Assert.Equal("00:06.3", v.TimePerStudyText);
+    }
+
+    // Started travels as an ISO UTC too, so the client can localize it to the
+    // same zone and format as Est. finish.
+    [Fact]
+    public void Started_carries_an_iso_utc_for_localization()
+    {
+        var v = RunCardView.From(Run(10, 4))!;
+        Assert.Equal("2026-07-17T10:00:00.0000000Z", v.StartedUtc);
+    }
+
     // Invariant formatting, matching the rest of the payload: "90.0 %" with a
     // space on the invariant culture the container runs, not a dev box's "90.0%".
     [Fact]

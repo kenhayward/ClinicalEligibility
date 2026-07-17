@@ -1527,6 +1527,56 @@ Public Class PostgresGatewayIntegrationTests
         End Using
     End Function
 
+    ' ============ Runs pagination ============
+
+    <SkippableFact>
+    Public Async Function CountRuns_and_GetRunsPage_paginate_newest_first() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        ' 5 runs, one minute apart, so the newest-first order is unambiguous.
+        Dim baseTime = New DateTimeOffset(2026, 7, 17, 10, 0, 0, TimeSpan.Zero)
+        For i = 0 To 4
+            Await _fixture.Gateway.RecordRunAsync(New RunMetrics(
+                    runId:=Guid.NewGuid(),
+                    startedAt:=baseTime.AddMinutes(i),
+                    endedAt:=baseTime.AddMinutes(i + 1),
+                    triggerSource:="form",
+                    studyCount:=10,
+                    studiesProcessed:=10,
+                    rowsPersisted:=100 + i,
+                    resolutionRate:=0.9,
+                    status:="success",
+                    errorSummary:=""), CancellationToken.None)
+        Next
+
+        Assert.Equal(5L, Await _fixture.Gateway.CountRunsAsync(CancellationToken.None))
+
+        ' Page 1 (limit 2, offset 0): the two newest (rows 104, 103).
+        Dim page1 = Await _fixture.Gateway.GetRunsPageAsync(2, 0, CancellationToken.None)
+        Assert.Equal(2, page1.Count)
+        Assert.Equal(104, page1(0).RowsPersisted)
+        Assert.Equal(103, page1(1).RowsPersisted)
+
+        ' Page 2 (offset 2): the next two (102, 101).
+        Dim page2 = Await _fixture.Gateway.GetRunsPageAsync(2, 2, CancellationToken.None)
+        Assert.Equal(2, page2.Count)
+        Assert.Equal(102, page2(0).RowsPersisted)
+        Assert.Equal(101, page2(1).RowsPersisted)
+
+        ' Page 3 (offset 4): the last one (100).
+        Dim page3 = Await _fixture.Gateway.GetRunsPageAsync(2, 4, CancellationToken.None)
+        Assert.Single(page3)
+        Assert.Equal(100, page3(0).RowsPersisted)
+    End Function
+
+    <SkippableFact>
+    Public Async Function CountRuns_is_zero_on_an_empty_table() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Assert.Equal(0L, Await _fixture.Gateway.CountRunsAsync(CancellationToken.None))
+    End Function
+
     ' ============ RecordRunAsync ============
 
     <SkippableFact>

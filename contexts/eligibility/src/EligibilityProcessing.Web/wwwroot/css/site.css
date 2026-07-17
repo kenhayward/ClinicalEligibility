@@ -23,22 +23,26 @@ html {
    which is why there is no longer an `html { position: relative }` /
    `body { margin-bottom: 60px }` pair here - those existed only to reserve
    space for the absolutely-positioned footer and would now show as a gap. */
+/* Fixed viewport height, not min-height: the shell fills the screen exactly so
+   the rail and footer stay put and only .ep-main scrolls (below). A taller page
+   scrolls its CONTENT, not the whole window - the nav rail must never move. */
 .ep-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .ep-body {
   display: flex;
   align-items: stretch;
-  flex: 1 0 auto;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 0;   /* let .ep-main's overflow engage instead of growing the row */
 }
 
 .ep-main {
   flex: 1 1 auto;
-  min-width: 0;   /* let wide tables scroll inside instead of stretching the row */
+  min-width: 0;    /* let wide tables scroll inside instead of stretching the row */
+  overflow-y: auto;   /* THE scroll region - the rail (a flex sibling) stays fixed */
 }
 
 /* ===== Nav rail =====
@@ -123,31 +127,6 @@ html {
 
 .ep-rail-user .dropdown-toggle > span:not(.rounded-circle) {
   display: none !important;
-}
-
-/* ===== Dropdown submenu (flyout) =====
-   Bootstrap 5 dropped native nested dropdowns. The user menu hosts a Theme
-   flyout. It opens to the RIGHT: the parent menu now hangs off the nav rail on
-   the LEFT edge of the viewport (_UserMenu uses .dropend), so opening leftward
-   would clip off-screen - the mirror of the old top-right navbar case. Two
-   triggers: hover (this CSS) and click (JS in _Layout.cshtml that toggles
-   .show). Hover keeps it usable on desktop even if the inline script fails or
-   the page is partially loaded. */
-.dropdown-submenu {
-  position: relative;
-}
-
-.dropdown-submenu > .dropdown-menu {
-  top: 0;
-  left: 100%;
-  right: auto;
-  margin-top: -0.25rem;
-  margin-left: 0.125rem;
-}
-
-.dropdown-submenu:hover > .dropdown-menu,
-.dropdown-submenu > .dropdown-menu.show {
-  display: block;
 }
 
 /* ===== Dashboard =====
@@ -410,16 +389,23 @@ html {
    keeps a long run from defeating the single-screen layout above. min-height:0
    is load-bearing: a flex child's default min-height:auto refuses to shrink
    below its content, so the list would push the card past the viewport and the
-   overflow would never engage. */
+   overflow would never engage.
+
+   max-height caps it as a rolling ticker when the layout is NOT height-pinned
+   (a viewport under 880px tall - a common laptop). Without it, the feed grows to
+   fit its (now 16-item) list and the card creeps taller as events stream in. In
+   the pinned layout below the cap is removed so the feed fills the row instead. */
 .ep-activity-log {
   flex: 1 1 auto;
   min-height: 12rem;
+  max-height: 26rem;
   overflow-y: auto;
 }
 
 @media (min-height: 880px) and (min-width: 1400px) {
   .ep-activity-log {
     min-height: 0;
+    max-height: none;
   }
 }
 
