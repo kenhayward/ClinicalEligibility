@@ -330,6 +330,27 @@ Two things make this work, and both are load-bearing:
 is not enabled, because parameters here carry criteria text, raw LLM responses, user
 emails and password hashes. You get command text, not data.
 
+**Making SQL logging usable.** On its own it is unreadable: one entry per command, and
+each entry spans as many lines as its query has newlines (the dashboard query alone is
+~40). Three settings fix that, and they belong together:
+
+| Variable | Effect |
+|-----|-------|
+| `Postgres__SlowCommandLogThresholdMs=50` | Drop every command faster than 50ms. This is what turns a firehose into a list of outliers. |
+| `Logging__Console__FormatterName=simple` | Required for the next one to bind. |
+| `Logging__Console__FormatterOptions__SingleLine=true` | Category and message on one line. Affects all log output, not just SQL. |
+
+Result - one grep-able line per slow query, SQL collapsed and truncated:
+
+```
+info: Npgsql.Command[2001] Command execution completed (duration=90ms): SELECT name FROM ctgov.conditions WHERE nct_id = $1 ORDER BY name
+```
+
+The filtering reads Npgsql's **structured** `DurationMs` field, never the message text
+(`SlowCommandLoggerFactory`), and forwards the original state untouched - a structured
+sink still sees `CommandText` / `DurationMs` / `ConnectorId` as fields; only the console
+rendering changes.
+
 **This is a firehose.** HttpClient logging is per-request and Npgsql per-command; a real
 batch runs 8+ trials in flight and thousands of commands. It is for diagnosis, not for
 leaving on.
@@ -347,6 +368,7 @@ code defaults in `PostgresOptions`; add a `Postgres` section to a host's
 |-----|---------|-------|
 | `MaxStudyCount` | `5000` | Upper bound on a single batch's `StudyCount`. A larger request is clamped (with a warning) inside `SelectNextTrialsAsync`, so a fat-fingered value (e.g. `10000`) can't turn the source anti-join into a multi-minute scan. `0` disables the clamp. |
 | `SourceCommandTimeoutSeconds` | `300` | Command timeout applied to the **source** data source (the trial-selection scan + exclusion-set COPY). Replaces Npgsql's 30s default, which surfaced a slow selection as a fatal `Exception while reading from stream`. `0` means no timeout. |
+| `SlowCommandLogThresholdMs` | `0` | Only log SQL commands taking at least this many ms; `0` logs every command. Only relevant once SQL logging is on. Without it, SQL logging is unusable: one entry per command, thousands per batch. Applies only to commands Npgsql has **timed** - the Debug "Executing command" event has no duration yet and always passes through, because it is the only trace a **hung** query leaves. |
 | `InterruptedStudyThresholdHours` | `6` | Age beyond which an `eligibility_study` row still at `status='running'` is assumed orphaned by a killed host and reconciled to `interrupted` at **web-host startup**. `0` or less disables the sweep. **Do not lower this below ~3h without also lowering `Llm:TimeoutSeconds`/`Llm:RetryCount`:** one trial's worst case is ~2h (3 LLM attempts x 1200s, per-attempt, doubled by reasoning escalation), and the CLI can process trials against the same database concurrently with no cross-process lock - the age gate is the only thing keeping the sweep off live rows. A trial wrongly swept self-corrects when it finishes. |
 
 > Fast selection also relies on a partial index, `ix_eligibilities_selectable_nct_id`,

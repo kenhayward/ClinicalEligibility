@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 21, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 22, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.22",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "SQL logging is now usable instead of a firehose. Set Postgres__SlowCommandLogThresholdMs=50 and only commands taking at least 50ms are logged - everything faster vanishes, so an outlier is visible instead of buried under thousands of fast queries. Surviving commands print on ONE line with their duration and query, rather than spanning as many lines as the query has newlines. Set Logging__Console__FormatterName=simple and Logging__Console__FormatterOptions__SingleLine=true alongside it to get the whole entry on a single line: info: Npgsql.Command[2001] Command execution completed (duration=90ms): SELECT ... The default of 0 logs every command, so logs are unchanged unless you set a threshold. Query text is truncated at 500 characters, and parameter values are still never logged. The Debug-level start-of-command line always shows regardless of the threshold, because a query that hangs never finishes and so never reports a duration - that line is the only trace it leaves."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.21",
       "releaseDate": "2026-07-17",
