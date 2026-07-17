@@ -85,6 +85,47 @@ public class WebTests : IClassFixture<WebTests.Factory>
         Assert.Contains(">Runs<", body);
     }
 
+    // The nav rail is icon-only, so every item's label is a .visually-hidden
+    // span - that span IS the accessible name. Without it the whole navigation
+    // is unusable to a screen reader and unnameable to anything but sight, so
+    // pin all seven rather than trusting an icon to speak for itself.
+    [Theory]
+    [InlineData("Dashboard", "/")]          // default route collapses Home/Index to "/"
+    [InlineData("Runs", "/Home/Runs")]
+    [InlineData("History", "/Home/History")]
+    [InlineData("Analysis", "/Home/Analysis")]
+    [InlineData("Results", "/Home/Results")]
+    [InlineData("Tools", "/Home/Tools")]
+    [InlineData("Authoring", "/Authoring")]
+    public async Task Nav_rail_item_has_an_accessible_label_and_route(string label, string href)
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/");
+        var body = await response.Content.ReadAsStringAsync();
+
+        // Matched loosely: _Layout has a .cshtml.css companion, so CSS isolation
+        // stamps every element in it with a scope attribute, and it lands BEFORE
+        // the class - <span b-0npz3m0mho class="visually-hidden">.
+        Assert.Matches($"<span[^>]*class=\"visually-hidden\"[^>]*>{label}</span>", body);
+        Assert.Contains($"href=\"{href}\"", body);
+    }
+
+    // The theme picker is three-state (Light / Dark / Auto) and lives in the
+    // user menu, which the rail redesign relocated. "auto" is the default and
+    // the only mode that tracks the OS, so losing it is a silent regression a
+    // purely visual review would not catch.
+    [Fact]
+    public async Task Theme_picker_offers_light_dark_and_auto()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("data-bs-theme-value=\"light\"", body);
+        Assert.Contains("data-bs-theme-value=\"dark\"", body);
+        Assert.Contains("data-bs-theme-value=\"auto\"", body);
+    }
+
     [Fact]
     public async Task History_returns_200_with_history_chrome()
     {

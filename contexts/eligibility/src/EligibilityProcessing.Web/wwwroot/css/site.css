@@ -16,32 +16,133 @@ html {
   box-shadow: 0 0 0 0.1rem var(--bs-body-bg), 0 0 0 0.25rem #258cfb;
 }
 
-html {
-  position: relative;
-  min-height: 100%;
+/* ===== App shell (nav rail + content + footer) =====
+   A min-height:100vh flex column. The footer is a sibling of the rail+content
+   row, so it spans the full width (under the rail) and pins to the bottom
+   because .ep-body takes the slack. This replaced a position:absolute footer,
+   which is why there is no longer an `html { position: relative }` /
+   `body { margin-bottom: 60px }` pair here - those existed only to reserve
+   space for the absolutely-positioned footer and would now show as a gap. */
+.ep-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
-body {
-  margin-bottom: 60px;
+.ep-body {
+  display: flex;
+  align-items: stretch;
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+.ep-main {
+  flex: 1 1 auto;
+  min-width: 0;   /* let wide tables scroll inside instead of stretching the row */
+}
+
+/* ===== Nav rail =====
+   66px icon-only nav, replacing the former top navbar on every page. */
+.ep-rail {
+  width: 66px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 0;
+  background-color: var(--bs-tertiary-bg);
+  border-right: 1px solid var(--bs-border-color);
+}
+
+.ep-rail-logo {
+  display: block;
+  margin-bottom: 14px;
+  line-height: 0;
+}
+
+.ep-rail-nav,
+.ep-rail-user {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-left: 0;
+  margin-bottom: 0;
+  list-style: none;
+}
+
+.ep-rail-spacer {
+  flex: 1 1 auto;
+}
+
+/* Specificity note: _Layout.cshtml.css (CSS isolation, loaded AFTER this file)
+   carries a blanket `a { color: #0077cc }` which, scoped as `a[b-xxxxxxx]`,
+   outranks a single class selector. `.ep-rail .ep-nav-link` (two classes) beats
+   it, which is why these are written as descendants rather than bare classes.
+   Drop the nesting and the rail icons silently turn link-blue. */
+.ep-rail .ep-nav-link {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  color: var(--bs-secondary-color);
+  text-decoration: none;
+  transition: background-color .15s, color .15s;
+}
+
+.ep-rail .ep-nav-link:hover,
+.ep-rail .ep-nav-link:focus-visible {
+  background-color: var(--bs-secondary-bg);
+  color: var(--bs-body-color);
+}
+
+/* Active tab: filled primary tile. Replaces the old bold + bottom-border
+   treatment, which is meaningless on an icon-only rail. */
+.ep-rail .ep-nav-link.ep-active {
+  background-color: var(--bs-primary);
+  color: #fff;
+}
+
+.ep-ico {
+  width: 20px;
+  height: 20px;
+}
+
+/* The user chip is a full-width navbar control by default; in the rail it must
+   collapse to just the avatar. The name/role block inside it is already
+   d-none/d-sm-flex, so hide it outright here. */
+.ep-rail-user .dropdown-toggle {
+  padding: 0;
+  gap: 0 !important;
+}
+
+.ep-rail-user .dropdown-toggle::after {
+  display: none;   /* no caret - the rail is too narrow to carry one */
+}
+
+.ep-rail-user .dropdown-toggle > span:not(.rounded-circle) {
+  display: none !important;
 }
 
 /* ===== Dropdown submenu (flyout) =====
    Bootstrap 5 dropped native nested dropdowns. The user menu hosts a Theme
-   flyout that opens to the LEFT — the parent uses .dropdown-menu-end so it
-   sits against the right edge of the viewport, where opening rightward would
-   clip off-screen. Two triggers: hover (this CSS) and click (JS in
-   _Layout.cshtml that toggles .show). Hover keeps it usable on desktop even
-   if the inline script fails or the page is partially loaded. */
+   flyout. It opens to the RIGHT: the parent menu now hangs off the nav rail on
+   the LEFT edge of the viewport (_UserMenu uses .dropend), so opening leftward
+   would clip off-screen - the mirror of the old top-right navbar case. Two
+   triggers: hover (this CSS) and click (JS in _Layout.cshtml that toggles
+   .show). Hover keeps it usable on desktop even if the inline script fails or
+   the page is partially loaded. */
 .dropdown-submenu {
   position: relative;
 }
 
 .dropdown-submenu > .dropdown-menu {
   top: 0;
-  right: 100%;
-  left: auto;
+  left: 100%;
+  right: auto;
   margin-top: -0.25rem;
-  margin-right: 0.125rem;
+  margin-left: 0.125rem;
 }
 
 .dropdown-submenu:hover > .dropdown-menu,
@@ -52,13 +153,22 @@ body {
 /* ===== Authoring dashboard tab (master-detail) =====
    Authoring is a dashboard tab (Views/Authoring/*, hosted in _Layout under
    container-fluid). A collapsible study-list sidebar sits left of the editor
-   pane; collapsing it lets the editor use the full page width. The shell fits
-   between the sticky navbar and the absolute footer, and the two panes scroll
-   independently. */
+   pane; collapsing it lets the editor use the full page width. The two panes
+   scroll independently.
+
+   The height budget is viewport minus the footer (60px) minus the main padding
+   (2rem, from .py-3 top and bottom). It no longer subtracts a navbar: the top
+   navbar became a left rail, which costs width, not height. Leaving the old
+   3.5rem term in would short the shell by a navbar it no longer sits under.
+
+   Note this puts a second sidebar (the study list) alongside the rail. That is
+   deliberate - they are different axes of navigation (app section vs. study) -
+   but it is the tightest horizontal budget in the app; check it here first if
+   the rail width ever changes. */
 .authoring-shell {
   display: flex;
   align-items: stretch;
-  height: calc(100vh - 3.5rem - 60px - 1rem);
+  height: calc(100vh - 60px - 2rem);
   min-height: 26rem;
   overflow: hidden;
 }

@@ -1,8 +1,12 @@
 @*
-    Top-right user chip: avatar (Google picture) or initial + user id + role, with
-    a dropdown. "Manage Accounts" shows only for admins (Owner/Administrator).
-    Renders nothing for an unauthenticated request. Designed to sit inside a
-    <ul class="navbar-nav"> (it is an <li>).
+    User chip at the foot of the nav rail: avatar (Google picture) or initial +
+    user id + role, with a dropdown. "Manage Accounts" shows only for admins
+    (Owner/Administrator). Renders nothing for an unauthenticated request.
+    Designed to sit inside a <ul class="navbar-nav"> (it is an <li>).
+
+    `dropend` opens the menu to the RIGHT of the rail. Without it Bootstrap
+    places the menu below the toggle, which - for a chip pinned to the bottom of
+    a full-height rail - renders off the bottom of the viewport.
 *@
 @{
     var isAuthenticated = User?.Identity?.IsAuthenticated == true;
@@ -16,7 +20,7 @@
     var isOwner = User?.IsInRole(Roles.Owner) ?? false;
     var initial = string.IsNullOrEmpty(userName) ? "?" : userName.Substring(0, 1).ToUpperInvariant();
 
-    <li class="nav-item dropdown">
+    <li class="nav-item dropdown dropend">
         @* data-bs-auto-close="outside" keeps the parent dropdown open when the
            user clicks the Theme submenu toggle or a theme option inside it.
            Without this, Bootstrap closes the parent on any inner click and the
@@ -52,8 +56,9 @@
                 <li><hr class="dropdown-divider" /></li>
             }
             @* Theme flyout. Bootstrap 5 dropped native nested dropdowns, so this
-               is a hand-rolled .dropdown-submenu — site.css positions the nested
-               menu to the left of the parent (the parent uses dropdown-menu-end).
+               is a hand-rolled .dropdown-submenu - site.css positions the nested
+               menu to the RIGHT of the parent, because the parent itself now
+               hangs off the nav rail on the left edge of the viewport.
                #bd-theme-label is kept from the original navbar dropdown so the
                existing wiring in _Layout.cshtml continues to update it. *@
             <li class="dropdown-submenu">
