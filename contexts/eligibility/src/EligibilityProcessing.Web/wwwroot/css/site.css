@@ -410,16 +410,23 @@ html {
    keeps a long run from defeating the single-screen layout above. min-height:0
    is load-bearing: a flex child's default min-height:auto refuses to shrink
    below its content, so the list would push the card past the viewport and the
-   overflow would never engage. */
+   overflow would never engage.
+
+   max-height caps it as a rolling ticker when the layout is NOT height-pinned
+   (a viewport under 880px tall - a common laptop). Without it, the feed grows to
+   fit its (now 16-item) list and the card creeps taller as events stream in. In
+   the pinned layout below the cap is removed so the feed fills the row instead. */
 .ep-activity-log {
   flex: 1 1 auto;
   min-height: 12rem;
+  max-height: 26rem;
   overflow-y: auto;
 }
 
 @media (min-height: 880px) and (min-width: 1400px) {
   .ep-activity-log {
     min-height: 0;
+    max-height: none;
   }
 }
 

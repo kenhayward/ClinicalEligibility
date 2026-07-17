@@ -188,12 +188,13 @@
                from the run card's per-run "Rows persisted". *@
             <div class="epk">Eligibility rows persisted</div>
             <div class="fw-bold ep-num" style="font-size:1.45rem;" data-metric="eligibilityRowCountText">-</div>
-            @* Per-run rows, NOT the cumulative figure above - the caption says so,
-               because the same word ("rows") on the same card would otherwise
-               read as a sparkline of the big number, which never goes down.
-               Hidden until hydrate has two runs to draw. *@
+            @* Rows per 100 trials, NOT the cumulative figure above and NOT raw
+               per-run totals - runs have different study counts, so raw totals
+               make a small run look worse than a big one. Normalizing to 100
+               trials makes the yield comparable across runs. Hidden until hydrate
+               has two runs to draw. *@
             <div class="mt-2" data-spark-block="rows" hidden>
-                <div class="epk mb-1">rows per run - last 7</div>
+                <div class="epk mb-1">rows per 100 trials - last 7 runs</div>
                 <div class="text-primary">
                     <svg class="ep-spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
                         <polyline data-spark="rows" points=""></polyline>
@@ -213,7 +214,10 @@
        feed narrows THIS card rather than the simple number tiles. *@
     <div class="card epcard position-relative" style="flex: 1 1 0; min-width: 0;">
         <div class="card-body py-3 px-3">
-            <div class="epk mb-2">Tokens used</div>
+            <div class="epk">Tokens used</div>
+            @* The costs below are notional: inference runs on self-hosted GPUs, so
+               the real spend is electricity, not per-token API billing. *@
+            <div class="fst-italic mb-2" style="font-size:.68rem;color:var(--bs-secondary-color);">At equivalent foundation model prices.</div>
             <div class="d-flex align-items-center gap-3">
                 <div class="ep-ring" data-pie style="width:76px;height:76px;--ep-gradient:conic-gradient(var(--bs-secondary-bg) 0 100%);">
                     <div class="ep-ring-hole" style="width:0;height:0;"></div>

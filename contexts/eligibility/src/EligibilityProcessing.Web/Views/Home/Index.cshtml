@@ -224,7 +224,11 @@
                 // drawing while keeping the raw order for the delta.
                 const runs = (p.runs ?? []).slice();
                 drawSpark("resolution", runs.map((r) => r.resolutionRate).reverse());
-                drawSpark("rows", runs.map((r) => r.rowsPersisted).reverse());
+                // Rows per 100 trials, not the raw per-run total: runs have
+                // different study counts, so normalizing makes the yield
+                // comparable. Guard the divide for a run with nothing processed.
+                drawSpark("rows", runs.map((r) =>
+                    r.studiesProcessed > 0 ? r.rowsPersisted / r.studiesProcessed * 100 : 0).reverse());
                 drawDelta("resolution",
                     runs.length >= 2 ? (runs[0].resolutionRate - runs[1].resolutionRate) : null);
 
@@ -275,7 +279,10 @@
                 show("[data-run-processed-stat]", !rc.showRing);
                 set("[data-run-processed-2]", rc.studiesProcessedText);
 
-                set("[data-run-started]", rc.startedText);
+                // Started is a .local-datetime span - set the UTC and localize,
+                // rather than writing the raw text.
+                const started = card.querySelector("[data-run-started]");
+                if (started) { started.setAttribute("data-utc", rc.startedUtc); localizeDatetime(started); }
                 set("[data-run-trigger]", rc.triggerSource);
                 set("[data-run-rows]", rc.rowsPersistedText);
                 set("[data-run-resolution]", rc.resolutionRateText);
@@ -356,7 +363,9 @@
                 body.textContent = text;
                 li.append(time, tag, body);
                 log.prepend(li);
-                while (log.children.length > 50) { log.removeChild(log.lastChild); }
+                // Rolling ticker: keep only the newest 16 so the panel holds a
+                // steady height during a long run instead of growing without bound.
+                while (log.children.length > 16) { log.removeChild(log.lastChild); }
             }
 
             // Enable/disable all the run-start buttons together. Only one run can
@@ -441,23 +450,19 @@
             // First paint has no figures in it - go and get them.
             loadMetrics(false);
 
-            // Render a .local-datetime span in the viewer's local time; show the
-            // date too when it is not today. Reused by the run-card refresh, which
-            // rewrites the Est. finish and needs to re-localize it.
+            // Render a .local-datetime span in the viewer's local time, as
+            // dd-MMM-yyyy HH:mm - one format for Started and Est. finish so they
+            // read the same. Reused by the run-card refresh to re-localize both.
+            const EP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
             function localizeDatetime(el) {
                 const iso = el.getAttribute("data-utc");
                 if (!iso) { return; }
                 const d = new Date(iso);
                 if (isNaN(d.getTime())) { return; }
-                const now = new Date();
                 const p = (n) => String(n).padStart(2, "0");
-                const time = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-                const sameDay = d.getFullYear() === now.getFullYear()
-                    && d.getMonth() === now.getMonth()
-                    && d.getDate() === now.getDate();
-                el.textContent = sameDay
-                    ? time
-                    : d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + time;
+                el.textContent = p(d.getDate()) + "-" + EP_MONTHS[d.getMonth()] + "-" + d.getFullYear()
+                    + " " + p(d.getHours()) + ":" + p(d.getMinutes());
             }
             document.querySelectorAll(".local-datetime").forEach(localizeDatetime);
 
