@@ -221,6 +221,21 @@
                         : "conic-gradient(var(--bs-secondary-bg) 0 100%)");
                 }
 
+                // Tokens per study: raw tokens on each line over studies
+                // successful, nearest whole token. Guard the divide before the
+                // first success.
+                const tk = p.tokens ?? {};
+                const perStudy = (raw) => p.studiesSuccessful > 0
+                    ? Math.round(raw / p.studiesSuccessful).toLocaleString()
+                    : "-";
+                const setPs = (key, raw) => {
+                    const el = document.querySelector(`[data-token-perstudy="${key}"]`);
+                    if (el) { el.textContent = perStudy(raw); }
+                };
+                setPs("prompt", tk.prompt ?? 0);
+                setPs("completion", tk.completion ?? 0);
+                setPs("total", tk.total ?? 0);
+
                 // Backlog. null means UNKNOWN (no reachable AACT - the seeded
                 // quickstart has no ctgov schema), not zero, so show the caption
                 // instead of a bar sitting at a confident 100%.

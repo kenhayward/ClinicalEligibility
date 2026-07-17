@@ -110,22 +110,21 @@
                                    title="@b.Status - view these studies in History" data-failure-count>-</a>
                             </div>
                         }
-                        <hr class="my-1" />
-                        @* Not a failure - a valid outcome, but a RISING count can
-                           signal a prompt/model regression worth noticing. *@
+                    </div>
+
+                    @* Right column: informational counts, not failures. Parse
+                       empty is a valid outcome (a rising count can still signal a
+                       prompt/model regression); the other three are maintenance
+                       backlogs, the same values the Tools tab shows (fetched from
+                       /Home/ToolCounts) and cleared by the jobs there. *@
+                    <div style="flex:1;min-width:0;">
                         <div class="d-flex align-items-center gap-2"
                              title="Latest attempt returned valid JSON but zero criteria. A valid 'no eligibility criteria' outcome, not a failure.">
-                            <span class="text-body-secondary">Parse empty</span>
+                            <span class="text-body-secondary text-truncate">Parse empty</span>
                             <a asp-action="History" asp-route-status="@StudyExecution.StatusParseEmpty"
                                class="ms-auto fw-semibold ep-num text-body-secondary text-decoration-none"
                                title="View these studies in History" data-metric="parseEmptyText">-</a>
                         </div>
-                    </div>
-
-                    @* Maintenance backlogs. Same values as the Tools tab (fetched
-                       from /Home/ToolCounts); cleared by the jobs there, so these
-                       are counts, not links. *@
-                    <div style="flex:1;min-width:0;">
                         <div class="d-flex align-items-center gap-2"
                              title="Distinct extracted concepts still unresolved to a UMLS CUI. Cleared by the normalize-umls job on the Tools tab.">
                             <span class="text-body-secondary text-truncate">Unresolved concepts</span>
@@ -246,26 +245,30 @@
                 <div class="ep-ring" data-pie style="width:76px;height:76px;--ep-gradient:conic-gradient(var(--bs-secondary-bg) 0 100%);">
                     <div class="ep-ring-hole" style="width:0;height:0;"></div>
                 </div>
-                <div class="flex-grow-1" style="font-size:.78rem;min-width:0;">
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="ep-dot" style="background:var(--bs-primary);"></span>
-                        <span class="text-body-secondary">Input</span>
-                        <span class="ms-auto fw-semibold ep-num" data-metric="tokens.promptText">-</span>
-                        <span class="text-body-secondary ep-num" style="width:6rem;text-align:right;" data-metric="tokens.promptCostText">-</span>
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="ep-dot" style="background:var(--bs-warning);"></span>
-                        <span class="text-body-secondary">Output</span>
-                        <span class="ms-auto fw-semibold ep-num" data-metric="tokens.completionText">-</span>
-                        <span class="text-body-secondary ep-num" style="width:6rem;text-align:right;" data-metric="tokens.completionCostText">-</span>
-                    </div>
-                    <hr class="my-1" />
-                    <div class="d-flex align-items-center gap-2 fw-bold"
-                         title="Priced at commercial list rates ($5 / $25 per 1M input / output tokens). Inference runs on self-hosted GPUs, so this is what the corpus would have cost to buy, not money spent.">
-                        <span>Total</span>
-                        <span class="ms-auto ep-num" data-metric="tokens.totalText">-</span>
-                        <span class="ep-num" style="width:6rem;text-align:right;" data-metric="tokens.totalCostText">-</span>
-                    </div>
+                @* Grid so the three number columns line up under their headings.
+                   Per Study is tokens on that line over studies successful,
+                   computed on hydrate. The Total row's top border spans the grid
+                   via a border-top on each of its cells. *@
+                <div class="flex-grow-1 ep-tokens-grid" style="font-size:.78rem;min-width:0;">
+                    <span></span>
+                    <span class="epk text-end">Total</span>
+                    <span class="epk text-end">Per Study</span>
+                    <span class="epk text-end" title="Priced at commercial list rates ($5 / $25 per 1M input / output tokens). Inference runs on self-hosted GPUs, so this is what the corpus would have cost to buy, not money spent.">Cost</span>
+
+                    <span class="d-flex align-items-center gap-2"><span class="ep-dot" style="background:var(--bs-primary);"></span><span class="text-body-secondary">Input</span></span>
+                    <span class="fw-semibold ep-num text-end" data-metric="tokens.promptText">-</span>
+                    <span class="ep-num text-end text-body-secondary" data-token-perstudy="prompt">-</span>
+                    <span class="ep-num text-end text-body-secondary" data-metric="tokens.promptCostText">-</span>
+
+                    <span class="d-flex align-items-center gap-2"><span class="ep-dot" style="background:var(--bs-warning);"></span><span class="text-body-secondary">Output</span></span>
+                    <span class="fw-semibold ep-num text-end" data-metric="tokens.completionText">-</span>
+                    <span class="ep-num text-end text-body-secondary" data-token-perstudy="completion">-</span>
+                    <span class="ep-num text-end text-body-secondary" data-metric="tokens.completionCostText">-</span>
+
+                    <span class="fw-bold ep-tokens-total">Total</span>
+                    <span class="fw-bold ep-num text-end ep-tokens-total" data-metric="tokens.totalText">-</span>
+                    <span class="fw-bold ep-num text-end ep-tokens-total" data-token-perstudy="total">-</span>
+                    <span class="fw-bold ep-num text-end ep-tokens-total" data-metric="tokens.totalCostText">-</span>
                 </div>
             </div>
         </div>
