@@ -183,6 +183,18 @@
                from the run card's per-run "Rows persisted". *@
             <div class="epk">Eligibility rows persisted</div>
             <div class="fw-bold ep-num" style="font-size:1.45rem;" data-metric="eligibilityRowCountText">-</div>
+            @* Per-run rows, NOT the cumulative figure above - the caption says so,
+               because the same word ("rows") on the same card would otherwise
+               read as a sparkline of the big number, which never goes down.
+               Hidden until hydrate has two runs to draw. *@
+            <div class="mt-2" data-spark-block="rows" hidden>
+                <div class="epk mb-1">rows per run - last 7</div>
+                <div class="text-primary">
+                    <svg class="ep-spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline data-spark="rows" points=""></polyline>
+                    </svg>
+                </div>
+            </div>
         </div>
         <div class="ep-skel">
             <div class="card-body py-3 px-3">

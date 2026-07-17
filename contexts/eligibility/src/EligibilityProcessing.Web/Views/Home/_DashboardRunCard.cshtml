@@ -135,6 +135,25 @@
                     </div>
                 </div>
             </div>
+
+            @* Resolution-rate trend across recent runs. Server-rendered hidden -
+               the series arrives with the client /Home/Metrics fetch (the run
+               card itself only has the ONE run), and it needs at least two runs
+               to be a line, so hydrate() reveals it or leaves it hidden.
+
+               This is a PER-RUN series, unlike the corpus-wide gauge below, which
+               is why a "vs last run" delta is legitimate here and not there. *@
+            <div class="mt-3 pt-2 border-top" data-spark-block="resolution" hidden>
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="epk">Resolution rate - last 7 runs</span>
+                    <span class="ms-auto fw-semibold ep-num" style="font-size:.78rem;" data-spark-delta="resolution"></span>
+                </div>
+                <div class="text-success">
+                    <svg class="ep-spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline data-spark="resolution" points=""></polyline>
+                    </svg>
+                </div>
+            </div>
         }
     </div>
 </div>

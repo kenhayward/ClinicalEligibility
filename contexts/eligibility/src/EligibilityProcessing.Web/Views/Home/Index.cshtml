@@ -218,6 +218,58 @@
                         unknown.hidden = true;
                     }
                 }
+
+                // Sparklines. The series is newest-first (the payload's run
+                // order); charts read left-to-right in time, so reverse for
+                // drawing while keeping the raw order for the delta.
+                const runs = (p.runs ?? []).slice();
+                drawSpark("resolution", runs.map((r) => r.resolutionRate).reverse());
+                drawSpark("rows", runs.map((r) => r.rowsPersisted).reverse());
+                drawDelta("resolution",
+                    runs.length >= 2 ? (runs[0].resolutionRate - runs[1].resolutionRate) : null);
+            }
+
+            // Sets a polyline's points from a value series, and reveals its block.
+            // Needs two points to be a line - a single run is not a trend, so its
+            // block stays hidden rather than showing a lone dot.
+            function drawSpark(name, values) {
+                const poly = document.querySelector(`[data-spark="${name}"]`);
+                const block = document.querySelector(`[data-spark-block="${name}"]`);
+                if (!poly || !block) { return; }
+                if (values.length < 2) { block.hidden = true; return; }
+
+                const svg = poly.ownerSVGElement;
+                const vb = svg.viewBox.baseVal;
+                const pad = 2;
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const span = max - min;
+                const w = vb.width - pad * 2;
+                const h = vb.height - pad * 2;
+
+                const points = values.map((v, i) => {
+                    const x = pad + (values.length === 1 ? 0 : (i / (values.length - 1)) * w);
+                    // A flat series (span 0) sits on the mid-line rather than
+                    // dividing by zero and collapsing to the top edge.
+                    const y = pad + (span === 0 ? h / 2 : (1 - (v - min) / span) * h);
+                    return `${x.toFixed(2)},${y.toFixed(2)}`;
+                });
+                poly.setAttribute("points", points.join(" "));
+                block.hidden = false;
+            }
+
+            // A pp delta for the resolution sparkline: newest run minus the one
+            // before, in percentage points, coloured by direction. Hidden when
+            // there is nothing to compare against.
+            function drawDelta(name, deltaFraction) {
+                const el = document.querySelector(`[data-spark-delta="${name}"]`);
+                if (!el) { return; }
+                if (deltaFraction === null) { el.textContent = ""; return; }
+                const pp = deltaFraction * 100;
+                const sign = pp > 0 ? "+" : "";
+                el.textContent = `${sign}${pp.toFixed(1)}pp`;
+                el.classList.toggle("text-success", pp >= 0);
+                el.classList.toggle("text-danger", pp < 0);
             }
 
             function appendEvent(label, badge, text) {

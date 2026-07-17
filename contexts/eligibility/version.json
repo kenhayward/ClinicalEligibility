@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 26, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 27, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.27",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "The dashboard now shows two small trend lines from the last seven runs: resolution rate on the most-recent-run card, with a plus/minus change against the run before it, and rows-per-run on the rows tile. These are per-run figures, labelled as such, and sit alongside the corpus-wide totals rather than replacing them. They appear once there are at least two runs to compare - a single run is not a trend - and need no charting library."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.26",
       "releaseDate": "2026-07-17",
