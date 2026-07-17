@@ -31,6 +31,70 @@ Public Class CorpusReadCacheTests
         Assert.Same(first, second)
     End Function
 
+    ' ===== invalidation =====
+    ' Backs the dashboard's Reload button and its refresh-on-run-completed. Both
+    ' would otherwise be no-ops inside the TTL: the UI shows a loading state,
+    ' re-reads the identical cached numbers, and appears broken.
+
+    <Fact>
+    Public Async Function InvalidateDashboardMetrics_ForcesTheNextReadToHitTheGateway() As Task
+        Dim gateway As New FakeGateway()
+        Dim cache = NewCache(gateway)
+
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        Assert.Equal(1, gateway.GetDashboardMetricsCalls)
+
+        cache.InvalidateDashboardMetrics()
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.Equal(2, gateway.GetDashboardMetricsCalls)
+    End Function
+
+    ' Invalidate-then-read repopulates for everyone, so the TTL keeps throttling
+    ' a user leaning on Reload rather than every press reaching Postgres.
+    <Fact>
+    Public Async Function InvalidateDashboardMetrics_RepopulatesSoLaterReadsAreCachedAgain() As Task
+        Dim gateway As New FakeGateway()
+        Dim cache = NewCache(gateway)
+
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        cache.InvalidateDashboardMetrics()
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.Equal(2, gateway.GetDashboardMetricsCalls)
+    End Function
+
+    ' The filter-options entry is keyed separately and is not the dashboard's to
+    ' drop - Results would pay ~1150ms to rebuild it for no reason.
+    <Fact>
+    Public Async Function InvalidateDashboardMetrics_LeavesFilterOptionsCached() As Task
+        Dim gateway As New FakeGateway()
+        Dim cache = NewCache(gateway)
+
+        Await cache.GetEligibilityFilterOptionsAsync(50, CancellationToken.None)
+        cache.InvalidateDashboardMetrics()
+        Await cache.GetEligibilityFilterOptionsAsync(50, CancellationToken.None)
+
+        Assert.Equal(1, gateway.GetFilterOptionsCalls)
+    End Function
+
+    ' With caching off every read already hits the gateway, so invalidating is
+    ' meaningless - but it must not throw, because the caller cannot see the TTL.
+    <Fact>
+    Public Async Function InvalidateDashboardMetrics_WhenCachingDisabled_IsAHarmlessNoOp() As Task
+        Dim gateway As New FakeGateway()
+        Dim cache = NewCache(gateway, TimeSpan.Zero)
+
+        cache.InvalidateDashboardMetrics()
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        cache.InvalidateDashboardMetrics()
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+
+        Assert.Equal(2, gateway.GetDashboardMetricsCalls)
+    End Function
+
     <Fact>
     Public Async Function FilterOptions_SecondCallWithinTtl_DoesNotHitGateway() As Task
         Dim gateway As New FakeGateway()

@@ -25,6 +25,18 @@ Public Interface ICorpusReadCache
     Function GetDashboardMetricsAsync(
             cancellationToken As CancellationToken) As Task(Of DashboardMetrics)
 
+    ' Drops the cached dashboard aggregate so the next read goes to Postgres.
+    '
+    ' Needed because the TTL and a user's expectations disagree. The dashboard
+    ' has an explicit Reload control and re-reads itself when a run finishes;
+    ' inside the TTL both would hand back the identical cached numbers, so the
+    ' UI would show a loading state, resolve, and change nothing. That reads as
+    ' broken rather than as cached.
+    '
+    ' Invalidate-then-read, not read-around: the caller repopulates the entry for
+    ' everyone else, and the TTL still throttles anyone leaning on the button.
+    Sub InvalidateDashboardMetrics()
+
     ' Per-column distinct-value lists for the Results filter dropdowns. Cached
     ' per maxDropdownSize, since that argument changes the result.
     Function GetEligibilityFilterOptionsAsync(

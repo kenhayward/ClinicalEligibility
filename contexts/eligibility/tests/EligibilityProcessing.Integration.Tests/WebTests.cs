@@ -179,6 +179,37 @@ public class WebTests : IClassFixture<WebTests.Factory>
     }
 
 
+    // ===== GET /Home/Metrics =====
+    // The dashboard fetches its corpus figures from here so it can show a real
+    // skeleton, refresh on run completion, and give Reload something to do.
+
+    // Read-tolerant like ToolCounts: a 500 here would leave the dashboard
+    // permanently skeletal on a backend hiccup, when it should render the
+    // message inline and stay usable (spec section 6.4). The placeholder
+    // connection string in this harness means the gateway always throws, which
+    // is exactly the path under test.
+    [Fact]
+    public async Task Metrics_returns_200_with_an_inline_error_when_gateway_unavailable()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Home/Metrics");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("application/json", response.Content.Headers.ContentType!.ToString());
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("error", body);
+    }
+
+    [Fact]
+    public async Task Metrics_accepts_the_fresh_cache_bypass_flag()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Home/Metrics?fresh=true");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     public async Task Analysis_returns_200_with_form_chrome()
     {

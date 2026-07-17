@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 23, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 24, "releaseDate": "2026-07-17" },
   "releases": [
+    {
+      "version": "0.1.24",
+      "releaseDate": "2026-07-17",
+      "enhancements": [
+        "Groundwork for the dashboard redesign: the dashboard's corpus figures are now also available as data at /Home/Metrics, which is what will let the page show its numbers as they arrive, refresh itself when a run finishes, and give the Reload button something to do other than reload the whole page. Nothing on screen changes yet. The figures are the same ones the dashboard already shows and need the same sign-in to see."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.23",
       "releaseDate": "2026-07-17",
