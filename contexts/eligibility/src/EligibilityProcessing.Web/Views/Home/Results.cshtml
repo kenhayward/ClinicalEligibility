@@ -10,6 +10,9 @@
         $"<input id=\"{id}\" name=\"{name}\" value=\"{Html.Encode(value ?? "")}\" type=\"text\" class=\"form-control form-control-sm\" placeholder=\"{Html.Encode(placeholder ?? "")}\" />";
 }
 
+<h1 class="h3 mb-1">Results</h1>
+<p class="text-muted mb-3">Browse and filter the extracted eligibility rows - the structured, UMLS-coded output of the pipeline.</p>
+
 @if (Model.HasError)
 {
     <div class="alert alert-warning" role="alert">

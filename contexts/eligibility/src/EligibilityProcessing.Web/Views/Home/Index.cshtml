@@ -227,6 +227,75 @@
                 drawSpark("rows", runs.map((r) => r.rowsPersisted).reverse());
                 drawDelta("resolution",
                     runs.length >= 2 ? (runs[0].resolutionRate - runs[1].resolutionRate) : null);
+
+                // The most-recent-run card. Server-rendered for first paint, but
+                // it must move on Reload and on run completion - it is the card
+                // whose numbers change most - so refresh it from the same payload.
+                updateRunCard(p.mostRecentRun ?? null);
+            }
+
+            // Applies a RunCardView to the run card in place. Elements that come
+            // and go with the run's shape are toggled rather than rebuilt (the
+            // markup is always present - see _DashboardRunCard).
+            function updateRunCard(rc) {
+                const card = document.querySelector("[data-run-card]");
+                if (!card) { return; }
+
+                const set = (sel, text) => {
+                    const el = card.querySelector(sel);
+                    if (el) { el.textContent = text; }
+                };
+                const show = (sel, visible) => {
+                    const el = card.querySelector(sel);
+                    if (el) { el.hidden = !visible; }
+                };
+
+                // No runs yet: show the placeholder, hide the populated card.
+                show("[data-run-empty]", !rc);
+                show("[data-run-populated]", !!rc);
+                if (!rc) { return; }
+
+                set("[data-run-status]", rc.status);
+                const badge = card.querySelector("[data-run-badge]");
+                if (badge) { badge.className = "badge d-inline-flex align-items-center gap-1 rounded-pill " + rc.statusBadgeClass; }
+                show("[data-run-pulse]", rc.isRunning);
+
+                set("[data-run-id]", rc.runId);
+                const link = card.querySelector("[data-run-link]");
+                if (link) { link.href = `/Home/History?runId=${encodeURIComponent(rc.runId)}&hideSuperseded=false`; }
+
+                // Ring vs. the fallback "Studies processed" stat - exactly one shows.
+                const ring = card.querySelector("[data-run-ring]");
+                if (ring) {
+                    ring.hidden = !rc.showRing;
+                    ring.style.setProperty("--ep-sweep", Math.round(rc.progressFraction * 100) + "%");
+                }
+                set("[data-run-pct]", rc.progressPctText);
+                set("[data-run-processed]", rc.studiesProcessedText);
+                show("[data-run-processed-stat]", !rc.showRing);
+                set("[data-run-processed-2]", rc.studiesProcessedText);
+
+                set("[data-run-started]", rc.startedText);
+                set("[data-run-trigger]", rc.triggerSource);
+                set("[data-run-rows]", rc.rowsPersistedText);
+                set("[data-run-resolution]", rc.resolutionRateText);
+                set("[data-run-timeperstudy]", rc.timePerStudyText);
+
+                // Est. finish: null when nothing processed. Swap the localized span
+                // for a dash, and re-localize when present (it is a fresh UTC value).
+                const est = card.querySelector("[data-run-estfinish]");
+                const estDash = card.querySelector("[data-run-estfinish-dash]");
+                if (est && estDash) {
+                    if (rc.estimatedFinishUtc) {
+                        est.setAttribute("data-utc", rc.estimatedFinishUtc);
+                        est.hidden = false;
+                        estDash.hidden = true;
+                        localizeDatetime(est);
+                    } else {
+                        est.hidden = true;
+                        estDash.hidden = false;
+                    }
+                }
             }
 
             // Sets a polyline's points from a value series, and reveals its block.
@@ -372,9 +441,10 @@
             // First paint has no figures in it - go and get them.
             loadMetrics(false);
 
-            // Render "Est. finish" in the viewer's local time; show the
-            // date too when the finish is not today.
-            document.querySelectorAll(".local-datetime").forEach(function (el) {
+            // Render a .local-datetime span in the viewer's local time; show the
+            // date too when it is not today. Reused by the run-card refresh, which
+            // rewrites the Est. finish and needs to re-localize it.
+            function localizeDatetime(el) {
                 const iso = el.getAttribute("data-utc");
                 if (!iso) { return; }
                 const d = new Date(iso);
@@ -388,7 +458,8 @@
                 el.textContent = sameDay
                     ? time
                     : d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + time;
-            });
+            }
+            document.querySelectorAll(".local-datetime").forEach(localizeDatetime);
 
             async function postForm(form) {
                 const response = await fetch(form.action, {
