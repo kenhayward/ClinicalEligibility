@@ -115,6 +115,9 @@ public class AuthTests
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain("Trigger Earliest", body);
         Assert.DoesNotContain("Manage Accounts", body);
+        // ...but the toolbar is not left empty. A header row with nothing in it
+        // reads as broken; "Read-only" says the controls are absent by design.
+        Assert.Contains("Read-only", body);
     }
 
     [Fact]

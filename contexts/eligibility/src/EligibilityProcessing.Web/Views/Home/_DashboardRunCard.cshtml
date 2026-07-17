@@ -1,0 +1,140 @@
+@model EligibilityProcessing.Core.RunMetrics
+@*
+    "Most recent run": progress ring + the run's stat grid.
+
+    Server-rendered from the model rather than fetched: the underlying read is
+    cheap and uncached, and it is what makes a just-finished run appear
+    immediately. It is also the read that keeps the dashboard's "Backend
+    unavailable" path alive - see Index.
+*@
+@{
+    // Duration as mm:ss - TotalMinutes so a >1h pace still reads correctly.
+    string FormatMmSs(TimeSpan ts) =>
+        $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}";
+}
+
+<div class="card epcard">
+    <div class="card-body py-3 px-3">
+        @if (Model is null)
+        {
+            <div class="epk mb-1">Most recent run</div>
+            <p class="text-muted mb-0">No runs have been recorded yet.</p>
+        }
+        else
+        {
+            var run = Model;
+            var elapsed = (run.EndedAt ?? DateTimeOffset.UtcNow) - run.StartedAt;
+            var timePerStudy = run.StudiesProcessed > 0
+                ? FormatMmSs(elapsed / run.StudiesProcessed)
+                : "-";
+            DateTimeOffset? estimatedFinish =
+                run.EndedAt
+                ?? (run.StudiesProcessed > 0
+                    ? run.StartedAt + (elapsed / run.StudiesProcessed) * run.StudyCount
+                    : (DateTimeOffset?)null);
+            var statusBadge = run.Status switch
+            {
+                "success" => "bg-success",
+                "failed" => "bg-danger",
+                "running" => "bg-info text-dark",
+                _ => "bg-secondary"
+            };
+
+            // Progress percent. StudyCount is the denominator, so guard it: a run
+            // recorded with 0 planned studies would divide by zero, and the clamp
+            // stops a >100% ring if processed ever overshoots the plan.
+            var pct = run.StudyCount > 0
+                ? Math.Clamp((double)run.StudiesProcessed / run.StudyCount, 0d, 1d)
+                : 0d;
+
+            // A single-trial run (Run Trial / a rerun) can only ever be 0% or
+            // 100%, so the ring carries no information and reads as broken at
+            // either extreme. Show the fraction instead.
+            var showRing = run.StudyCount > 1;
+
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <span class="fw-bold" style="font-size: .95rem;">Most recent run</span>
+                <span class="badge @statusBadge d-inline-flex align-items-center gap-1 rounded-pill">
+                    @if (run.Status == "running")
+                    {
+                        <span class="ep-pulse-dot"></span>
+                    }
+                    @run.Status
+                </span>
+                @* Link to History filtered by this run. hideSuperseded=false so
+                   trials whose latest attempt is a later run still appear,
+                   instead of being hidden by the default filter. *@
+                <a asp-action="History" asp-route-runId="@run.RunId"
+                   asp-route-hideSuperseded="false"
+                   class="ms-auto text-decoration-none small"
+                   title="View all studies from this run">
+                    <code>@run.RunId</code>
+                </a>
+            </div>
+
+            <div class="d-flex align-items-center gap-4 flex-wrap">
+                @if (showRing)
+                {
+                    <div class="ep-ring" style="width:132px;height:132px;--ep-sweep:@(((int)Math.Round(pct * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture))%;">
+                        <div class="ep-ring-hole" style="width:100px;height:100px;">
+                            <div>
+                                <div class="fw-bold ep-num" style="font-size:1.5rem;line-height:1;">@pct.ToString("P0", System.Globalization.CultureInfo.InvariantCulture)</div>
+                                <div class="epk">@run.StudiesProcessed / @run.StudyCount studies</div>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                <div class="flex-grow-1" style="min-width: 18rem;">
+                    <div class="row g-3">
+                        <div class="col-4">
+                            <div class="epk">Started</div>
+                            <div class="fw-semibold ep-num" style="font-size:.85rem;">@run.StartedAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="epk">Trigger source</div>
+                            <div class="fw-semibold" style="font-size:.85rem;">@run.TriggerSource</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="epk">Rows persisted</div>
+                            <div class="fw-semibold ep-num" style="font-size:.85rem;">@run.RowsPersisted.ToString("N0")</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="epk">Resolution rate</div>
+                            <div class="fw-semibold ep-num text-success" style="font-size:.85rem;">@run.ResolutionRate.ToString("P1")</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="epk">Time / study</div>
+                            <div class="fw-semibold ep-num" style="font-size:.85rem;">@timePerStudy</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="epk">Est. finish</div>
+                            <div class="fw-semibold ep-num" style="font-size:.85rem;">
+                                @if (estimatedFinish is null)
+                                {
+                                    <text>-</text>
+                                }
+                                else
+                                {
+                                    @* Rendered UTC, rewritten to the viewer's local
+                                       time by the .local-datetime script in Index. *@
+                                    <span class="local-datetime"
+                                          data-utc="@estimatedFinish.Value.UtcDateTime.ToString("o")">
+                                        @estimatedFinish.Value.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+                                    </span>
+                                }
+                            </div>
+                        </div>
+                        @if (!showRing)
+                        {
+                            <div class="col-4">
+                                <div class="epk">Studies processed</div>
+                                <div class="fw-semibold ep-num" style="font-size:.85rem;">@run.StudiesProcessed / @run.StudyCount</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>

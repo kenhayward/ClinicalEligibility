@@ -1,0 +1,23 @@
+@*
+    Live activity feed. Populated entirely client-side from the SignalR hub - see
+    the script section in Index.
+
+    id="activity-log" / id="activity-empty" are load-bearing: the script finds
+    the list by id and removes the placeholder on the first event.
+
+    The list scrolls inside the card (.ep-activity-log) rather than growing it.
+    A long run emits hundreds of events, and letting them extend the card would
+    push the dashboard past the viewport - which is exactly what the
+    single-screen layout is trying to avoid.
+*@
+<div class="card epcard h-100">
+    <div class="card-body py-3 px-3 d-flex flex-column" style="min-height: 0;">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="fw-semibold" style="font-size:.85rem;">Live activity</span>
+            <span class="epk ms-auto" title="Streamed from the orchestrator over SignalR (/hubs/progress).">/hubs/progress</span>
+        </div>
+        <ul id="activity-log" class="list-group list-group-flush ep-activity-log">
+            <li class="list-group-item text-muted small px-0" id="activity-empty">Waiting for events.</li>
+        </ul>
+    </div>
+</div>
