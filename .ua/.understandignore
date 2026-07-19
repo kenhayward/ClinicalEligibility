@@ -1,0 +1,50 @@
+# .understandignore - patterns for files/dirs to exclude from analysis
+# Syntax: same as .gitignore (globs, # comments, ! negation, trailing / for dirs)
+#
+# Built-in defaults (always excluded unless negated):
+#   node_modules/, .git/, dist/, build/, obj/, *.lock, *.min.js, etc.
+
+# --- Secrets: MUST stay excluded ---
+# The scanner walks the filesystem, not git, so gitignored secret files would
+# otherwise be read and summarized into the knowledge graph.
+.env
+*.env
+.env.*
+!.env.example
+Production.env
+FlowDev.env
+*.pfx
+*.publishsettings
+
+# --- Test projects (excluded per chosen scope) ---
+contexts/eligibility/tests/
+
+# --- Build output / IDE / tooling noise ---
+**/bin/
+**/obj/
+.vs/
+.vscode/
+.claude/
+.ua/
+.superpowers/
+[Tt]est[Rr]esult*/
+*.trx
+*.binlog
+*.user
+*.suo
+untracked/
+_untracked/
+*.dump
+
+# --- Binary assets ---
+images/
+*.png
+*.jpg
+*.jpeg
+*.ico
+*.exe
+*.dll
+
+# --- Misc ---
+**/__pycache__/
+*.pyc

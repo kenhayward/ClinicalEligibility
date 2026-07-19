@@ -284,7 +284,13 @@ else
             tick();
             setInterval(tick, 1000);
         })();
+    </script>
 
+    @* Gated to match the modal markup above - a read-only user has no Resolve
+       control, so they should not be shipped its script either. *@
+    @if (canRunPipeline)
+    {
+    <script>
         // Resolve-stranded-run modal. Posts to /Home/ResolveRun and reloads on
         // success so the dashboard toolbar's runInProgress check re-evaluates and
         // the trigger buttons come back.
@@ -365,4 +371,5 @@ else
             });
         })();
     </script>
+    }
 }

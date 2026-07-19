@@ -1,0 +1,1652 @@
+{
+  "scriptCompleted": true,
+  "files": [
+    {
+      "path": ".dockerignore",
+      "language": "unknown",
+      "sizeLines": 14,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".env.example",
+      "language": "config",
+      "sizeLines": 226,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".gitattributes",
+      "language": "unknown",
+      "sizeLines": 5,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "yaml",
+      "sizeLines": 30,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "CLAUDE.md",
+      "language": "markdown",
+      "sizeLines": 121,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/Eligibility.sln",
+      "language": "sln",
+      "sizeLines": 113,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/README.md",
+      "language": "markdown",
+      "sizeLines": 12,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Cli/appsettings.json",
+      "language": "json",
+      "sizeLines": 9,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Cli/EligibilityProcessing.Cli.vbproj",
+      "language": "vbproj",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Cli/My Project/launchSettings.json",
+      "language": "json",
+      "sizeLines": 7,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Cli/Program.vb",
+      "language": "vb",
+      "sizeLines": 955,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Cli/UmlsRrfReader.vb",
+      "language": "vb",
+      "sizeLines": 61,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AppUser.vb",
+      "language": "vb",
+      "sizeLines": 24,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuditEntry.vb",
+      "language": "vb",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuditLogFilter.vb",
+      "language": "vb",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuditLogPage.vb",
+      "language": "vb",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuthoringCriterion.vb",
+      "language": "vb",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuthoringCriterionSource.vb",
+      "language": "vb",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuthoringEligibility.vb",
+      "language": "vb",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuthoringStudy.vb",
+      "language": "vb",
+      "sizeLines": 51,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuthoringStudyAggregate.vb",
+      "language": "vb",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/AuthoringStudySummary.vb",
+      "language": "vb",
+      "sizeLines": 38,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/BatchResult.vb",
+      "language": "vb",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/CorpusReadCache.vb",
+      "language": "vb",
+      "sizeLines": 107,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/CriterionCluster.vb",
+      "language": "vb",
+      "sizeLines": 38,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/CriterionRecord.vb",
+      "language": "vb",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/DashboardMetrics.vb",
+      "language": "vb",
+      "sizeLines": 146,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/DuplicateConceptMerger.vb",
+      "language": "vb",
+      "sizeLines": 99,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EligibilityFilter.vb",
+      "language": "vb",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EligibilityFilterOptions.vb",
+      "language": "vb",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EligibilityProcessing.Core.vbproj",
+      "language": "vbproj",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EligibilityResultPage.vb",
+      "language": "vb",
+      "sizeLines": 34,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EligibilityRow.vb",
+      "language": "vb",
+      "sizeLines": 53,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EmbeddingResult.vb",
+      "language": "vb",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EmbeddingStats.vb",
+      "language": "vb",
+      "sizeLines": 37,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/EmbeddingTextBuilder.vb",
+      "language": "vb",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/IAccessRequestNotifier.vb",
+      "language": "vb",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/ICorpusReadCache.vb",
+      "language": "vb",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/ICriteriaNormalizer.vb",
+      "language": "vb",
+      "sizeLines": 38,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/IEmbeddingClient.vb",
+      "language": "vb",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/ILlmClient.vb",
+      "language": "vb",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/INotificationSink.vb",
+      "language": "vb",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/Intervention.vb",
+      "language": "vb",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/IPipelineHooks.vb",
+      "language": "vb",
+      "sizeLines": 107,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/IPostgresGateway.vb",
+      "language": "vb",
+      "sizeLines": 764,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/IUmlsClient.vb",
+      "language": "vb",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/LlmParseResult.vb",
+      "language": "vb",
+      "sizeLines": 44,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/LlmRequest.vb",
+      "language": "vb",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/LlmResponse.vb",
+      "language": "vb",
+      "sizeLines": 104,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/LlmResponseParser.vb",
+      "language": "vb",
+      "sizeLines": 905,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/NormalizationResult.vb",
+      "language": "vb",
+      "sizeLines": 26,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/OrchestratorOptions.vb",
+      "language": "vb",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/PipelineOrchestrator.vb",
+      "language": "vb",
+      "sizeLines": 877,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/ResolvedRecord.vb",
+      "language": "vb",
+      "sizeLines": 53,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/Role.vb",
+      "language": "vb",
+      "sizeLines": 70,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/RunConfiguration.vb",
+      "language": "vb",
+      "sizeLines": 81,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/RunMetrics.vb",
+      "language": "vb",
+      "sizeLines": 88,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/SimilarStudy.vb",
+      "language": "vb",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/SourceEligibilityDetails.vb",
+      "language": "vb",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudyDetails.vb",
+      "language": "vb",
+      "sizeLines": 65,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudyEmbeddingInput.vb",
+      "language": "vb",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudyEmbeddingJob.vb",
+      "language": "vb",
+      "sizeLines": 111,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudyExecution.vb",
+      "language": "vb",
+      "sizeLines": 141,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudyExecutionPage.vb",
+      "language": "vb",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudyFilter.vb",
+      "language": "vb",
+      "sizeLines": 41,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudySearchFilter.vb",
+      "language": "vb",
+      "sizeLines": 65,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudySearchResult.vb",
+      "language": "vb",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/StudySnapshot.vb",
+      "language": "vb",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/ToolJobs.vb",
+      "language": "vb",
+      "sizeLines": 144,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/Trial.vb",
+      "language": "vb",
+      "sizeLines": 15,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/TrialSelectionDirection.vb",
+      "language": "vb",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/UmlsCandidate.vb",
+      "language": "vb",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/UmlsMatch.vb",
+      "language": "vb",
+      "sizeLines": 37,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/UmlsMatchScorer.vb",
+      "language": "vb",
+      "sizeLines": 158,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/UmlsNormalizeJob.vb",
+      "language": "vb",
+      "sizeLines": 154,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/UmlsNormalizeTypes.vb",
+      "language": "vb",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Core/UmlsRetryTypes.vb",
+      "language": "vb",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/EligibilityProcessing.Data.vbproj",
+      "language": "vbproj",
+      "sizeLines": 90,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V1__schema.sql",
+      "language": "sql",
+      "sizeLines": 48,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V10__authoring_criterion_source.sql",
+      "language": "sql",
+      "sizeLines": 37,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V11__auth.sql",
+      "language": "sql",
+      "sizeLines": 37,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V12__audit.sql",
+      "language": "sql",
+      "sizeLines": 36,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V13__authoring_study_id.sql",
+      "language": "sql",
+      "sizeLines": 19,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V14__authoring_criterion_manual_reason.sql",
+      "language": "sql",
+      "sizeLines": 12,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V15__run_concurrency_cap.sql",
+      "language": "sql",
+      "sizeLines": 15,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V16__study_phase_timings.sql",
+      "language": "sql",
+      "sizeLines": 17,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V17__umls_metathesaurus.sql",
+      "language": "sql",
+      "sizeLines": 58,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V18__umls_fts.sql",
+      "language": "sql",
+      "sizeLines": 24,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V19__umls_retry.sql",
+      "language": "sql",
+      "sizeLines": 25,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V2__study_table.sql",
+      "language": "sql",
+      "sizeLines": 35,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V20__umls_concept_normalization.sql",
+      "language": "sql",
+      "sizeLines": 37,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V21__signing_credentials.sql",
+      "language": "sql",
+      "sizeLines": 4,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V3__study_raw_response.sql",
+      "language": "sql",
+      "sizeLines": 14,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V4__drop_watermark.sql",
+      "language": "sql",
+      "sizeLines": 15,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V5__study_detail.sql",
+      "language": "sql",
+      "sizeLines": 48,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V6__authoring.sql",
+      "language": "sql",
+      "sizeLines": 80,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V7__study_embeddings.sql",
+      "language": "sql",
+      "sizeLines": 27,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V8__performance_indexes.sql",
+      "language": "sql",
+      "sizeLines": 75,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/Migrations/V9__llm_stop_diagnostics.sql",
+      "language": "sql",
+      "sizeLines": 21,
+      "fileCategory": "data"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/PostgresGateway.vb",
+      "language": "vb",
+      "sizeLines": 3987,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/PostgresOptions.vb",
+      "language": "vb",
+      "sizeLines": 76,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/PostgresRunLock.vb",
+      "language": "vb",
+      "sizeLines": 204,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/PostgresUmlsClient.vb",
+      "language": "vb",
+      "sizeLines": 191,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/SlowCommandLoggerFactory.vb",
+      "language": "vb",
+      "sizeLines": 172,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Data/UmlsMetathesaurusStore.vb",
+      "language": "vb",
+      "sizeLines": 448,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Hosting/CompositionRoot.vb",
+      "language": "vb",
+      "sizeLines": 413,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Hosting/DotEnvLoader.vb",
+      "language": "vb",
+      "sizeLines": 71,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Hosting/EligibilityProcessing.Hosting.vbproj",
+      "language": "vbproj",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Hosting/SharedAppSettings.vb",
+      "language": "vb",
+      "sizeLines": 58,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/CriteriaNormalizer.vb",
+      "language": "vb",
+      "sizeLines": 224,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/EligibilityProcessing.Llm.vbproj",
+      "language": "vbproj",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/EmbeddingClient.vb",
+      "language": "vb",
+      "sizeLines": 152,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/EmbeddingOptions.vb",
+      "language": "vb",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/LlmClient.vb",
+      "language": "vb",
+      "sizeLines": 238,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/LlmNormalizeOptions.vb",
+      "language": "vb",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/LlmOptions.vb",
+      "language": "vb",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/PromptBuilder.vb",
+      "language": "vb",
+      "sizeLines": 112,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/Prompts/concept-normalize.v1.md",
+      "language": "markdown",
+      "sizeLines": 30,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/Prompts/normalize.v1.md",
+      "language": "markdown",
+      "sizeLines": 19,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Llm/Prompts/system.v1.md",
+      "language": "markdown",
+      "sizeLines": 52,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Notifications/EligibilityProcessing.Notifications.vbproj",
+      "language": "vbproj",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Notifications/ISmtpEmailSender.vb",
+      "language": "vb",
+      "sizeLines": 13,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Notifications/MailKitSmtpEmailSender.vb",
+      "language": "vb",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Notifications/SmtpAccessRequestNotifier.vb",
+      "language": "vb",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Notifications/SmtpNotificationOptions.vb",
+      "language": "vb",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Notifications/SmtpNotificationSink.vb",
+      "language": "vb",
+      "sizeLines": 184,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Umls/EligibilityProcessing.Umls.vbproj",
+      "language": "vbproj",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Umls/UmlsCache.vb",
+      "language": "vb",
+      "sizeLines": 114,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Umls/UmlsClient.vb",
+      "language": "vb",
+      "sizeLines": 179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Umls/UmlsLogRedactionHandler.vb",
+      "language": "vb",
+      "sizeLines": 54,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Umls/UmlsOptions.vb",
+      "language": "vb",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/appsettings.Development.json",
+      "language": "json",
+      "sizeLines": 8,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/appsettings.json",
+      "language": "json",
+      "sizeLines": 18,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Auth/AuditWriter.cs",
+      "language": "csharp",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Auth/AuthClaims.cs",
+      "language": "csharp",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Auth/AuthConstants.cs",
+      "language": "csharp",
+      "sizeLines": 10,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Auth/AuthOptions.cs",
+      "language": "csharp",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Auth/CurrentUserAccessor.cs",
+      "language": "csharp",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Auth/PasswordHasher.cs",
+      "language": "csharp",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/BatchRunner.cs",
+      "language": "csharp",
+      "sizeLines": 156,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/AccountController.cs",
+      "language": "csharp",
+      "sizeLines": 271,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/AuthoringController.cs",
+      "language": "csharp",
+      "sizeLines": 839,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/EmbeddingsController.cs",
+      "language": "csharp",
+      "sizeLines": 197,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/HomeController.cs",
+      "language": "csharp",
+      "sizeLines": 973,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/RuntimeParametersController.cs",
+      "language": "csharp",
+      "sizeLines": 231,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/SeedController.cs",
+      "language": "csharp",
+      "sizeLines": 96,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/UsersController.cs",
+      "language": "csharp",
+      "sizeLines": 272,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Controllers/VersionController.cs",
+      "language": "csharp",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/EligibilityProcessing.Web.csproj",
+      "language": "csproj",
+      "sizeLines": 47,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Embeddings/EmbeddingsDump.cs",
+      "language": "csharp",
+      "sizeLines": 120,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Embeddings/EmbeddingsJobRequest.cs",
+      "language": "csharp",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Embeddings/EmbeddingsJobRunner.cs",
+      "language": "csharp",
+      "sizeLines": 308,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Embeddings/EmbeddingsJobState.cs",
+      "language": "csharp",
+      "sizeLines": 173,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Export/AuthoringCriteriaAuditCsv.cs",
+      "language": "csharp",
+      "sizeLines": 143,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Export/AuthoringCriteriaCsv.cs",
+      "language": "csharp",
+      "sizeLines": 51,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Export/CsvWriter.cs",
+      "language": "csharp",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Export/DeterministicId.cs",
+      "language": "csharp",
+      "sizeLines": 66,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Export/ExportResults.cs",
+      "language": "csharp",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AccountModels.cs",
+      "language": "csharp",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AnalysisViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringCriterionForm.cs",
+      "language": "csharp",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringCriterionSourceForm.cs",
+      "language": "csharp",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringEditViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringEligibilityForm.cs",
+      "language": "csharp",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringIndexViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringListPanelModel.cs",
+      "language": "csharp",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/AuthoringStudyForm.cs",
+      "language": "csharp",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/DashboardMetricsPayload.cs",
+      "language": "csharp",
+      "sizeLines": 230,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/DashboardViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/ErrorViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/ResultsViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 57,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/RunCardView.cs",
+      "language": "csharp",
+      "sizeLines": 132,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/RunsViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/RuntimeParametersForm.cs",
+      "language": "csharp",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/StudiesViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 71,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Models/ToolsViewModel.cs",
+      "language": "csharp",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Program.cs",
+      "language": "csharp",
+      "sizeLines": 371,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Properties/launchSettings.json",
+      "language": "json",
+      "sizeLines": 38,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/RunGate.cs",
+      "language": "csharp",
+      "sizeLines": 103,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/RunProgressHub.cs",
+      "language": "csharp",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/RunRequest.cs",
+      "language": "csharp",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Seeding/SeedDump.cs",
+      "language": "csharp",
+      "sizeLines": 95,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Seeding/SeedJobRequest.cs",
+      "language": "csharp",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Seeding/SeedJobRunner.cs",
+      "language": "csharp",
+      "sizeLines": 197,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Seeding/SeedJobState.cs",
+      "language": "csharp",
+      "sizeLines": 151,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/SignalRPipelineHooks.cs",
+      "language": "csharp",
+      "sizeLines": 88,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/ToolJobRequest.cs",
+      "language": "csharp",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/ToolJobRunner.cs",
+      "language": "csharp",
+      "sizeLines": 181,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/ToolJobState.cs",
+      "language": "csharp",
+      "sizeLines": 100,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Versioning/AppVersion.cs",
+      "language": "csharp",
+      "sizeLines": 100,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/_ViewImports.cshtml",
+      "language": "cshtml",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/_ViewStart.cshtml",
+      "language": "cshtml",
+      "sizeLines": 3,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Account/Bootstrap.cshtml",
+      "language": "cshtml",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Account/Denied.cshtml",
+      "language": "cshtml",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Account/Login.cshtml",
+      "language": "cshtml",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Authoring/_CreateStudyModal.cshtml",
+      "language": "cshtml",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Authoring/_StudyListPanel.cshtml",
+      "language": "cshtml",
+      "sizeLines": 115,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Authoring/Edit.cshtml",
+      "language": "cshtml",
+      "sizeLines": 1168,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Authoring/Index.cshtml",
+      "language": "cshtml",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/_DashboardActivity.cshtml",
+      "language": "cshtml",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/_DashboardMetrics.cshtml",
+      "language": "cshtml",
+      "sizeLines": 289,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/_DashboardRunCard.cshtml",
+      "language": "cshtml",
+      "sizeLines": 161,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/_DashboardToolbar.cshtml",
+      "language": "cshtml",
+      "sizeLines": 112,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/_ToolJobPanel.cshtml",
+      "language": "cshtml",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/Analysis.cshtml",
+      "language": "cshtml",
+      "sizeLines": 1232,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/History.cshtml",
+      "language": "cshtml",
+      "sizeLines": 923,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/Index.cshtml",
+      "language": "cshtml",
+      "sizeLines": 626,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/Results.cshtml",
+      "language": "cshtml",
+      "sizeLines": 265,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/Runs.cshtml",
+      "language": "cshtml",
+      "sizeLines": 214,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Home/Tools.cshtml",
+      "language": "cshtml",
+      "sizeLines": 541,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_AboutModal.cshtml",
+      "language": "cshtml",
+      "sizeLines": 107,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_AuditTrailModal.cshtml",
+      "language": "cshtml",
+      "sizeLines": 187,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_AuthLayout.cshtml",
+      "language": "cshtml",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_CreateSeedModal.cshtml",
+      "language": "cshtml",
+      "sizeLines": 428,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_IconSprite.cshtml",
+      "language": "cshtml",
+      "sizeLines": 57,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_Layout.cshtml",
+      "language": "cshtml",
+      "sizeLines": 238,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_Layout.cshtml.css",
+      "language": "css",
+      "sizeLines": 56,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_ManageAccountsModal.cshtml",
+      "language": "cshtml",
+      "sizeLines": 177,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_RuntimeParametersModal.cshtml",
+      "language": "cshtml",
+      "sizeLines": 195,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_UserMenu.cshtml",
+      "language": "cshtml",
+      "sizeLines": 91,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/_ValidationScriptsPartial.cshtml",
+      "language": "cshtml",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Shared/Error.cshtml",
+      "language": "cshtml",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/Views/Version/ReleaseNotes.cshtml",
+      "language": "cshtml",
+      "sizeLines": 58,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/WebhookOptions.cs",
+      "language": "csharp",
+      "sizeLines": 34,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/WebMarker.cs",
+      "language": "csharp",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/wwwroot/css/site.css",
+      "language": "css",
+      "sizeLines": 548,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/wwwroot/js/site.js",
+      "language": "javascript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/wwwroot/lib/jquery-validation-unobtrusive/jquery.validate.unobtrusive.js",
+      "language": "javascript",
+      "sizeLines": 435,
+      "fileCategory": "code"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/wwwroot/lib/jquery-validation-unobtrusive/LICENSE.txt",
+      "language": "txt",
+      "sizeLines": 23,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/wwwroot/lib/jquery-validation/LICENSE.md",
+      "language": "markdown",
+      "sizeLines": 22,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/EligibilityProcessing.Web/wwwroot/lib/jquery/LICENSE.txt",
+      "language": "txt",
+      "sizeLines": 20,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "contexts/eligibility/src/Shared/appsettings.Shared.json",
+      "language": "json",
+      "sizeLines": 62,
+      "fileCategory": "config"
+    },
+    {
+      "path": "contexts/eligibility/version.json",
+      "language": "json",
+      "sizeLines": 308,
+      "fileCategory": "config"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "language": "markdown",
+      "sizeLines": 54,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/deploy-windows.ps1",
+      "language": "powershell",
+      "sizeLines": 264,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/deploy.ps1",
+      "language": "powershell",
+      "sizeLines": 151,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/docker-compose.yml",
+      "language": "yaml",
+      "sizeLines": 174,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/Dockerfile.cli",
+      "language": "dockerfile",
+      "sizeLines": 31,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/Dockerfile.web",
+      "language": "dockerfile",
+      "sizeLines": 27,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/haproxy/haproxy.cfg",
+      "language": "config",
+      "sizeLines": 131,
+      "fileCategory": "config"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/Deploy-evo.ps1",
+      "language": "powershell",
+      "sizeLines": 2,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/Deploy-flow.ps1",
+      "language": "powershell",
+      "sizeLines": 2,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/Deploy-Llamaservices.ps1",
+      "language": "powershell",
+      "sizeLines": 94,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/llama-embedding.xml",
+      "language": "xml",
+      "sizeLines": 14,
+      "fileCategory": "config"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/llama-main.xml",
+      "language": "xml",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/llama-normalize.xml",
+      "language": "xml",
+      "sizeLines": 14,
+      "fileCategory": "config"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/llamacpp_services/readme.md",
+      "language": "markdown",
+      "sizeLines": 15,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/retry-umls-loop.ps1",
+      "language": "powershell",
+      "sizeLines": 137,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/eligibility-pipeline/umls-loader.md",
+      "language": "markdown",
+      "sizeLines": 130,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "deploy/quickstart/.env.example",
+      "language": "config",
+      "sizeLines": 72,
+      "fileCategory": "config"
+    },
+    {
+      "path": "deploy/quickstart/docker-compose.yml",
+      "language": "yaml",
+      "sizeLines": 145,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "deploy/quickstart/Dockerfile.loader",
+      "language": "dockerfile",
+      "sizeLines": 17,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "deploy/quickstart/load-seed.sh",
+      "language": "shell",
+      "sizeLines": 106,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/quickstart/make-seed.sh",
+      "language": "shell",
+      "sizeLines": 47,
+      "fileCategory": "script"
+    },
+    {
+      "path": "deploy/quickstart/README.md",
+      "language": "markdown",
+      "sizeLines": 110,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "Directory.Build.props",
+      "language": "props",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "docs/design_handoff_dashboard/Dashboard redesign.dc.html",
+      "language": "html",
+      "sizeLines": 177,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "docs/design_handoff_dashboard/README.md",
+      "language": "markdown",
+      "sizeLines": 250,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/pipeline-overview.md",
+      "language": "markdown",
+      "sizeLines": 74,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/specs/configuration.md",
+      "language": "markdown",
+      "sizeLines": 461,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/specs/database_schema.md",
+      "language": "markdown",
+      "sizeLines": 579,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/specs/Eligibility_Processing_DotNet_Architecture.md",
+      "language": "markdown",
+      "sizeLines": 651,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/specs/Eligibility_Processing_Specification.md",
+      "language": "markdown",
+      "sizeLines": 806,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "global.json",
+      "language": "json",
+      "sizeLines": 7,
+      "fileCategory": "config"
+    },
+    {
+      "path": "Installation.md",
+      "language": "markdown",
+      "sizeLines": 275,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 210,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "SECURITY.md",
+      "language": "markdown",
+      "sizeLines": 31,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "tests.runsettings",
+      "language": "runsettings",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 268,
+  "filteredByIgnore": 71,
+  "estimatedComplexity": "large",
+  "stats": {
+    "filesScanned": 268,
+    "byCategory": {
+      "infra": 7,
+      "config": 16,
+      "code": 192,
+      "docs": 21,
+      "data": 21,
+      "markup": 3,
+      "script": 8
+    },
+    "byLanguage": {
+      "unknown": 2,
+      "config": 3,
+      "yaml": 3,
+      "markdown": 19,
+      "sln": 1,
+      "json": 8,
+      "vbproj": 7,
+      "vb": 91,
+      "sql": 21,
+      "csharp": 57,
+      "csproj": 1,
+      "cshtml": 32,
+      "css": 2,
+      "javascript": 2,
+      "txt": 2,
+      "powershell": 6,
+      "dockerfile": 3,
+      "xml": 3,
+      "shell": 2,
+      "props": 1,
+      "html": 1,
+      "runsettings": 1
+    }
+  }
+}
