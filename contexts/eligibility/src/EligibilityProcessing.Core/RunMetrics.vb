@@ -47,7 +47,10 @@ Public NotInheritable Class RunMetrics
     Public ReadOnly Property StudiesProcessed As Integer ' studies actually persisted
     Public ReadOnly Property RowsPersisted As Integer    ' total criterion rows
     Public ReadOnly Property ResolutionRate As Double    ' [0, 1] rounded to 3 dp
-    Public ReadOnly Property Status As String            ' "success" | "failed" | "cancelled"
+    ' See RunStatus for the vocabulary. "running" is written first (in-flight,
+    ' EndedAt = Nothing) and overwritten on completion; "interrupted" is only
+    ' ever written by a manual resolve from the Runs tab.
+    Public ReadOnly Property Status As String            ' running | success | failed | cancelled | interrupted
     Public ReadOnly Property ErrorSummary As String      ' empty when status = "success"
 
     ' Sum of llm_completion_tokens across the run's eligibility_study rows.

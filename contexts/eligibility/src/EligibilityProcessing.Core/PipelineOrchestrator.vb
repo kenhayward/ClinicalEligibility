@@ -97,7 +97,7 @@ Public NotInheritable Class PipelineOrchestrator
         ' more at the end with the terminal status.
         Await TryRecordRunAsync(
                 BuildRunMetrics(runId, startedAt, endedAt:=Nothing, config, counters,
-                                status:="running", errorSummary:=""),
+                                status:=RunStatus.Running, errorSummary:=""),
                 cancellationToken).ConfigureAwait(False)
 
         Await SafeNotifyAsync(
@@ -201,7 +201,7 @@ Public NotInheritable Class PipelineOrchestrator
                 Await _gateway.RecordRunAsync(
                         BuildRunMetrics(runId, startedAt, endedAt:=DateTimeOffset.UtcNow,
                                         config, counters,
-                                        status:="cancelled",
+                                        status:=RunStatus.Cancelled,
                                         errorSummary:="Cancelled by host or user"),
                         CancellationToken.None).ConfigureAwait(False)
             Catch writeEx As Exception
@@ -212,7 +212,7 @@ Public NotInheritable Class PipelineOrchestrator
 
         ' --- Steps 15-16: metrics + notifications (once per batch). ---
         Dim endedAt = DateTimeOffset.UtcNow
-        Dim status As String = If(catastrophic Is Nothing, "success", "failed")
+        Dim status As String = If(catastrophic Is Nothing, RunStatus.Success, RunStatus.Failed)
         Dim errorSummary As String = If(catastrophic Is Nothing, "", catastrophic.Message)
         Dim metrics = BuildRunMetrics(runId, startedAt, endedAt, config, counters, status, errorSummary)
 
@@ -603,7 +603,7 @@ Public NotInheritable Class PipelineOrchestrator
         ' settles correctly even if intermediate writes land out of order.
         Await TryRecordRunAsync(
                 BuildRunMetrics(runId, runStartedAt, endedAt:=Nothing, config, counters,
-                                status:="running", errorSummary:=""),
+                                status:=RunStatus.Running, errorSummary:=""),
                 cancellationToken).ConfigureAwait(False)
     End Function
 

@@ -182,6 +182,25 @@ public class AuthTests
         Assert.DoesNotContain("Manage Accounts", body);
     }
 
+    // The Resolve action edits run history, so it sits behind the same
+    // PipelineOps policy as every other run control. Authorization runs before
+    // the antiforgery filter, so a forbidden role gets 403 without a token.
+    [Theory]
+    [InlineData("Author")]
+    [InlineData("Viewer")]
+    public async Task Resolve_run_requires_pipeline_ops(string role)
+    {
+        using var factory = new AuthedFactory();
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/Home/ResolveRun");
+        request.Headers.Add(TestAuthHandler.RoleHeader, role);
+        request.Headers.Add("X-Requested-With", "XMLHttpRequest");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     private class AnonFactory : WebApplicationFactory<WebMarker>
     {
         protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)

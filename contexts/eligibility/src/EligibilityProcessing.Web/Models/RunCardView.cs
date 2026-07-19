@@ -104,6 +104,7 @@ public sealed class RunCardView
                 "success" => "bg-success",
                 "failed" => "bg-danger",
                 "running" => "bg-info text-dark",
+                "interrupted" => "bg-warning text-dark",
                 _ => "bg-secondary"
             },
             IsRunning = run.Status == "running",

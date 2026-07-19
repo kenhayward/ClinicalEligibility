@@ -980,6 +980,85 @@ ON CONFLICT (run_id) DO UPDATE
         End Using
     End Function
 
+    ' ============ ResolveInterruptedRunAsync (output DB, guarded, transactional) ============
+
+    Public Async Function ResolveInterruptedRunAsync(
+            runId As Guid,
+            status As String,
+            reason As String,
+            cancellationToken As CancellationToken) As Task(Of (RunUpdated As Boolean, StudiesReconciled As Integer)) _
+            Implements IPostgresGateway.ResolveInterruptedRunAsync
+        If String.IsNullOrWhiteSpace(status) Then
+            Throw New ArgumentException("status must be non-empty", NameOf(status))
+        End If
+        If String.IsNullOrWhiteSpace(reason) Then
+            Throw New ArgumentException("reason must be non-empty", NameOf(reason))
+        End If
+
+        ' AND status = 'running' is the concurrency guard - see the interface
+        ' remarks. COALESCE on ended_at because a stranded row always has NULL
+        ' there; the coalesce stops this inventing a second ending if it ever
+        ' does not.
+        Const RunSql As String = "
+UPDATE public.eligibility_run
+   SET status        = @status,
+       error_summary = @reason,
+       ended_at      = COALESCE(ended_at, @now)
+ WHERE run_id = @run_id
+   AND status = 'running'"
+
+        ' Scoped to the one run_id and NOT age-filtered. The existing
+        ' error_message wins when present: a row that recorded its own failure
+        ' knows more than the blanket run reason does.
+        Const StudySql As String = "
+UPDATE public.eligibility_study
+   SET status        = 'interrupted',
+       finished_at   = @now,
+       error_message = COALESCE(NULLIF(error_message, ''), @reason)
+ WHERE run_id = @run_id
+   AND status = 'running'"
+
+        Dim now = DateTimeOffset.UtcNow
+
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using tx = Await conn.BeginTransactionAsync(cancellationToken).ConfigureAwait(False)
+                Dim runUpdated As Integer
+                Using cmd = conn.CreateCommand()
+                    cmd.Transaction = tx
+                    cmd.CommandText = RunSql
+                    cmd.Parameters.Add(New NpgsqlParameter("run_id", NpgsqlDbType.Uuid) With {.Value = runId})
+                    cmd.Parameters.Add(New NpgsqlParameter("status", NpgsqlDbType.Text) With {.Value = status})
+                    cmd.Parameters.Add(New NpgsqlParameter("reason", NpgsqlDbType.Text) With {.Value = reason})
+                    cmd.Parameters.Add(New NpgsqlParameter("now", NpgsqlDbType.TimestampTz) With {.Value = now})
+                    runUpdated = Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+                End Using
+
+                ' No run was resolved, so there is nothing to cascade to. Commit
+                ' the empty transaction and report the no-op.
+                If runUpdated = 0 Then
+                    Await tx.CommitAsync(cancellationToken).ConfigureAwait(False)
+                    Return (False, 0)
+                End If
+
+                Dim studiesReconciled As Integer
+                Using cmd = conn.CreateCommand()
+                    cmd.Transaction = tx
+                    cmd.CommandText = StudySql
+                    cmd.Parameters.Add(New NpgsqlParameter("run_id", NpgsqlDbType.Uuid) With {.Value = runId})
+                    cmd.Parameters.Add(New NpgsqlParameter("reason", NpgsqlDbType.Text) With {.Value = reason})
+                    cmd.Parameters.Add(New NpgsqlParameter("now", NpgsqlDbType.TimestampTz) With {.Value = now})
+                    studiesReconciled = Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+                End Using
+
+                Await tx.CommitAsync(cancellationToken).ConfigureAwait(False)
+                _logger.LogInformation(
+                        "Run {RunId} manually resolved to '{Status}'; {Count} stranded study row(s) reconciled to 'interrupted'.",
+                        runId, status, studiesReconciled)
+                Return (True, studiesReconciled)
+            End Using
+        End Using
+    End Function
+
     ' ============ RecordFailedTrialAsync (output DB, UPSERT, increments attempt_count) ============
 
     Public Async Function RecordFailedTrialAsync(

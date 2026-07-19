@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 32, "releaseDate": "2026-07-17" },
+  "current": { "major": 0, "minor": 1, "build": 33, "releaseDate": "2026-07-19" },
   "releases": [
+    {
+      "version": "0.1.33",
+      "releaseDate": "2026-07-19",
+      "enhancements": [
+        "Runs tab: a run left showing as 'running' by a server restart can now be resolved by hand - pick failed, cancelled or interrupted, give a reason, and any of its trials still stranded at 'running' are marked interrupted too. This clears the stale run that was keeping the dashboard's trigger buttons disabled."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.32",
       "releaseDate": "2026-07-17",

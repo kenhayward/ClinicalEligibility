@@ -26,6 +26,10 @@
         string s(double? ms) => ms.HasValue ? (ms.Value / 1000.0).ToString("F1") : "–";
         return $"{s(llmMs)} / {s(umlsMs)} / {s(persistMs)}";
     }
+
+    // Cosmetic gate only - HomeController.ResolveRun re-checks the policy. Matches
+    // History.cshtml.
+    var canRunPipeline = (await AuthorizationService.AuthorizeAsync(User, "PipelineOps")).Succeeded;
 }
 
 @{
@@ -64,6 +68,10 @@ else
                     <th class="text-end" title="Average per-trial phase split (seconds) across successful trials: LLM call / sequential UMLS resolution / persist transaction. If UMLS dominates, it is the throughput ceiling — and if it grows with concurrency, the phase contends under load.">LLM/UMLS/Pst&nbsp;(s)</th>
                     <th>Status</th>
                     <th>Run ID</th>
+                    @if (canRunPipeline)
+                    {
+                        <th></th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -75,6 +83,7 @@ else
                         "failed" => "bg-danger",
                         "running" => "bg-info",
                         "cancelled" => "bg-warning text-dark",
+                        "interrupted" => "bg-warning text-dark",
                         _ => "bg-secondary"
                     };
                     // hh:mm:ss; TotalHours not Hours so 25-hour runs render
@@ -133,6 +142,22 @@ else
                                 <small><code>@run.RunId.ToString("N").Substring(0, 8)</code></small>
                             </a>
                         </td>
+                        @* Resolve is offered only for runs still showing as
+                           running - those are the ones that can be WRONG (a host
+                           that died mid-run never wrote a terminal status). A
+                           completed run is real history and is not editable here. *@
+                        @if (canRunPipeline)
+                        {
+                            <td>
+                                @if (run.Status == "running")
+                                {
+                                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none"
+                                            data-resolve-run="@run.RunId"
+                                            data-resolve-started="@run.StartedAt.ToString("yyyy-MM-dd HH:mm:ss")"
+                                            title="Mark this run as no longer in flight (it was stranded by a host restart)">Resolve</button>
+                                }
+                            </td>
+                        }
                     </tr>
                 }
             </tbody>
@@ -159,6 +184,55 @@ else
             </ul>
         </nav>
     }
+}
+
+@if (canRunPipeline)
+{
+    <div class="modal fade" id="resolveRunModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Resolve stranded run</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @* Anti-forgery token for the fetch below. The form tag helper
+                       only injects one into a real <form>, and this modal posts
+                       via fetch - same approach as _CreateSeedModal. *@
+                    <form id="rr-token-form" method="post"></form>
+
+                    <p class="text-muted small">
+                        Only a run still showing as <em>running</em> can be resolved. This records why the run
+                        ended and marks any of its trials still stranded at <em>running</em> as
+                        <em>interrupted</em>. It does not re-run anything.
+                    </p>
+                    <p class="small mb-3">Run started <span class="font-monospace" id="rr-started"></span></p>
+
+                    <div class="mb-3">
+                        <label for="rr-status" class="form-label">Mark the run as</label>
+                        <select class="form-select form-select-sm" id="rr-status">
+                            <option value="interrupted" selected>interrupted - the host stopped mid-run</option>
+                            <option value="failed">failed - the run errored</option>
+                            <option value="cancelled">cancelled - it was stopped deliberately</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-2">
+                        <label for="rr-reason" class="form-label">Reason (required)</label>
+                        <textarea class="form-control form-control-sm" id="rr-reason" rows="3"
+                                  maxlength="500" placeholder="e.g. unscheduled server reboot on 2026-07-18"></textarea>
+                        <div class="form-text">Stored as the run's error summary and shown on this page.</div>
+                    </div>
+
+                    <div id="rr-error" class="alert alert-danger py-2 mb-0 d-none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="rr-submit" disabled>Resolve run</button>
+                </div>
+            </div>
+        </div>
+    </div>
 }
 
 @section Scripts {
@@ -211,4 +285,91 @@ else
             setInterval(tick, 1000);
         })();
     </script>
+
+    @* Gated to match the modal markup above - a read-only user has no Resolve
+       control, so they should not be shipped its script either. *@
+    @if (canRunPipeline)
+    {
+    <script>
+        // Resolve-stranded-run modal. Posts to /Home/ResolveRun and reloads on
+        // success so the dashboard toolbar's runInProgress check re-evaluates and
+        // the trigger buttons come back.
+        (function () {
+            const modalEl = document.getElementById("resolveRunModal");
+            if (!modalEl || typeof bootstrap === "undefined") return;
+            const modal = new bootstrap.Modal(modalEl);
+
+            const startedEl = document.getElementById("rr-started");
+            const statusEl = document.getElementById("rr-status");
+            const reasonEl = document.getElementById("rr-reason");
+            const errorEl = document.getElementById("rr-error");
+            const submitEl = document.getElementById("rr-submit");
+            let runId = null;
+
+            function token() {
+                const el = document.querySelector('#rr-token-form input[name="__RequestVerificationToken"]');
+                return el ? el.value : "";
+            }
+            function showError(message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove("d-none");
+            }
+            function resetSubmit() {
+                submitEl.disabled = false;
+                submitEl.textContent = "Resolve run";
+            }
+
+            document.querySelectorAll("button[data-resolve-run]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    runId = btn.dataset.resolveRun;
+                    startedEl.textContent = btn.dataset.resolveStarted || "";
+                    reasonEl.value = "";
+                    statusEl.value = "interrupted";
+                    errorEl.classList.add("d-none");
+                    submitEl.disabled = true;
+                    submitEl.textContent = "Resolve run";
+                    modal.show();
+                });
+            });
+
+            reasonEl.addEventListener("input", function () {
+                submitEl.disabled = reasonEl.value.trim().length === 0;
+            });
+
+            submitEl.addEventListener("click", async function () {
+                if (!runId) return;
+                submitEl.disabled = true;
+                submitEl.textContent = "Resolving...";
+                errorEl.classList.add("d-none");
+
+                const body = new FormData();
+                body.set("runId", runId);
+                body.set("status", statusEl.value);
+                body.set("reason", reasonEl.value.trim());
+                body.set("__RequestVerificationToken", token());
+
+                try {
+                    const response = await fetch("@Url.Action("ResolveRun", "Home")", {
+                        method: "POST",
+                        body: body,
+                        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+                    });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        showError(payload.error || ("Request failed (" + response.status + ")."));
+                        resetSubmit();
+                        return;
+                    }
+                    // Reload either way: on a real resolve to pick up the new
+                    // status, and on the already-finished no-op because the page
+                    // is by definition stale.
+                    window.location.reload();
+                } catch (err) {
+                    showError("Could not reach the server.");
+                    resetSubmit();
+                }
+            });
+        })();
+    </script>
+    }
 }

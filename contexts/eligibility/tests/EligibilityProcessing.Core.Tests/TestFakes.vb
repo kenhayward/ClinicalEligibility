@@ -213,6 +213,15 @@ Friend NotInheritable Class FakeGateway
         Return Task.CompletedTask
     End Function
 
+    ' Manual dashboard action - never invoked by the orchestrator, so the fake
+    ' reports "nothing was stranded" rather than tracking calls.
+    Public Function ResolveInterruptedRunAsync(
+            runId As Guid, status As String, reason As String,
+            cancellationToken As CancellationToken) As Task(Of (RunUpdated As Boolean, StudiesReconciled As Integer)) _
+            Implements IPostgresGateway.ResolveInterruptedRunAsync
+        Return Task.FromResult((False, 0))
+    End Function
+
     Public Function RecordFailedTrialAsync(
             nctId As String,
             errorMessage As String,

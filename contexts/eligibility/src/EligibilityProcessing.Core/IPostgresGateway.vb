@@ -255,6 +255,31 @@ Public Interface IPostgresGateway
             cancellationToken As CancellationToken) As Task
 
     ''' <summary>
+    ''' Manually resolves a run stranded at 'running' by an unclean host shutdown,
+    ''' setting its status and error_summary and cascading its still-'running'
+    ''' study rows to 'interrupted'. Both statements run in one transaction.
+    ''' </summary>
+    ''' <remarks>
+    ''' Guarded on <c>status = 'running'</c>: if the run genuinely completed
+    ''' between the operator loading the page and submitting, the update matches
+    ''' nothing, the transaction commits as a no-op, and RunUpdated is False. This
+    ''' is what makes the action safe against a second host sharing the database.
+    '''
+    ''' The study cascade applies NO age threshold, unlike
+    ''' ReconcileInterruptedStudiesAsync: that threshold exists to guess that a run
+    ''' is dead, and here an operator has asserted it directly for this one run.
+    ''' </remarks>
+    ''' <returns>
+    ''' RunUpdated: False when the run does not exist or already reached a terminal
+    ''' status. StudiesReconciled: how many study rows the cascade moved.
+    ''' </returns>
+    Function ResolveInterruptedRunAsync(
+            runId As Guid,
+            status As String,
+            reason As String,
+            cancellationToken As CancellationToken) As Task(Of (RunUpdated As Boolean, StudiesReconciled As Integer))
+
+    ''' <summary>
     ''' Records a terminal LLM-call failure into public.eligibility_failed so the
     ''' "retry" CLI command can revisit it. UPSERTs on nct_id, incrementing
     ''' attempt_count. Closes gap section 9.1.

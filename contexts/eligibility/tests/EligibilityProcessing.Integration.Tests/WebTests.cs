@@ -75,6 +75,39 @@ public class WebTests : IClassFixture<WebTests.Factory>
         Assert.Contains("Backend unavailable", body);
     }
 
+    // The Resolve modal renders from the PipelineOps check alone, independent of
+    // whether the run table loaded - so these two assert the authorization gate
+    // and that the Razor actually emits the modal (and its antiforgery token),
+    // which a compile-only check would not catch.
+    [Fact]
+    public async Task Runs_renders_the_resolve_modal_for_pipeline_ops()
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/Home/Runs");
+        request.Headers.Add(TestAuthHandler.RoleHeader, "Owner");
+
+        var response = await client.SendAsync(request);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("resolveRunModal", body);
+        Assert.Contains("__RequestVerificationToken", body);
+    }
+
+    [Theory]
+    [InlineData("Author")]
+    [InlineData("Viewer")]
+    public async Task Runs_hides_the_resolve_modal_from_non_pipeline_ops(string role)
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/Home/Runs");
+        request.Headers.Add(TestAuthHandler.RoleHeader, role);
+
+        var response = await client.SendAsync(request);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("resolveRunModal", body);
+    }
+
     [Fact]
     public async Task Nav_contains_links_to_dashboard_and_runs()
     {

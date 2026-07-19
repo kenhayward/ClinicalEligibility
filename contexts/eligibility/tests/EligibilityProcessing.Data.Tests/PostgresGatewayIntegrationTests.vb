@@ -1644,6 +1644,166 @@ Public Class PostgresGatewayIntegrationTests
         End Using
     End Function
 
+    ' ============ ResolveInterruptedRunAsync (manual resolve of a stranded run) ============
+    '
+    ' An unclean host shutdown leaves eligibility_run at 'running' forever, which
+    ' disables the dashboard trigger buttons. There is no automatic sweep for runs
+    ' (unlike study rows), so an operator resolves the row by hand. The
+    ' "already terminal" test below is the load-bearing one: it is the guard that
+    ' stops a stale page rewriting a run that finished in the meantime.
+
+    Private Async Function SeedRunAsync(runId As Guid, status As String) As Task
+        Await _fixture.Gateway.RecordRunAsync(
+                New RunMetrics(runId, DateTimeOffset.UtcNow, Nothing, "form", 50, 0, 0, 0, status, ""),
+                CancellationToken.None)
+    End Function
+
+    Private Async Function GetRunStatusAsync(runId As Guid) As Task(Of (Status As String, ErrorSummary As String, HasEnded As Boolean))
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT status, COALESCE(error_summary, ''), ended_at IS NOT NULL
+                                     FROM public.eligibility_run WHERE run_id = @id"
+                cmd.Parameters.AddWithValue("id", runId)
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Await reader.ReadAsync()
+                    Return (reader.GetString(0), reader.GetString(1), reader.GetBoolean(2))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    Private Async Function GetStudyStatusAsync(nctId As String) As Task(Of (Status As String, ErrorMessage As String))
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT status, COALESCE(error_message, '')
+                                     FROM public.eligibility_study WHERE nct_id = @n"
+                cmd.Parameters.AddWithValue("n", nctId)
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Await reader.ReadAsync()
+                    Return (reader.GetString(0), reader.GetString(1))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function ResolveInterruptedRun_sets_status_reason_and_ended_at() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim runId = Guid.NewGuid()
+        Await SeedRunAsync(runId, RunStatus.Running)
+
+        Dim result = Await _fixture.Gateway.ResolveInterruptedRunAsync(
+                runId, RunStatus.Interrupted, "server rebooted", CancellationToken.None)
+
+        Assert.True(result.RunUpdated)
+        Dim row = Await GetRunStatusAsync(runId)
+        Assert.Equal(RunStatus.Interrupted, row.Status)
+        Assert.Equal("server rebooted", row.ErrorSummary)
+        Assert.True(row.HasEnded)   ' a stranded row has no ended_at; we stamp one
+    End Function
+
+    ' THE guard. If the run genuinely completed between the page rendering and the
+    ' operator submitting, this must be a no-op rather than overwriting a real result.
+    <SkippableFact>
+    Public Async Function ResolveInterruptedRun_is_a_no_op_when_the_run_already_finished() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim runId = Guid.NewGuid()
+        Await _fixture.Gateway.RecordRunAsync(
+                New RunMetrics(runId, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "form",
+                               50, 50, 374, 0.882, RunStatus.Success, ""),
+                CancellationToken.None)
+
+        Dim result = Await _fixture.Gateway.ResolveInterruptedRunAsync(
+                runId, RunStatus.Failed, "should not apply", CancellationToken.None)
+
+        Assert.False(result.RunUpdated)
+        Dim row = Await GetRunStatusAsync(runId)
+        Assert.Equal(RunStatus.Success, row.Status)
+        Assert.Equal("", row.ErrorSummary)
+    End Function
+
+    <SkippableFact>
+    Public Async Function ResolveInterruptedRun_returns_false_for_an_unknown_run() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim result = Await _fixture.Gateway.ResolveInterruptedRunAsync(
+                Guid.NewGuid(), RunStatus.Failed, "nobody home", CancellationToken.None)
+
+        Assert.False(result.RunUpdated)
+        Assert.Equal(0, result.StudiesReconciled)
+    End Function
+
+    <SkippableFact>
+    Public Async Function ResolveInterruptedRun_cascades_to_stranded_study_rows() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim runId = Guid.NewGuid()
+        Await SeedRunAsync(runId, RunStatus.Running)
+        ' Two rows left at 'running' by the same dead host, no age threshold applied.
+        Await _fixture.Gateway.StartStudyAsync(runId, "NCT00000001", DateTimeOffset.UtcNow, CancellationToken.None)
+        Await _fixture.Gateway.StartStudyAsync(runId, "NCT00000002", DateTimeOffset.UtcNow, CancellationToken.None)
+
+        Dim result = Await _fixture.Gateway.ResolveInterruptedRunAsync(
+                runId, RunStatus.Interrupted, "server rebooted", CancellationToken.None)
+
+        Assert.Equal(2, result.StudiesReconciled)
+        Dim study = Await GetStudyStatusAsync("NCT00000001")
+        Assert.Equal(StudyExecution.StatusInterrupted, study.Status)
+        Assert.Equal("server rebooted", study.ErrorMessage)
+    End Function
+
+    <SkippableFact>
+    Public Async Function ResolveInterruptedRun_leaves_other_runs_study_rows_alone() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim deadRunId = Guid.NewGuid()
+        Dim liveRunId = Guid.NewGuid()
+        Await SeedRunAsync(deadRunId, RunStatus.Running)
+        Await SeedRunAsync(liveRunId, RunStatus.Running)
+        Await _fixture.Gateway.StartStudyAsync(deadRunId, "NCT00000001", DateTimeOffset.UtcNow, CancellationToken.None)
+        Await _fixture.Gateway.StartStudyAsync(liveRunId, "NCT00000002", DateTimeOffset.UtcNow, CancellationToken.None)
+
+        Dim result = Await _fixture.Gateway.ResolveInterruptedRunAsync(
+                deadRunId, RunStatus.Interrupted, "server rebooted", CancellationToken.None)
+
+        Assert.Equal(1, result.StudiesReconciled)
+        Dim untouched = Await GetStudyStatusAsync("NCT00000002")
+        Assert.Equal(StudyExecution.StatusRunning, untouched.Status)
+        Dim liveRun = Await GetRunStatusAsync(liveRunId)
+        Assert.Equal(RunStatus.Running, liveRun.Status)
+    End Function
+
+    ' A study row that recorded its own failure knows more than the blanket run
+    ' reason does, so the existing message wins.
+    <SkippableFact>
+    Public Async Function ResolveInterruptedRun_preserves_an_existing_study_error_message() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim runId = Guid.NewGuid()
+        Await SeedRunAsync(runId, RunStatus.Running)
+        Await _fixture.Gateway.StartStudyAsync(runId, "NCT00000001", DateTimeOffset.UtcNow, CancellationToken.None)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "UPDATE public.eligibility_study SET error_message = 'llm timeout' WHERE nct_id = 'NCT00000001'"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+
+        Await _fixture.Gateway.ResolveInterruptedRunAsync(
+                runId, RunStatus.Interrupted, "server rebooted", CancellationToken.None)
+
+        Dim study = Await GetStudyStatusAsync("NCT00000001")
+        Assert.Equal("llm timeout", study.ErrorMessage)
+    End Function
+
     ' ============ GetRecentRunsAsync ============
 
     <SkippableFact>
