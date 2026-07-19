@@ -271,6 +271,55 @@ public class WebTests : IClassFixture<WebTests.Factory>
         Assert.Contains("Backend unavailable", body);
     }
 
+    // Auto-refresh controls. The timer logic itself has no automated coverage
+    // (there is no JS test harness in this repo), so these assert the contract
+    // the script depends on: the elements exist, the default is 30s, and the
+    // controls are NOT behind the pipeline-ops gate.
+    [Fact]
+    public async Task Dashboard_renders_auto_refresh_controls()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("auto-refresh-toggle", body);
+        Assert.Contains("auto-refresh-interval", body);
+        Assert.Contains("auto-refresh-state", body);
+    }
+
+    [Fact]
+    public async Task Auto_refresh_offers_four_intervals_defaulting_to_30_seconds()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("value=\"10000\"", body);
+        Assert.Contains("value=\"30000\"", body);
+        Assert.Contains("value=\"60000\"", body);
+        Assert.Contains("value=\"300000\"", body);
+        // The 30s option is the one carrying `selected`.
+        Assert.Contains("value=\"30000\" selected", body);
+    }
+
+    // Watching a run is a read. The Reload button is deliberately outside the
+    // PipelineOps gate for the same reason - a read-only user watching a batch
+    // has more reason to refresh than anyone.
+    [Theory]
+    [InlineData("Author")]
+    [InlineData("Viewer")]
+    public async Task Auto_refresh_controls_render_for_read_only_roles(string role)
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add(TestAuthHandler.RoleHeader, role);
+
+        var response = await client.SendAsync(request);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("auto-refresh-toggle", body);
+    }
+
     [Fact]
     public async Task Unknown_path_returns_404()
     {

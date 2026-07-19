@@ -80,20 +80,32 @@
             // race, and the SLOWER response would overwrite the newer figures.
             let inFlight = null;
 
-            async function loadMetrics(fresh) {
+            // opts.silent      - skip the skeleton. Auto-refresh ticks pass this:
+            //                    flashing the whole dashboard into skeleton state
+            //                    every 10-30s is unusable, and a tick is not a
+            //                    user action that needs acknowledging.
+            // opts.includeToolCounts - the maintenance backlog counts do not move
+            //                    during a batch, and they are three UNCACHED
+            //                    queries. Ticks skip them.
+            async function loadMetrics(fresh, opts) {
+                const silent = !!(opts && opts.silent);
+                const includeToolCounts = !opts || opts.includeToolCounts !== false;
+
                 if (inFlight) { inFlight.abort(); }
                 const ctl = new AbortController();
                 inFlight = ctl;
-                dash.setAttribute("data-loading", "1");
+                if (!silent) { dash.setAttribute("data-loading", "1"); }
                 try {
                     // The maintenance-backlog counts on the failures card come from
                     // the same endpoint the Tools tab uses. Fetched in parallel and
                     // best-effort - it must not block or fail the main figures - so
                     // hydrate the counts here, before awaiting the metrics below.
-                    fetch("/Home/ToolCounts", { signal: ctl.signal, headers: { "Accept": "application/json" } })
-                        .then((r) => r.json())
-                        .then((tc) => { if (!ctl.signal.aborted) { hydrateToolCounts(tc); } })
-                        .catch(() => { /* leave the counts at their last value */ });
+                    if (includeToolCounts) {
+                        fetch("/Home/ToolCounts", { signal: ctl.signal, headers: { "Accept": "application/json" } })
+                            .then((r) => r.json())
+                            .then((tc) => { if (!ctl.signal.aborted) { hydrateToolCounts(tc); } })
+                            .catch(() => { /* leave the counts at their last value */ });
+                    }
 
                     const res = await fetch(fresh ? "/Home/Metrics?fresh=true" : "/Home/Metrics",
                                             { signal: ctl.signal, headers: { "Accept": "application/json" } });
@@ -120,6 +132,7 @@
                     if (payload.error) { showError(payload.error); return; }
                     hydrate(payload);
                     errBox.hidden = true;
+                    return payload;
                 } catch (err) {
                     // An abort is this function superseding itself, not a failure -
                     // and the request that replaced it owns the loading state now.
@@ -128,7 +141,9 @@
                 } finally {
                     // Always clear, even on failure: a skeleton that outlives its
                     // request tells the user to keep waiting for something that is
-                    // never coming.
+                    // never coming. A silent call never set the attribute, but
+                    // clearing it unconditionally is still correct - it may have
+                    // been set by a non-silent call this one superseded.
                     if (inFlight === ctl) {
                         dash.removeAttribute("data-loading");
                         inFlight = null;
@@ -454,6 +469,7 @@
             connection.on("BatchStarted", (e) => {
                 setTriggerButtonsDisabled(true);
                 appendEvent("Batch", "bg-info", `Started run ${e.runId.substring(0, 8)} (${e.studyCount} studies)`);
+                if (window.__dashAutoRefresh) { window.__dashAutoRefresh.start(); }
             });
             connection.on("TrialStarted", (e) =>
                 appendEvent("Trial", "bg-secondary", `Started ${e.nctId}`));
@@ -468,11 +484,13 @@
                 setTriggerButtonsDisabled(false);
                 appendEvent("Batch", e.status === "success" ? "bg-success" : "bg-danger",
                     `Completed run ${e.runId.substring(0, 8)} (${e.rowsPersisted} rows, ${(e.resolutionRate * 100).toFixed(1)}% resolved)`);
+                if (window.__dashAutoRefresh) { window.__dashAutoRefresh.stop(); }
                 loadMetrics(false);
             });
             connection.on("BatchCancelled", (e) => {
                 setTriggerButtonsDisabled(false);
                 appendEvent("Batch", "bg-warning", `Cancelled run ${e.runId.substring(0, 8)}`);
+                if (window.__dashAutoRefresh) { window.__dashAutoRefresh.stop(); }
                 // Cancelled still persisted whatever finished first.
                 loadMetrics(false);
             });
@@ -514,6 +532,139 @@
                     });
                 });
             }
+
+            // ===================== Auto-refresh =====================
+            //
+            // Polls ONLY while a batch is in flight. Idle costs nothing.
+            //
+            // Three things here are load-bearing and easy to "simplify" wrongly:
+            //
+            //  1. A tick SKIPS ITSELF if a request is already running. loadMetrics
+            //     aborts whatever is in flight (inFlight is a single slot), so a
+            //     tick landing during a user's Reload would kill that Reload. The
+            //     user's explicit action always wins; a skipped tick costs nothing
+            //     because another follows in 10-300s.
+            //
+            //  2. The poll STOPS ITSELF when its own payload says the run ended.
+            //     Not redundant with the SignalR BatchCompleted hook: if the
+            //     connection has dropped, that event never arrives and the timer
+            //     would otherwise spin forever.
+            //
+            //  3. Ticks pass fresh=false. fresh=true invalidates the SHARED 60s
+            //     cache, so polling with it would force every connected client's
+            //     aggregate uncached at once - the opposite of what a poll is for.
+            (function () {
+                const root = document.getElementById("auto-refresh");
+                const toggleEl = document.getElementById("auto-refresh-toggle");
+                const intervalEl = document.getElementById("auto-refresh-interval");
+                const stateEl = document.getElementById("auto-refresh-state");
+                if (!root || !toggleEl || !intervalEl || !stateEl) { return; }
+
+                const KEY_ON = "dashboard.autoRefresh";
+                const KEY_MS = "dashboard.autoRefreshIntervalMs";
+                const DEFAULT_MS = 30000;
+                const ALLOWED_MS = ["10000", "30000", "60000", "300000"];
+
+                let timer = null;        // the single interval handle
+                let runActive = root.dataset.runActive === "true";
+
+                // localStorage throws in some privacy modes; a dead preference
+                // must not take the dashboard down with it.
+                function readPref(key, fallback) {
+                    try {
+                        const v = localStorage.getItem(key);
+                        return v === null ? fallback : v;
+                    } catch (e) { return fallback; }
+                }
+                function writePref(key, value) {
+                    try { localStorage.setItem(key, value); } catch (e) { }
+                }
+
+                function chosenMs() {
+                    const v = parseInt(intervalEl.value, 10);
+                    return isNaN(v) ? DEFAULT_MS : v;
+                }
+                function label(ms) {
+                    return ms >= 60000 ? `${Math.round(ms / 60000)}min` : `${Math.round(ms / 1000)}s`;
+                }
+                function setState(text) { stateEl.textContent = text; }
+
+                function pulse() {
+                    stateEl.classList.add("ep-tick");
+                    setTimeout(() => stateEl.classList.remove("ep-tick"), 400);
+                }
+
+                async function tick() {
+                    // (1) above - never cancel a request already in progress.
+                    if (inFlight) { return; }
+                    pulse();
+                    const payload = await loadMetrics(false, { silent: true, includeToolCounts: false });
+                    // (2) above. An undefined payload means abort/error/expired
+                    // session - no information about the run, so keep polling and
+                    // let the visible error box speak for itself.
+                    if (payload && payload.mostRecentRun && payload.mostRecentRun.isRunning === false) {
+                        runActive = false;
+                        stop();
+                    }
+                }
+
+                // Always clears before setting: the only defence against leaking a
+                // second interval when this is called twice (interval change,
+                // visibility resume, a SignalR reconnect re-firing BatchStarted).
+                function start() {
+                    stopTimerOnly();
+                    if (!toggleEl.checked) { setState("off"); return; }
+                    if (!runActive) { setState("idle"); return; }
+                    if (document.visibilityState === "hidden") { setState("paused"); return; }
+                    const ms = chosenMs();
+                    timer = setInterval(tick, ms);
+                    setState(label(ms));
+                }
+                function stopTimerOnly() {
+                    if (timer !== null) { clearInterval(timer); timer = null; }
+                }
+                function stop() {
+                    stopTimerOnly();
+                    setState(toggleEl.checked ? "idle" : "off");
+                }
+
+                toggleEl.addEventListener("change", () => {
+                    writePref(KEY_ON, toggleEl.checked ? "1" : "0");
+                    if (toggleEl.checked) { start(); } else { stop(); }
+                });
+
+                intervalEl.addEventListener("change", () => {
+                    writePref(KEY_MS, intervalEl.value);
+                    start();   // clears the old interval first
+                });
+
+                // A hidden tab polling every 10s for hours is pure waste. Resume
+                // with an immediate tick so returning to the tab shows current
+                // figures rather than up-to-one-interval-old ones.
+                document.addEventListener("visibilitychange", () => {
+                    if (document.visibilityState === "hidden") {
+                        stopTimerOnly();
+                        if (toggleEl.checked && runActive) { setState("paused"); }
+                    } else {
+                        start();
+                        if (toggleEl.checked && runActive) { tick(); }
+                    }
+                });
+
+                // Restore preferences. An unrecognised stored interval is NOT
+                // trusted - a corrupt value would otherwise become a real
+                // setInterval delay.
+                const storedMs = readPref(KEY_MS, String(DEFAULT_MS));
+                intervalEl.value = ALLOWED_MS.indexOf(storedMs) >= 0 ? storedMs : String(DEFAULT_MS);
+                toggleEl.checked = readPref(KEY_ON, "1") === "1";
+
+                window.__dashAutoRefresh = {
+                    start: function () { runActive = true; start(); },
+                    stop: function () { runActive = false; stop(); }
+                };
+
+                start();
+            })();
 
             // First paint has no figures in it - go and get them.
             loadMetrics(false);

@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 33, "releaseDate": "2026-07-19" },
+  "current": { "major": 0, "minor": 1, "build": 34, "releaseDate": "2026-07-19" },
   "releases": [
+    {
+      "version": "0.1.34",
+      "releaseDate": "2026-07-19",
+      "enhancements": [
+        "Dashboard: an auto-refresh switch and interval (10s / 30s / 60s / 5 min, default 30s) next to Reload. While a batch is running the figures and the run card advance on their own; nothing polls when the pipeline is idle. The setting is remembered per browser."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.1.33",
       "releaseDate": "2026-07-19",
