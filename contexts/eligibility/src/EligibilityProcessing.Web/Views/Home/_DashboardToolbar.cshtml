@@ -40,6 +40,35 @@
             <svg class="ep-ico" style="width:16px;height:16px;" aria-hidden="true" focusable="false"><use href="#ep-reload"></use></svg>
             <span class="visually-hidden">Reload stats</span>
         </button>
+
+        @* Auto-refresh. Outside the PipelineOps gate for the same reason as
+           Reload above: watching a run is a read.
+
+           data-run-active seeds the timer from the server so a batch already in
+           flight at page load starts polling immediately - including one started
+           by the CLI on another host, which never fires a SignalR BatchStarted in
+           this browser. Deliberately NOT runInProgress: that is also true for
+           tool jobs, which do not drive the run card. *@
+        <div id="auto-refresh" class="d-flex align-items-center gap-2 border rounded-3 px-2 py-1"
+             data-run-active="@((Model.MostRecentRun?.Status == "running").ToString().ToLowerInvariant())">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       id="auto-refresh-toggle" checked
+                       aria-label="Automatically refresh the dashboard while a run is in progress" />
+            </div>
+            <label for="auto-refresh-interval" class="epk mb-0" style="white-space: nowrap;">
+                Auto-refresh: <span id="auto-refresh-state">idle</span>
+            </label>
+            <select id="auto-refresh-interval" class="form-select form-select-sm"
+                    style="width: auto;"
+                    aria-label="Auto-refresh interval">
+                <option value="10000">10s</option>
+                <option value="30000" selected>30s</option>
+                <option value="60000">60s</option>
+                <option value="300000">5 min</option>
+            </select>
+        </div>
+
         <div>
             <div class="fw-bold" style="font-size: 1.2rem; line-height: 1.2;">Clinical Eligibility Encoding</div>
             <div class="epk">Pipeline overview</div>
