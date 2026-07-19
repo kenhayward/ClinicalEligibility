@@ -458,3 +458,11 @@ FlowDev.env
 untracked/
 _untracked/
 *.dump
+
+# Claude Code: .claude/settings.json is shared (project-level plugin choices);
+# settings.local.json is the per-developer permission allowlist and holds
+# machine-specific absolute paths, so it stays local.
+.claude/settings.local.json
+
+# understand-anything knowledge-graph tooling - local-only, not shared.
+.ua/
