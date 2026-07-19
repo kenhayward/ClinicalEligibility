@@ -80,20 +80,32 @@
             // race, and the SLOWER response would overwrite the newer figures.
             let inFlight = null;
 
-            async function loadMetrics(fresh) {
+            // opts.silent      - skip the skeleton. Auto-refresh ticks pass this:
+            //                    flashing the whole dashboard into skeleton state
+            //                    every 10-30s is unusable, and a tick is not a
+            //                    user action that needs acknowledging.
+            // opts.includeToolCounts - the maintenance backlog counts do not move
+            //                    during a batch, and they are three UNCACHED
+            //                    queries. Ticks skip them.
+            async function loadMetrics(fresh, opts) {
+                const silent = !!(opts && opts.silent);
+                const includeToolCounts = !opts || opts.includeToolCounts !== false;
+
                 if (inFlight) { inFlight.abort(); }
                 const ctl = new AbortController();
                 inFlight = ctl;
-                dash.setAttribute("data-loading", "1");
+                if (!silent) { dash.setAttribute("data-loading", "1"); }
                 try {
                     // The maintenance-backlog counts on the failures card come from
                     // the same endpoint the Tools tab uses. Fetched in parallel and
                     // best-effort - it must not block or fail the main figures - so
                     // hydrate the counts here, before awaiting the metrics below.
-                    fetch("/Home/ToolCounts", { signal: ctl.signal, headers: { "Accept": "application/json" } })
-                        .then((r) => r.json())
-                        .then((tc) => { if (!ctl.signal.aborted) { hydrateToolCounts(tc); } })
-                        .catch(() => { /* leave the counts at their last value */ });
+                    if (includeToolCounts) {
+                        fetch("/Home/ToolCounts", { signal: ctl.signal, headers: { "Accept": "application/json" } })
+                            .then((r) => r.json())
+                            .then((tc) => { if (!ctl.signal.aborted) { hydrateToolCounts(tc); } })
+                            .catch(() => { /* leave the counts at their last value */ });
+                    }
 
                     const res = await fetch(fresh ? "/Home/Metrics?fresh=true" : "/Home/Metrics",
                                             { signal: ctl.signal, headers: { "Accept": "application/json" } });
@@ -120,6 +132,7 @@
                     if (payload.error) { showError(payload.error); return; }
                     hydrate(payload);
                     errBox.hidden = true;
+                    return payload;
                 } catch (err) {
                     // An abort is this function superseding itself, not a failure -
                     // and the request that replaced it owns the loading state now.
@@ -128,7 +141,9 @@
                 } finally {
                     // Always clear, even on failure: a skeleton that outlives its
                     // request tells the user to keep waiting for something that is
-                    // never coming.
+                    // never coming. A silent call never set the attribute, but
+                    // clearing it unconditionally is still correct - it may have
+                    // been set by a non-silent call this one superseded.
                     if (inFlight === ctl) {
                         dash.removeAttribute("data-loading");
                         inFlight = null;
