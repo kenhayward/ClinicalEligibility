@@ -568,6 +568,102 @@ public class HomeController : Controller
         }
     }
 
+    /// <summary>
+    /// Manually resolves a run stranded at 'running' by an unclean host shutdown.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Why this exists: neither exclusivity gate reads eligibility_run.status
+    /// (RunGate is in-process, PostgresRunLock is a session advisory lock), so a
+    /// stranded row blocks nothing server-side - but _DashboardToolbar disables the
+    /// trigger buttons while the most recent run reads as "running", so the
+    /// operator cannot start a batch until the row is corrected.
+    /// </para>
+    /// <para>
+    /// Restricted to runs at 'running' by the gateway's SQL guard, so a completed
+    /// run's history can never be rewritten through this path. Validation lives in
+    /// Core (RunStatus.ValidateResolution) rather than here, which keeps it
+    /// unit-testable without faking the gateway.
+    /// </para>
+    /// </remarks>
+    [HttpPost]
+    [Authorize(Policy = "PipelineOps")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ResolveRun(
+        [FromServices] RunGate gate,
+        Guid runId,
+        string status,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        if (runId == Guid.Empty)
+        {
+            return BadRequest(new { error = "A run id is required." });
+        }
+
+        // If THIS host is actively running that run it is by definition not
+        // stranded, and the operator has hit the button in error. The SQL guard
+        // alone would let this through, since a live run is legitimately
+        // 'running'. Deliberately does not take the gate - this is a targeted
+        // row correction, not a job, and blocking on an unrelated tool job would
+        // just make an incident harder to clear.
+        if (gate.CurrentRunId == runId)
+        {
+            return Conflict(new
+            {
+                error = "That run is currently in flight on this host. Cancel it instead.",
+                current_run_id = gate.CurrentRunId,
+                activity = gate.CurrentActivity
+            });
+        }
+
+        var validation = RunStatus.ValidateResolution(status, reason);
+        if (!validation.IsValid)
+        {
+            return BadRequest(new { error = validation.ErrorMessage });
+        }
+
+        try
+        {
+            var (runUpdated, studiesReconciled) = await _gateway.ResolveInterruptedRunAsync(
+                runId, validation.Status, validation.Reason, cancellationToken);
+
+            if (!runUpdated)
+            {
+                // Not an error: the run finished on its own between the page
+                // rendering and this submit, which is exactly what the guard is
+                // for. Say so plainly rather than 500ing or claiming success.
+                return Json(new
+                {
+                    ok = true,
+                    runUpdated = false,
+                    studiesReconciled = 0,
+                    message = "That run is no longer stranded - it has already reached a terminal status. Nothing was changed."
+                });
+            }
+
+            await _audit.WriteAsync("update", "eligibility_run", runId.ToString(),
+                $"manually resolved to '{validation.Status}': {validation.Reason}",
+                HttpContext.RequestAborted);
+
+            return Json(new
+            {
+                ok = true,
+                runUpdated = true,
+                studiesReconciled,
+                message = $"Run resolved to '{validation.Status}'."
+                          + (studiesReconciled > 0
+                              ? $" {studiesReconciled} stranded study row(s) marked interrupted."
+                              : string.Empty)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve run {RunId}", runId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = ex.Message });
+        }
+    }
+
     [HttpPost]
     [Authorize(Policy = "PipelineOps")]
     [ValidateAntiForgeryToken]
