@@ -1239,6 +1239,14 @@ Friend NotInheritable Class ThrowingGateway
         Return Task.CompletedTask  ' allow the orchestrator to record the failed metrics row
     End Function
 
+    ' Manual dashboard action - not part of any orchestrator path this fake drives.
+    Public Function ResolveInterruptedRunAsync(
+            runId As Guid, status As String, reason As String,
+            cancellationToken As CancellationToken) As Task(Of (RunUpdated As Boolean, StudiesReconciled As Integer)) _
+            Implements IPostgresGateway.ResolveInterruptedRunAsync
+        Return Task.FromResult((False, 0))
+    End Function
+
     Public Function RecordFailedTrialAsync(
             nctId As String, errorMessage As String, cancellationToken As CancellationToken) As Task _
             Implements IPostgresGateway.RecordFailedTrialAsync
