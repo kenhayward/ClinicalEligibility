@@ -168,6 +168,8 @@ Module Program
                     Return Await RunEmbedStudiesAsync(appHost, args, cancellationToken).ConfigureAwait(False)
                 Case "load-umls"
                     Return Await RunLoadUmlsAsync(appHost, args, cancellationToken).ConfigureAwait(False)
+                Case "backfill-semantic-types"
+                    Return Await RunBackfillSemanticTypesAsync(appHost, args, cancellationToken).ConfigureAwait(False)
                 Case "umls-compare"
                     Return Await RunUmlsCompareAsync(appHost, args, cancellationToken).ConfigureAwait(False)
                 Case "retry-umls"
@@ -575,6 +577,78 @@ Module Program
         Return 0
     End Function
 
+    ' Fills public.eligibility.semantic_type_tuis (and the derived semantic_type)
+    ' for every resolved row, in id-range batches.
+    '
+    ' Guarded on load completeness, not by convention but by refusal: backfilling
+    ' from a short umls.semantic_type writes NULLs across ~4M rows and reports
+    ' success. That is exactly the silent failure that left 3.48M rows without a
+    ' semantic type for two months before anyone noticed.
+    Private Async Function RunBackfillSemanticTypesAsync(
+            appHost As IHost,
+            args As String(),
+            cancellationToken As CancellationToken) As Task(Of Integer)
+
+        Dim store = appHost.Services.GetRequiredService(Of UmlsMetathesaurusStore)()
+        Dim dryRun = args.Any(Function(a) String.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase))
+        Dim batchSize = CLng(ParseOptionInt(args, "--batch-size", 100000))
+
+        Dim completeness = Await store.GetLoadCompletenessAsync(cancellationToken).ConfigureAwait(False)
+        If Not completeness.IsComplete Then
+            System.Console.Error.WriteLine("REFUSING TO BACKFILL - " & completeness.Describe())
+            System.Console.Error.WriteLine(
+                "umls.semantic_type is incomplete, so this would write NULLs across the corpus and look " &
+                "like success. Run load-umls --semantic-types-only first.")
+            Return 4
+        End If
+
+        Dim range = Await store.GetEligibilityIdRangeAsync(cancellationToken).ConfigureAwait(False)
+        If range.MaxId < range.MinId Then
+            System.Console.WriteLine("public.eligibility is empty; nothing to backfill.")
+            Return 0
+        End If
+
+        System.Console.WriteLine($"Backfilling semantic types over ids {range.MinId:N0}-{range.MaxId:N0} " &
+                                 $"in batches of {batchSize:N0}{If(dryRun, " (dry run)", "")}")
+        System.Console.WriteLine("  " & completeness.Describe())
+
+        Dim unmappableBefore = Await store.CountUnmappableEligibilityRowsAsync(cancellationToken).ConfigureAwait(False)
+
+        If dryRun Then
+            ' No cheap exact count without doing the work, so report the bound
+            ' rather than inventing a number: every resolved row is a candidate,
+            ' and rows already canonical are skipped by the UPDATE's predicate.
+            System.Console.WriteLine($"Dry run: {unmappableBefore:N0} resolved row(s) have a CUI absent from " &
+                                     "umls.semantic_type and cannot be filled. No rows were written.")
+            Return 0
+        End If
+
+        Dim total As Long = 0
+        Dim batches As Integer = 0
+        Dim fromId = range.MinId
+        Do While fromId <= range.MaxId
+            cancellationToken.ThrowIfCancellationRequested()
+            Dim toId = Math.Min(fromId + batchSize - 1, range.MaxId)
+            Dim changed = Await store.BackfillSemanticTypesBatchAsync(fromId, toId, cancellationToken).ConfigureAwait(False)
+            total += changed
+            batches += 1
+            System.Console.WriteLine($"  ids {fromId:N0}-{toId:N0}: {changed:N0} row(s) updated (total {total:N0})")
+            fromId = toId + 1
+        Loop
+
+        System.Console.WriteLine($"Done. {total:N0} row(s) updated across {batches:N0} batch(es).")
+        Dim unmappableAfter = Await store.CountUnmappableEligibilityRowsAsync(cancellationToken).ConfigureAwait(False)
+        If unmappableAfter > 0 Then
+            System.Console.WriteLine($"  {unmappableAfter:N0} resolved row(s) remain unfilled - their CUI is absent " &
+                                     "from umls.semantic_type. Expected 0; investigate the vocabulary load.")
+        Else
+            System.Console.WriteLine("  0 rows left unfilled.")
+        End If
+        System.Console.WriteLine("  Run VACUUM (ANALYZE) public.eligibility now: semantic_type is indexed, so these")
+        System.Console.WriteLine("  were non-HOT updates and the table and its indexes have bloated.")
+        Return 0
+    End Function
+
     ' Validation harness: resolve a sample of concepts from public.eligibility
     ' through BOTH the REST and Postgres backends (same scorer) and report the
     ' resolution-rate delta + disagreements. Run after load-umls, before flipping
@@ -965,6 +1039,13 @@ Module Program
         System.Console.WriteLine("      leaving atoms and concepts untouched. Use to repair a partial load")
         System.Console.WriteLine("      without rebuilding healthy tables; safe against a running system.")
         System.Console.WriteLine("      Exits 4 if semantic types do not cover every loaded concept.")
+        System.Console.WriteLine()
+        System.Console.WriteLine("  EligibilityProcessing.Cli backfill-semantic-types [--batch-size N] [--dry-run]")
+        System.Console.WriteLine("      Fill public.eligibility.semantic_type_tuis (and rewrite semantic_type into")
+        System.Console.WriteLine("      canonical sorted order) for every resolved row, in id-range batches")
+        System.Console.WriteLine("      (default 100000). Re-runnable: rows already at their target are skipped.")
+        System.Console.WriteLine("      Refuses to run (exit 4) when umls.semantic_type is incomplete, since that")
+        System.Console.WriteLine("      would write NULLs across the corpus and report success. VACUUM afterwards.")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli umls-compare [--count N]")
         System.Console.WriteLine("      Resolve a sample of concepts through both the REST and Postgres")
