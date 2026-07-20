@@ -183,18 +183,28 @@ Adds a migration. Version bump: **MINOR** (reset build to 0), plus a
 
 - `public.eligibility.semantic_type_tuis text[]`, GIN indexed.
 - `umls.semantic_type`: PK changes from `(cui, sty)` to `(cui, tui)`, and `tui`
-  becomes `NOT NULL`. Today `tui` is nullable and outside the key, and the loader
-  dedupes via `DISTINCT ON (cui, sty)`, so a conflicting TUI is discarded
-  arbitrarily. TUI must be trustworthy before anything keys on it.
+  becomes `NOT NULL`.
+
+  **Correction (measured 2026-07-20).** This section originally justified the
+  change by saying `DISTINCT ON (cui, sty)` discards a conflicting TUI
+  arbitrarily. That is **wrong**: TUI and STY are a perfect 132/132 bijection
+  across all 3,876,942 rows, with zero `(cui, tui)` duplicates, so nothing is
+  discarded.
+
+  The change is still correct, for a different reason. `--semantic-types-only`
+  (phase 1) is **additive**, so if a future UMLS release renames a semantic type,
+  `ON CONFLICT (cui, sty)` would insert a second row for the same `(cui, tui)`.
+  Keying on TUI makes the additive load idempotent against renames. The loader
+  changes with it: `DISTINCT ON (cui, tui)` and `ON CONFLICT (cui, tui)`.
 
   The loader changes with it: `LoadSemanticTypesAsync`
   (`UmlsMetathesaurusStore.vb:337`) becomes `DISTINCT ON (cui, tui)` and its
   `ON CONFLICT (cui, sty)` becomes `ON CONFLICT (cui, tui)`.
 
   **Ordering hazard.** The migration must delete any rows with a NULL `tui`
-  before applying `NOT NULL`, or it will fail. Freshly loaded MRSTY rows always
-  carry a TUI, but the 100 pre-existing junk rows may not. Deleting them is safe
-  - phase 1 reloads the table from source.
+  before applying `NOT NULL`, or it will fail. Measured 2026-07-20: there are
+  **zero** such rows, so this is a defensive no-op - kept because a future
+  partial load could reintroduce them.
 - New `umls.semantic_type_dim (tui PRIMARY KEY, sty NOT NULL)` - ~127 rows.
   Populated **by the migration itself**, via
   `INSERT ... SELECT DISTINCT tui, sty FROM umls.semantic_type`, so it does not
@@ -232,8 +242,13 @@ Also:
   verbatim. That shim breaks under a real multi-value representation and must be
   replaced by reading the cached TUI array.
 - `umls.concept_normalization.semantic_type` (V20) caches the same joined string.
-  It comes into this phase: leaving it stale would reintroduce old-format strings
-  on every cache hit.
+
+  **Correction (2026-07-20).** This section implied the cache needs a TUI column.
+  It does not. The cache already stores `concept_code`, so the orchestrator looks
+  the assignments up from that CUI instead of reusing the cached string. No
+  schema change to `concept_normalization`, and the stale string is simply not
+  read on that path any more. Cost: one extra lookup per cache hit - a
+  sub-millisecond local query, memoized per run by `UmlsCache`.
 
 The dedup merge key `(ConceptCode, SemanticType, Criterion)`
 (`DuplicateConceptMerger.vb:39,47`) becomes TUI-array-based. Note this changes
@@ -248,10 +263,11 @@ A CLI command following the existing maintenance pattern (`normalize-umls`,
 - Scope: **all** rows with a resolved `concept_code`, not only NULL ones. The
   ~500K legacy rows are rewritten to canonical order.
 - Writes both `semantic_type_tuis` and the derived `semantic_type`.
-- Expected yield near-total: every UMLS CUI has at least one semantic type, so
-  approximately all 3.98M resolved rows should populate. Rows whose CUI has no
-  MRSTY entry stay NULL and must be **counted and reported**, not silently
-  skipped.
+- Expected yield: **total**. Measured 2026-07-20, after phase 1 widened the load
+  to every MRSTY CUI, **0** of the corpus's 132,243 distinct CUIs are absent from
+  `umls.semantic_type` - down from 19,133 before the widening. All 3,985,113
+  resolved rows can be filled. The unmapped count must still be **reported**,
+  since it is the regression signal, but it should read 0.
 - `ix_eligibility_semantic_type` indexes the changed column, so these are
   non-HOT updates. Expect table and index bloat across 4M rows: a `VACUUM
   (ANALYZE)` pass is **part of the job**, not an afterthought.

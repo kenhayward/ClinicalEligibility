@@ -56,8 +56,9 @@ Public Class UmlsMetathesaurusIntegrationTests
         Assert.Equal("Diabetes Mellitus, Non-Insulin-Dependent", diabetes.Name)
         Assert.Equal("MSH", diabetes.RootSource)
 
-        Dim sts = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
-        Assert.Contains("Disease or Syndrome", sts)
+        Dim sts = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
+        Assert.Contains("Disease or Syndrome", sts.Select(Function(a) a.Sty))
+        Assert.Contains("T047", sts.Select(Function(a) a.Tui))
 
         ' Unknown concept -> no candidates (and never throws).
         Assert.Empty(Await client.SearchAsync("zzzqqq nonexistent term", CancellationToken.None))
@@ -402,6 +403,142 @@ Public Class UmlsMetathesaurusIntegrationTests
         }, CancellationToken.None)
 
         Assert.Equal(2L, written)
+    End Function
+
+    ' ============ BackfillSemanticTypesBatchAsync ============
+
+    <SkippableFact>
+    Public Async Function Backfill_fills_tuis_and_canonical_string_for_resolved_rows() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0000005", .Tui = "T116", .Sty = "Amino Acid, Peptide, or Protein"},
+            New SemanticTypeRow With {.Cui = "C0000005", .Tui = "T126", .Sty = "Enzyme"}
+        }, CancellationToken.None)
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "crit", "concept", conceptCode:="C0000005")
+
+        Dim updated = Await store.BackfillSemanticTypesBatchAsync(0, Long.MaxValue, CancellationToken.None)
+
+        Assert.Equal(1L, updated)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT semantic_type, array_length(semantic_type_tuis,1) FROM public.eligibility WHERE nct_id='NCT00000001'"
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Await reader.ReadAsync()
+                    ' The comma-containing name survives intact in the display string,
+                    ' and the array carries both TUIs.
+                    Assert.Equal("Amino Acid, Peptide, or Protein, Enzyme", reader.GetString(0))
+                    Assert.Equal(2, reader.GetInt32(1))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    ' Re-running must converge, not churn. Every rewritten row is a non-HOT
+    ' update across a 2 GB table, so a backfill that re-applied itself would
+    ' bloat the table on each pass.
+    <SkippableFact>
+    Public Async Function Backfill_is_idempotent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "crit", "concept", conceptCode:="C0020615")
+
+        Await store.BackfillSemanticTypesBatchAsync(0, Long.MaxValue, CancellationToken.None)
+        Dim second = Await store.BackfillSemanticTypesBatchAsync(0, Long.MaxValue, CancellationToken.None)
+
+        Assert.Equal(0L, second)
+    End Function
+
+    ' Legacy rows keep whatever order the REST API returned, which is not
+    ' alphabetical. The backfill must rewrite them, not skip them as "already
+    ' populated" - otherwise GROUP BY splits one CUI across two strings.
+    <SkippableFact>
+    Public Async Function Backfill_rewrites_legacy_strings_into_canonical_order() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0000096", .Tui = "T109", .Sty = "Organic Chemical"},
+            New SemanticTypeRow With {.Cui = "C0000096", .Tui = "T123", .Sty = "Biologically Active Substance"}
+        }, CancellationToken.None)
+        Await _fixture.InsertEligibilityRowAsync("NCT00000004", "crit", "concept", conceptCode:="C0000096")
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                ' REST-era ordering: Organic Chemical first, which is not alphabetical.
+                cmd.CommandText = "UPDATE public.eligibility SET semantic_type = 'Organic Chemical, Biologically Active Substance' WHERE nct_id = 'NCT00000004'"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+
+        Dim updated = Await store.BackfillSemanticTypesBatchAsync(0, Long.MaxValue, CancellationToken.None)
+
+        Assert.Equal(1L, updated)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT semantic_type FROM public.eligibility WHERE nct_id='NCT00000004'"
+                Assert.Equal("Biologically Active Substance, Organic Chemical", CStr(Await cmd.ExecuteScalarAsync()))
+            End Using
+        End Using
+    End Function
+
+    ' Unresolved rows must not gain an empty array. NULL means "no concept";
+    ' an empty array is a distinct value that containment filters could match,
+    ' making unresolved rows look like a category of their own.
+    <SkippableFact>
+    Public Async Function Backfill_leaves_unresolved_rows_null() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await _fixture.InsertEligibilityRowAsync("NCT00000003", "crit", "concept", conceptCode:="")
+
+        Await store.BackfillSemanticTypesBatchAsync(0, Long.MaxValue, CancellationToken.None)
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT semantic_type_tuis IS NULL FROM public.eligibility WHERE nct_id='NCT00000003'"
+                Assert.True(CBool(Await cmd.ExecuteScalarAsync()))
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function Backfill_respects_the_id_range() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+        Await _fixture.InsertEligibilityRowAsync("NCT00000005", "crit", "concept", conceptCode:="C0020615")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000006", "crit", "concept", conceptCode:="C0020615")
+
+        Dim range = Await store.GetEligibilityIdRangeAsync(CancellationToken.None)
+        ' Only the first row's id.
+        Dim updated = Await store.BackfillSemanticTypesBatchAsync(range.MinId, range.MinId, CancellationToken.None)
+
+        Assert.Equal(1L, updated)
+    End Function
+
+    <SkippableFact>
+    Public Async Function CountUnmappableEligibilityRows_finds_cuis_absent_from_the_vocabulary() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+        Await _fixture.InsertEligibilityRowAsync("NCT00000007", "crit", "concept", conceptCode:="C0020615")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000008", "crit", "concept", conceptCode:="C9999999")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000009", "crit", "concept", conceptCode:="")
+
+        ' Only the C9999999 row: the resolved-and-known row is fine, and the
+        ' unresolved row is not a gap.
+        Assert.Equal(1L, Await store.CountUnmappableEligibilityRowsAsync(CancellationToken.None))
     End Function
 
     Private Shared Function Atom(cui As String, str As String, sab As String, tty As String, pref As Boolean) As AtomRow

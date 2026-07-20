@@ -120,8 +120,14 @@ Public NotInheritable Class UmlsNormalizeJob
                 Dim candidates = Await _umlsClient.SearchAsync(term, cancellationToken).ConfigureAwait(False)
                 match = _scorer.PickBestMatch(term, candidates)
                 If match.IsResolved Then
-                    Dim semTypes = Await _umlsClient.GetSemanticTypesAsync(match.ConceptCode, cancellationToken).ConfigureAwait(False)
-                    semantic = If(semTypes Is Nothing OrElse semTypes.Count = 0, "", String.Join(", ", semTypes))
+                    Dim semTypes = Await _umlsClient.GetSemanticTypeAssignmentsAsync(match.ConceptCode, cancellationToken).ConfigureAwait(False)
+                    ' Sorted by name, matching ResolvedRecord's canonical form -
+                    ' this string is cached in umls.concept_normalization and
+                    ' would otherwise be a second, differently-ordered rendering
+                    ' of the same concept.
+                    semantic = If(semTypes Is Nothing OrElse semTypes.Count = 0,
+                                  "",
+                                  String.Join(", ", semTypes.Select(Function(a) a.Sty).OrderBy(Function(s) s, StringComparer.Ordinal)))
                 End If
             End If
 

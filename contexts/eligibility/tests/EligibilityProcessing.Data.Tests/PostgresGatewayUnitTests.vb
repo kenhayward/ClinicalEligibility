@@ -57,7 +57,7 @@ Public Class PostgresGatewayUnitTests
                           End Sub)
         ' The last entry is the current target schema level (drives the CLI
         ' migrate banner).
-        Assert.Equal("V21__signing_credentials", names(names.Count - 1))
+        Assert.Equal("V22__semantic_type_tuis", names(names.Count - 1))
     End Sub
 
     ' ============ NullIfEmpty ============
@@ -134,12 +134,12 @@ Public Class PostgresGatewayUnitTests
     End Sub
 
     <Fact>
-    Public Sub BuildMultiRowInsert_binds_12_parameters_per_row()
+    Public Sub BuildMultiRowInsert_binds_13_parameters_per_row()
         Dim cmd = New NpgsqlCommand()
         Dim records = New ResolvedRecord() {MakeResolved(), MakeResolved()}
         PostgresGateway.BuildMultiRowInsert(cmd, records)
 
-        Assert.Equal(24, cmd.Parameters.Count)  ' 12 cols x 2 rows
+        Assert.Equal(26, cmd.Parameters.Count)  ' 13 cols x 2 rows (semantic_type_tuis added in V22)
     End Sub
 
     <Fact>
@@ -262,7 +262,7 @@ Public Class PostgresGatewayUnitTests
         Else
             match = New UmlsMatch(conceptCode, umlsName, matchSource, matchScore)
         End If
-        Return New ResolvedRecord(criterion, match, semanticTypes:=Array.Empty(Of String)())
+        Return New ResolvedRecord(criterion, match, semanticTypes:=Array.Empty(Of SemanticTypeAssignment)())
     End Function
 
 End Class

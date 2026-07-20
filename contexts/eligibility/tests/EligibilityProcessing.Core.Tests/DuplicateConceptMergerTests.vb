@@ -179,9 +179,12 @@ Public Class DuplicateConceptMergerTests
         Dim m = New UmlsMatch(
                 conceptCode:=conceptCode, umlsName:=concept,
                 matchSource:="MSH", matchScore:=0.9)
+        ' The helper takes a single name for brevity; a synthetic TUI keeps the
+        ' merge key (which is now the TUI set) aligned with that name.
         Dim semanticTypes = If(String.IsNullOrEmpty(semanticType),
-                                Array.Empty(Of String)(),
-                                New String() {semanticType})
+                                Array.Empty(Of SemanticTypeAssignment)(),
+                                New SemanticTypeAssignment() {
+                                    New SemanticTypeAssignment("T" & Math.Abs(semanticType.GetHashCode()).ToString().PadLeft(3, "0"c).Substring(0, 3), semanticType)})
         Return New ResolvedRecord(c, m, semanticTypes)
     End Function
 
@@ -193,7 +196,7 @@ Public Class DuplicateConceptMergerTests
                 nctId:="NCT00000001", criterion:=criterion, domain:="Disease",
                 concept:=concept, qualifier:="", timeWindow:="",
                 originalText:=originalText)
-        Return New ResolvedRecord(c, UmlsMatch.Unresolved, Array.Empty(Of String)())
+        Return New ResolvedRecord(c, UmlsMatch.Unresolved, Array.Empty(Of SemanticTypeAssignment)())
     End Function
 
 End Class

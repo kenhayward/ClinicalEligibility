@@ -1,7 +1,18 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 35, "releaseDate": "2026-07-20" },
+  "current": { "major": 0, "minor": 2, "build": 0, "releaseDate": "2026-07-20" },
   "releases": [
+    {
+      "version": "0.2.0",
+      "releaseDate": "2026-07-20",
+      "enhancements": [
+        "Semantic types are now stored as a queryable list of UMLS type ids alongside the display text, so a criterion carrying several types can be filtered on any one of them. Previously the types were a single joined string matched whole, which under-reported common types by more than half.",
+        "New backfill-semantic-types command fills the new column across the existing corpus and rewrites the display text into one consistent order, so the same concept reads identically everywhere."
+      ],
+      "fixes": [
+        "Duplicate criteria for the same concept now merge regardless of the order their semantic types were recorded in; previously a different order counted as a different record."
+      ]
+    },
     {
       "version": "0.1.35",
       "releaseDate": "2026-07-20",

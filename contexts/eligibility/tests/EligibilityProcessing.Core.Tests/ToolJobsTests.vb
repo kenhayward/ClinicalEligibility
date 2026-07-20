@@ -27,7 +27,7 @@ Public Class ToolJobsTests
 
         Dim umls As New FakeUmlsClient()
         umls.SearchResults("Diabetes Mellitus") = New UmlsCandidate() {New UmlsCandidate("C0011849", "Diabetes Mellitus", "MSH")}
-        umls.SemanticTypesResults("C0011849") = New String() {"Disease or Syndrome"}
+        umls.SemanticTypesResults("C0011849") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T047", "Disease or Syndrome")}
 
         Dim job As New UmlsNormalizeJob(gateway, normalizer, umls, New UmlsMatchScorer())
         Dim counters = Await job.RunAsync(

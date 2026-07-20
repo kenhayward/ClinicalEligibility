@@ -121,7 +121,7 @@ Public Class UmlsCacheTests
         Assert.Equal(1, fake.SearchCalls.Count)
     End Function
 
-    ' ============ GetSemanticTypesAsync — input gate ============
+    ' ============ GetSemanticTypeAssignmentsAsync — input gate ============
 
     <Theory>
     <InlineData("")>
@@ -129,32 +129,35 @@ Public Class UmlsCacheTests
     Public Async Function SemanticTypes_returns_empty_without_calling_inner_for_blank_cui(cui As String) As Task
         Dim fake = New FakeUmlsClient()
         Dim cache = New UmlsCache(fake)
-        Dim result = Await cache.GetSemanticTypesAsync(cui, CancellationToken.None)
+        Dim result = Await cache.GetSemanticTypeAssignmentsAsync(cui, CancellationToken.None)
         Assert.Empty(result)
         Assert.Empty(fake.SemanticTypesCalls)
     End Function
 
-    ' ============ GetSemanticTypesAsync — caching ============
+    ' ============ GetSemanticTypeAssignmentsAsync — caching ============
 
     <Fact>
     Public Async Function SemanticTypes_first_call_delegates_to_inner() As Task
         Dim fake = MakeFake()
-        fake.SemanticTypesResults("C0011860") = New String() {"Disease or Syndrome"}
+        fake.SemanticTypesResults("C0011860") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T047", "Disease or Syndrome")}
         Dim cache = New UmlsCache(fake)
-        Dim result = Await cache.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Dim result = Await cache.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
 
-        Assert.Equal(New String() {"Disease or Syndrome"}, result.ToArray())
+        ' Compare projections: SemanticTypeAssignment has reference equality, so
+        ' comparing instances would pass only by accident of identity.
+        Assert.Equal({"T047"}, result.Select(Function(a) a.Tui).ToArray())
+        Assert.Equal({"Disease or Syndrome"}, result.Select(Function(a) a.Sty).ToArray())
         Assert.Equal(1, fake.SemanticTypesCalls.Count)
     End Function
 
     <Fact>
     Public Async Function SemanticTypes_second_call_for_same_cui_hits_cache() As Task
         Dim fake = MakeFake()
-        fake.SemanticTypesResults("C0011860") = New String() {"Disease or Syndrome"}
+        fake.SemanticTypesResults("C0011860") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T047", "Disease or Syndrome")}
         Dim cache = New UmlsCache(fake)
 
-        Await cache.GetSemanticTypesAsync("C0011860", CancellationToken.None)
-        Await cache.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
 
         Assert.Equal(1, fake.SemanticTypesCalls.Count)
     End Function
@@ -164,12 +167,12 @@ Public Class UmlsCacheTests
         ' UMLS CUIs are conventionally uppercase "C" + 7 digits; we don't
         ' normalise case to avoid masking malformed inputs.
         Dim fake = MakeFake()
-        fake.SemanticTypesResults("C0011860") = New String() {"Disease or Syndrome"}
-        fake.SemanticTypesResults("c0011860") = New String() {"Something Else"}
+        fake.SemanticTypesResults("C0011860") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T047", "Disease or Syndrome")}
+        fake.SemanticTypesResults("c0011860") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T999", "Something Else")}
         Dim cache = New UmlsCache(fake)
 
-        Await cache.GetSemanticTypesAsync("C0011860", CancellationToken.None)
-        Await cache.GetSemanticTypesAsync("c0011860", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("c0011860", CancellationToken.None)
 
         Assert.Equal(2, fake.SemanticTypesCalls.Count)
     End Function
@@ -179,8 +182,8 @@ Public Class UmlsCacheTests
         Dim fake = MakeFake()
         Dim cache = New UmlsCache(fake)
 
-        Await cache.GetSemanticTypesAsync("CXXXXXXX", CancellationToken.None)
-        Await cache.GetSemanticTypesAsync("CXXXXXXX", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("CXXXXXXX", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("CXXXXXXX", CancellationToken.None)
 
         Assert.Equal(1, fake.SemanticTypesCalls.Count)
     End Function
@@ -195,7 +198,7 @@ Public Class UmlsCacheTests
         Dim cache = New UmlsCache(fake)
 
         Await cache.SearchAsync("C0011860", CancellationToken.None)
-        Await cache.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
 
         Assert.Equal(1, fake.SearchCalls.Count)
         Assert.Equal(1, fake.SemanticTypesCalls.Count)
@@ -221,7 +224,7 @@ Public Class UmlsCacheTests
         Using cts As New CancellationTokenSource()
             cts.Cancel()
             Await Assert.ThrowsAnyAsync(Of OperationCanceledException)(
-                Function() cache.GetSemanticTypesAsync("C0011860", cts.Token))
+                Function() cache.GetSemanticTypeAssignmentsAsync("C0011860", cts.Token))
         End Using
     End Function
 
@@ -237,7 +240,7 @@ Public Class UmlsCacheTests
         Await cache.SearchAsync("diabetes", CancellationToken.None)
         Await cache.SearchAsync("asthma", CancellationToken.None)
         Await cache.SearchAsync("diabetes", CancellationToken.None)  ' cache hit, no new entry
-        Await cache.GetSemanticTypesAsync("C001", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("C001", CancellationToken.None)
 
         Assert.Equal(2, cache.SearchCacheSize)
         Assert.Equal(1, cache.SemanticTypesCacheSize)
@@ -249,7 +252,7 @@ Public Class UmlsCacheTests
         Dim cache = New UmlsCache(fake)
 
         Await cache.SearchAsync("diabetes", CancellationToken.None)
-        Await cache.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Await cache.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
         Assert.Equal(1, cache.SearchCacheSize)
         Assert.Equal(1, cache.SemanticTypesCacheSize)
 

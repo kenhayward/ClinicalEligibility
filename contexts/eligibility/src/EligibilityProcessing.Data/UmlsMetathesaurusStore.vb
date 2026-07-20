@@ -231,21 +231,21 @@ ORDER BY top.best DESC"
         Return String.Join(" | ", lexemes)
     End Function
 
-    ''' <summary>Semantic-type names for a CUI (umls.semantic_type). Empty when none.</summary>
-    Public Async Function GetSemanticTypesAsync(
+    ''' <summary>Semantic-type assignments for a CUI (umls.semantic_type). Empty when none.</summary>
+    Public Async Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String))
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment))
 
-        If String.IsNullOrWhiteSpace(cui) Then Return Array.Empty(Of String)()
+        If String.IsNullOrWhiteSpace(cui) Then Return Array.Empty(Of SemanticTypeAssignment)()
 
-        Dim result As New List(Of String)
+        Dim result As New List(Of SemanticTypeAssignment)
         Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
             Using cmd = conn.CreateCommand()
-                cmd.CommandText = "SELECT sty FROM umls.semantic_type WHERE cui = @cui ORDER BY sty"
+                cmd.CommandText = "SELECT tui, sty FROM umls.semantic_type WHERE cui = @cui ORDER BY sty"
                 cmd.Parameters.Add(New NpgsqlParameter("cui", NpgsqlDbType.Text) With {.Value = cui.Trim()})
                 Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
                     While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
-                        result.Add(reader.GetString(0))
+                        result.Add(New SemanticTypeAssignment(reader.GetString(0), reader.GetString(1)))
                     End While
                 End Using
             End Using
@@ -351,10 +351,23 @@ CREATE TEMP TABLE mrsty_stage (cui text, tui text, sty text)"
             Using cmd = conn.CreateCommand()
                 cmd.CommandText = "
 INSERT INTO umls.semantic_type (cui, tui, sty)
-SELECT DISTINCT ON (cui, sty) cui, tui, sty
+SELECT DISTINCT ON (cui, tui) cui, tui, sty
 FROM pg_temp.mrsty_stage
-ORDER BY cui, sty
-ON CONFLICT (cui, sty) DO NOTHING"
+ORDER BY cui, tui
+ON CONFLICT (cui, tui) DO NOTHING"
+                Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+
+            ' Refresh the TUI -> name dimension (~132 rows) so a vocabulary
+            ' release that renames a semantic type updates the display name
+            ' without a separate step. The main table is keyed on (cui, tui), so
+            ' a rename does NOT create a duplicate row there - but the dim row
+            ' would otherwise keep the old name, hence the explicit UPDATE.
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.semantic_type_dim (tui, sty)
+SELECT DISTINCT tui, sty FROM pg_temp.mrsty_stage WHERE tui IS NOT NULL AND tui <> ''
+ON CONFLICT (tui) DO UPDATE SET sty = excluded.sty"
                 Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
             End Using
         End Using
@@ -439,6 +452,91 @@ ORDER BY cui,
                 cmd.CommandText = $"SELECT count(*) FROM {safe}"
                 Dim scalar = Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False)
                 Return Convert.ToInt64(scalar)
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' Fills semantic_type_tuis and the derived semantic_type for resolved rows
+    ''' whose id falls in [fromId, toId]. Returns the number of rows changed.
+    ''' </summary>
+    ''' <remarks>
+    ''' Re-runnable: the WHERE clause excludes rows already at their target
+    ''' value, so a second pass over the same range returns 0 rather than
+    ''' rewriting (and re-bloating) them.
+    '''
+    ''' Aggregates per CUI once in a CTE and joins, rather than running a
+    ''' correlated subquery per row - at ~4M rows the difference is not marginal.
+    ''' Ordering by sty matches ResolvedRecord's canonical display form, so a
+    ''' backfilled row and a freshly written one are byte-identical.
+    ''' </remarks>
+    Public Async Function BackfillSemanticTypesBatchAsync(
+            fromId As Long,
+            toId As Long,
+            cancellationToken As CancellationToken) As Task(Of Long)
+
+        Const Sql As String = "
+WITH canon AS (
+    SELECT cui,
+           array_agg(tui ORDER BY tui)        AS tuis,
+           string_agg(sty, ', ' ORDER BY sty) AS sty_text
+    FROM umls.semantic_type
+    GROUP BY cui
+)
+UPDATE public.eligibility e
+   SET semantic_type_tuis = c.tuis,
+       semantic_type      = c.sty_text
+  FROM canon c
+ WHERE e.concept_code = c.cui
+   AND e.id BETWEEN @from_id AND @to_id
+   AND e.concept_code IS NOT NULL
+   AND e.concept_code <> ''
+   AND (e.semantic_type_tuis IS DISTINCT FROM c.tuis
+     OR e.semantic_type      IS DISTINCT FROM c.sty_text)"
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                cmd.Parameters.Add(New NpgsqlParameter("from_id", NpgsqlDbType.Bigint) With {.Value = fromId})
+                cmd.Parameters.Add(New NpgsqlParameter("to_id", NpgsqlDbType.Bigint) With {.Value = toId})
+                Return Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' Resolved rows whose CUI has no umls.semantic_type entry, so the backfill
+    ''' cannot fill them. Expected 0 - a non-zero value means the vocabulary is
+    ''' missing CUIs the corpus uses, and is the regression signal to report.
+    ''' </summary>
+    Public Async Function CountUnmappableEligibilityRowsAsync(
+            cancellationToken As CancellationToken) As Task(Of Long)
+
+        Const Sql As String = "
+SELECT count(*)
+  FROM public.eligibility e
+ WHERE e.concept_code IS NOT NULL AND e.concept_code <> ''
+   AND NOT EXISTS (SELECT 1 FROM umls.semantic_type s WHERE s.cui = e.concept_code)"
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                Return Convert.ToInt64(Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False))
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>Min and max id in public.eligibility, for batching. (0, -1) when empty.</summary>
+    Public Async Function GetEligibilityIdRangeAsync(
+            cancellationToken As CancellationToken) As Task(Of (MinId As Long, MaxId As Long))
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT COALESCE(min(id), 0), COALESCE(max(id), -1) FROM public.eligibility"
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                    Return (reader.GetInt64(0), reader.GetInt64(1))
+                End Using
             End Using
         End Using
     End Function
