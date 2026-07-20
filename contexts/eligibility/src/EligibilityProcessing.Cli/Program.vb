@@ -507,7 +507,9 @@ Module Program
 
         Dim semanticTypesOnly = IsSemanticTypesOnly(args)
         Dim hierarchyOnly = IsHierarchyOnly(args)
-        Dim maxDepth = ParseOptionInt(args, "--max-depth", 5)
+        ' Default 2, chosen by measurement: depth 3 runs at 97% of the 600s
+        ' output command timeout, and rollups above level 2 tend toward "Disease".
+        Dim maxDepth = ParseOptionInt(args, "--max-depth", 2)
 
         Dim rrfDir = GetOptionValue(args, "--rrf-dir")
         If String.IsNullOrWhiteSpace(rrfDir) Then
@@ -1090,7 +1092,7 @@ Module Program
         System.Console.WriteLine("      without rebuilding healthy tables; safe against a running system.")
         System.Console.WriteLine("      Exits 4 if semantic types do not cover every loaded concept.")
         System.Console.WriteLine("      --hierarchy-only rebuilds umls.concept_ancestor alone from MRREL.RRF")
-        System.Console.WriteLine("      (SNOMED is-a edges, transitive closure to --max-depth levels, default 5).")
+        System.Console.WriteLine("      (SNOMED is-a edges, transitive closure to --max-depth levels, default 2).")
         System.Console.WriteLine("      Leaves atoms, concepts and semantic types untouched. Exits 4 if the")
         System.Console.WriteLine("      result is implausibly small. MRREL.RRF is ~6 GB and is read in full.")
         System.Console.WriteLine()
