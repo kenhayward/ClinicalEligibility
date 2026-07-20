@@ -317,27 +317,58 @@ No migration. Version bump: **build only**.
 `EligibilityFilter.SemanticType` becomes a collection. `EligibilityFilterOptions`
 changes shape accordingly.
 
-## Phase 4: authoring surface
+## Phase 4: authoring surface - CLOSED, NOT BUILT (2026-07-20)
 
-Adds a migration. Version bump: **MINOR**.
+**The planned schema change was dropped after measurement. This section records
+why, so it is not re-proposed on the same reasoning.**
 
-Deliberately deferred: the authoring area is a separate demo surface and folding
-it into phase 2 would roughly double that PR.
+The plan was: add `semantic_type_tuis` to `authoring_criterion` (V6) and
+`authoring_criterion_source` (V10), with the matching changes to
+`AuthoringController.cs:381,505,547,667`;
+`PostgresGateway.vb:2743,2760,2782,2803,3010-3036,3078-3094`;
+`Models/AuthoringCriterionForm.cs:21`, `Models/AuthoringCriterionSourceForm.cs:18`;
+`AuthoringCriterion.vb:19`, `AuthoringCriterionSource.vb:20`;
+`Export/AuthoringCriteriaCsv.cs:37`, `Export/AuthoringCriteriaAuditCsv.cs:103,118`;
+and 11 sites in `Views/Authoring/Edit.cshtml`.
 
-- `authoring_criterion.semantic_type` (V6) and
-  `authoring_criterion_source.semantic_type` (V10) hold the same joined string.
-- Read/write sites: `AuthoringController.cs:381,505,547,667`;
-  `PostgresGateway.vb:2743,2760,2782,2803,3010-3036,3078-3094`;
-  `Models/AuthoringCriterionForm.cs:21`,
-  `Models/AuthoringCriterionSourceForm.cs:18`; `AuthoringCriterion.vb:19`,
-  `AuthoringCriterionSource.vb:20`.
-- Exports: `Export/AuthoringCriteriaCsv.cs:37`,
-  `Export/AuthoringCriteriaAuditCsv.cs:103,118`.
-- Views: `Views/Authoring/Edit.cshtml` (11 sites).
+### Why it was dropped
 
-Until phase 4 lands, authoring rows keep the legacy string format. That is
-acceptable because the authoring corpus is small and hand-built, but it must be
-stated rather than discovered.
+Three findings, all measured against production on 2026-07-20:
+
+1. **Nothing queries authoring semantic types.** They appear as a hidden input, a
+   tooltip (`Edit.cshtml:355,367`) and two CSV columns. No filter, no grouping,
+   no aggregation. The TUI array exists to make containment queries possible;
+   there are none here to enable.
+2. **The field is never user-edited.** It is copied from the corpus, so it cannot
+   drift independently of a source that is now canonical.
+3. **The inconsistency was two rows, and it self-heals.** Of 57
+   `authoring_criterion` rows and 100 `authoring_criterion_source` rows, exactly
+   **2** carried a non-canonical string - both the same ordering artefact
+   (`Organic Chemical, Biologically Active Substance` for `C0005437` and
+   `C0010294`). New rows are populated from `ClusterCommonCriteriaAsync` and
+   corpus snapshots, both canonical since phases 2 and 3, so the format converges
+   without intervention.
+
+Building the schema change would have been consistency for its own sake: a
+migration, four gateway methods, two core types, two form models, two exports and
+eleven view sites, serving no query anyone makes.
+
+### What was done instead
+
+The two rows were canonicalised in place with a single UPDATE against
+`umls.semantic_type`. Verified afterwards: 0 non-canonical rows in either table,
+and 0 CUIs rendering more than one string.
+
+### If this is revisited
+
+The right trigger is a real requirement - something that needs to filter, group
+or aggregate authoring criteria by semantic type. At that point the array can be
+added against a concrete use, and this section is the record of why it was not
+added speculatively.
+
+**Standing property, worth stating plainly:** the authoring tables carry semantic
+types as a **display string only**, by design. Anything analytic should go
+through `public.eligibility`.
 
 ## Risks
 
@@ -355,15 +386,15 @@ corpus and look like success. The backfill command must therefore refuse to run
 when `umls.semantic_type` fails the same completeness check phase 1 introduces -
 a guard, not a convention, because the failure mode is silent.
 
-## Acceptance
+## Acceptance - all met, measured 2026-07-20
 
-- `umls.semantic_type` covers approximately every CUI in `umls.concept`, and
-  `load-umls` refuses to report success otherwise.
-- Every resolved row in `public.eligibility` has a populated
-  `semantic_type_tuis`, or is counted in a reported unmapped total.
-- The same CUI produces one identical display string everywhere in the corpus.
-- Filtering Results by `Pharmacologic Substance` returns 19,674 rows.
-- The semantic-type dropdown lists real UMLS semantic types, not combinations.
+| Criterion | Result |
+|---|---|
+| `umls.semantic_type` covers every CUI in `umls.concept`, and `load-umls` refuses to report success otherwise | **Met.** 3,876,942 rows over 3,530,466 CUIs; 0 of 1,265,171 concepts uncovered. `load-umls` exits 4 otherwise. |
+| Every resolved row in `public.eligibility` has a populated `semantic_type_tuis`, or is counted in a reported unmapped total | **Met.** 3,985,113 of 3,985,113; 0 unmapped. |
+| The same CUI produces one identical display string everywhere in the corpus | **Met.** 0 CUIs render more than one string, in `public.eligibility` and in the authoring tables. |
+| Filtering Results by `Pharmacologic Substance` returns every row carrying it | **Met**, though not at the number originally written here. The spec said 19,674; that was measured when only 506,023 rows had semantic types at all. After the backfill the real figures are **44,800 -> 118,867**. |
+| The semantic-type dropdown lists real UMLS semantic types, not combinations | **Met.** 132 types, from `umls.semantic_type_dim`, replacing 215 combination strings. |
 
 ## Out of scope
 
