@@ -9,6 +9,7 @@ Imports EligibilityProcessing.Data
 '
 ' MRCONSO.RRF columns (0-indexed): 0=CUI 1=LAT 6=ISPREF 11=SAB 12=TTY 14=STR 16=SUPPRESS
 ' MRSTY.RRF   columns:             0=CUI 1=TUI 3=STY
+' MRREL.RRF   columns:             0=CUI1 3=REL 4=CUI2 10=SAB
 
 Friend NotInheritable Class UmlsRrfReader
 
@@ -45,6 +46,41 @@ Friend NotInheritable Class UmlsRrfReader
                 .Tty = f(12),
                 .IsPref = String.Equals(f(6), "Y", StringComparison.Ordinal)
             }
+        Next
+    End Function
+
+    ''' <summary>
+    ''' Yields one <see cref="ConceptEdgeRow"/> per SNOMED is-a relationship in
+    ''' MRREL, normalised so ChildCui is always the more specific concept.
+    ''' </summary>
+    ''' <remarks>
+    ''' MRREL.REL describes the relationship of the SECOND concept to the first:
+    ''' (CUI1, 'PAR', CUI2) means CUI2 is the parent of CUI1; 'CHD' is the
+    ''' inverse. UMLS stores both directions, so most edges appear twice - the
+    ''' staging insert dedupes.
+    '''
+    ''' Scoped to SAB='SNOMEDCT_US'. UMLS asserts no cross-source hierarchy, so
+    ''' mixing vocabularies produces incoherent ancestry and can introduce cycles.
+    ''' RB/RN (broader/narrower) are deliberately excluded - they are not the
+    ''' is-a hierarchy, and they are the most common relationship in the file.
+    ''' </remarks>
+    Public Shared Iterator Function ReadRelations(mrrelPath As String) As IEnumerable(Of ConceptEdgeRow)
+        For Each line In File.ReadLines(mrrelPath)
+            Dim f = line.Split("|"c)
+            If f.Length < 11 Then Continue For
+            If Not String.Equals(f(10), "SNOMEDCT_US", StringComparison.Ordinal) Then Continue For
+
+            Dim cui1 = f(0)
+            Dim rel = f(3)
+            Dim cui2 = f(4)
+            If String.IsNullOrWhiteSpace(cui1) OrElse String.IsNullOrWhiteSpace(cui2) Then Continue For
+            If String.Equals(cui1, cui2, StringComparison.Ordinal) Then Continue For
+
+            If String.Equals(rel, "PAR", StringComparison.Ordinal) Then
+                Yield New ConceptEdgeRow With {.ChildCui = cui1, .ParentCui = cui2}
+            ElseIf String.Equals(rel, "CHD", StringComparison.Ordinal) Then
+                Yield New ConceptEdgeRow With {.ChildCui = cui2, .ParentCui = cui1}
+            End If
         Next
     End Function
 
