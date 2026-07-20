@@ -56,8 +56,9 @@ Public Class UmlsMetathesaurusIntegrationTests
         Assert.Equal("Diabetes Mellitus, Non-Insulin-Dependent", diabetes.Name)
         Assert.Equal("MSH", diabetes.RootSource)
 
-        Dim sts = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
-        Assert.Contains("Disease or Syndrome", sts)
+        Dim sts = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
+        Assert.Contains("Disease or Syndrome", sts.Select(Function(a) a.Sty))
+        Assert.Contains("T047", sts.Select(Function(a) a.Tui))
 
         ' Unknown concept -> no candidates (and never throws).
         Assert.Empty(Await client.SearchAsync("zzzqqq nonexistent term", CancellationToken.None))

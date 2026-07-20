@@ -66,13 +66,13 @@ Public NotInheritable Class UmlsClient
         End Try
     End Function
 
-    Public Async Function GetSemanticTypesAsync(
+    Public Async Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
-            Implements IUmlsClient.GetSemanticTypesAsync
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment)) _
+            Implements IUmlsClient.GetSemanticTypeAssignmentsAsync
 
         If String.IsNullOrWhiteSpace(cui) Then
-            Return Array.Empty(Of String)()
+            Return Array.Empty(Of SemanticTypeAssignment)()
         End If
 
         Dim url = BuildSemanticTypesUrl(cui)
@@ -82,7 +82,7 @@ Public NotInheritable Class UmlsClient
                     _logger.LogWarning(
                             "UMLS /content/current/CUI returned {Status} for cui {Cui}",
                             CInt(response.StatusCode), cui)
-                    Return Array.Empty(Of String)()
+                    Return Array.Empty(Of SemanticTypeAssignment)()
                 End If
                 Using stream = Await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(False)
                     Using doc = Await JsonDocument.ParseAsync(stream, cancellationToken:=cancellationToken).ConfigureAwait(False)
@@ -95,7 +95,7 @@ Public NotInheritable Class UmlsClient
         Catch ex As Exception
             _logger.LogWarning(ex,
                     "UMLS /content/current/CUI failed for cui {Cui}; treating as empty result", cui)
-            Return Array.Empty(Of String)()
+            Return Array.Empty(Of SemanticTypeAssignment)()
         End Try
     End Function
 
@@ -151,8 +151,8 @@ Public NotInheritable Class UmlsClient
         Return list
     End Function
 
-    Friend Shared Function ParseSemanticTypesResponse(root As JsonElement) As IReadOnlyList(Of String)
-        Dim list As New List(Of String)
+    Friend Shared Function ParseSemanticTypesResponse(root As JsonElement) As IReadOnlyList(Of SemanticTypeAssignment)
+        Dim list As New List(Of SemanticTypeAssignment)
         If root.ValueKind <> JsonValueKind.Object Then Return list
 
         Dim resultProp As JsonElement = Nothing
@@ -164,9 +164,33 @@ Public NotInheritable Class UmlsClient
         For Each element In stsProp.EnumerateArray()
             If element.ValueKind <> JsonValueKind.Object Then Continue For
             Dim name = GetStringOrEmpty(element, "name")
-            If Not String.IsNullOrEmpty(name) Then list.Add(name)
+            If String.IsNullOrEmpty(name) Then Continue For
+            list.Add(New SemanticTypeAssignment(ExtractTui(GetStringOrEmpty(element, "uri")), name))
         Next
         Return list
+    End Function
+
+    ''' <summary>
+    ''' Pulls the TUI out of a semantic-type URI, e.g.
+    ''' ".../semantic-network/2025AB/TUI/T047" -> "T047". Empty when the URI is
+    ''' absent or does not end in a TUI-shaped segment.
+    ''' </summary>
+    ''' <remarks>
+    ''' The REST response carries the TUI only in the URI - there is no dedicated
+    ''' field. An empty result is not fatal: the display name still lands, and
+    ''' ResolvedRecord drops empty TUIs rather than putting "" in the array.
+    ''' </remarks>
+    Friend Shared Function ExtractTui(uri As String) As String
+        If String.IsNullOrWhiteSpace(uri) Then Return ""
+        Dim segment = uri.TrimEnd("/"c)
+        Dim slash = segment.LastIndexOf("/"c)
+        If slash >= 0 Then segment = segment.Substring(slash + 1)
+        ' TUIs are "T" followed by digits. Anything else is not a TUI.
+        If segment.Length < 2 OrElse Not segment.StartsWith("T", StringComparison.Ordinal) Then Return ""
+        For i = 1 To segment.Length - 1
+            If Not Char.IsDigit(segment(i)) Then Return ""
+        Next
+        Return segment
     End Function
 
     Private Shared Function GetStringOrEmpty(element As JsonElement, propertyName As String) As String

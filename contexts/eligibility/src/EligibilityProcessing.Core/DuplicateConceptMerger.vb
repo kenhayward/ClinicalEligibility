@@ -44,7 +44,11 @@ Public NotInheritable Class DuplicateConceptMerger
                 Continue For
             End If
 
-            Dim key = (r.ConceptCode, r.SemanticType, r.Criterion)
+            ' Merge identity is the TUI SET, not the joined display string. The
+            ' previous key used that string, so the same CUI with differently
+            ' ordered semantic types counted as two distinct records.
+            Dim tuiKey = String.Join("|", r.SemanticTypeTuis.OrderBy(Function(t) t, StringComparer.Ordinal))
+            Dim key = (r.ConceptCode, tuiKey, r.Criterion)
             Dim idx As Integer
             If seen.TryGetValue(key, idx) Then
                 groups(idx).Add(r)
@@ -85,15 +89,14 @@ Public NotInheritable Class DuplicateConceptMerger
                 matchSource:=first.MatchSource,
                 matchScore:=first.MatchScore)
 
-        ' ResolvedRecord stores SemanticType as a comma-joined string; rebuild
-        ' the list form here so the constructor's joiner produces the same
-        ' value. Cheap; semantic-type names don't contain ", " in practice.
-        Dim semanticTypes As IReadOnlyList(Of String) =
-                If(String.IsNullOrEmpty(first.SemanticType),
-                   Array.Empty(Of String)(),
-                   first.SemanticType.Split({", "}, StringSplitOptions.RemoveEmptyEntries))
-
-        Return New ResolvedRecord(mergedCriterion, mergedMatch, semanticTypes)
+        ' Pass the assignments straight through. This used to split the joined
+        ' display string on ", " to rebuild a list, with a comment claiming
+        ' "semantic-type names don't contain ', ' in practice" - which is false:
+        ' "Amino Acid, Peptide, or Protein" is a single UMLS semantic type name.
+        ' That code was safe only because it re-joined with the same separator,
+        ' so the string round-tripped; the intermediate list was garbage. Under a
+        ' real list representation that accident no longer saves it.
+        Return New ResolvedRecord(mergedCriterion, mergedMatch, first.Assignments)
     End Function
 
 End Class

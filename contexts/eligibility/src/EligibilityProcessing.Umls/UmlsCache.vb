@@ -42,8 +42,8 @@ Public NotInheritable Class UmlsCache
     Private ReadOnly _searchCache As New ConcurrentDictionary(Of String, IReadOnlyList(Of UmlsCandidate))(
             StringComparer.OrdinalIgnoreCase)
 
-    ' CUI (case-sensitive per UMLS convention, format "C" + 7 digits) -> semantic-type names.
-    Private ReadOnly _semanticTypesCache As New ConcurrentDictionary(Of String, IReadOnlyList(Of String))(
+    ' CUI (case-sensitive per UMLS convention, format "C" + 7 digits) -> semantic-type assignments.
+    Private ReadOnly _semanticTypesCache As New ConcurrentDictionary(Of String, IReadOnlyList(Of SemanticTypeAssignment))(
             StringComparer.Ordinal)
 
     Public Sub New(inner As IUmlsClient, Optional logger As ILogger(Of UmlsCache) = Nothing)
@@ -72,21 +72,21 @@ Public NotInheritable Class UmlsCache
         Return fresh
     End Function
 
-    Public Async Function GetSemanticTypesAsync(
+    Public Async Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
-            Implements IUmlsClient.GetSemanticTypesAsync
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment)) _
+            Implements IUmlsClient.GetSemanticTypeAssignmentsAsync
 
         If String.IsNullOrWhiteSpace(cui) Then
-            Return Array.Empty(Of String)()
+            Return Array.Empty(Of SemanticTypeAssignment)()
         End If
 
-        Dim cached As IReadOnlyList(Of String) = Nothing
+        Dim cached As IReadOnlyList(Of SemanticTypeAssignment) = Nothing
         If _semanticTypesCache.TryGetValue(cui, cached) Then
             Return cached
         End If
 
-        Dim fresh = Await _inner.GetSemanticTypesAsync(cui, cancellationToken).ConfigureAwait(False)
+        Dim fresh = Await _inner.GetSemanticTypeAssignmentsAsync(cui, cancellationToken).ConfigureAwait(False)
         _semanticTypesCache.TryAdd(cui, fresh)
         Return fresh
     End Function

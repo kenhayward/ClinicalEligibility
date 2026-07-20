@@ -689,13 +689,19 @@ Module Program
                         Dim candidates = Await umlsClient.SearchAsync(row.Concept, cancellationToken).ConfigureAwait(False)
                         Dim match = scorer.PickBestMatch(row.Concept, candidates)
                         If match.IsResolved Then
-                            Dim semanticTypes = Await umlsClient.GetSemanticTypesAsync(
+                            Dim semanticTypes = Await umlsClient.GetSemanticTypeAssignmentsAsync(
                                     match.ConceptCode, cancellationToken).ConfigureAwait(False)
-                            ' Same reduction as ResolvedRecord: comma-join the list.
-                            Dim semantic = If(semanticTypes Is Nothing OrElse semanticTypes.Count = 0,
-                                              "", String.Join(", ", semanticTypes))
+                            ' Same derivation as ResolvedRecord: names sorted then
+                            ' joined for display, TUIs (minus any empty) for the array.
+                            Dim assignments = If(semanticTypes,
+                                                 CType(Array.Empty(Of SemanticTypeAssignment)(), IReadOnlyList(Of SemanticTypeAssignment)))
+                            Dim semantic = String.Join(", ",
+                                    assignments.Select(Function(a) a.Sty).OrderBy(Function(s) s, StringComparer.Ordinal))
+                            Dim tuis = assignments.Select(Function(a) a.Tui) _
+                                                  .Where(Function(t) Not String.IsNullOrEmpty(t)) _
+                                                  .Distinct(StringComparer.Ordinal).ToArray()
                             updates.Add(New UmlsRetryResult(
-                                    row.Id, match.ConceptCode, match.UmlsName, match.MatchSource, match.MatchScore, semantic))
+                                    row.Id, match.ConceptCode, match.UmlsName, match.MatchSource, match.MatchScore, semantic, tuis))
                         End If
                     Next
                     totalAttempted += rows.Count

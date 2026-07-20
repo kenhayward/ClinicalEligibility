@@ -19,9 +19,15 @@ Public Structure UmlsRetryRow
     End Sub
 End Structure
 
-''' <summary>The outcome of re-resolving one row — the row id plus the five UMLS
+''' <summary>The outcome of re-resolving one row — the row id plus the UMLS
 ''' columns to write. Constructed only for rows that newly cleared the scorer's
 ''' match threshold; rows that still don't resolve are left untouched.</summary>
+''' <remarks>
+''' Carries SemanticTypeTuis as well as the display string: this path writes
+''' public.eligibility directly, so omitting the array would leave every
+''' retry-resolved row with a NULL semantic_type_tuis and silently reintroduce
+''' the gap the phase 2 backfill exists to close.
+''' </remarks>
 Public Structure UmlsRetryResult
     Public ReadOnly Id As Long
     Public ReadOnly ConceptCode As String
@@ -29,6 +35,7 @@ Public Structure UmlsRetryResult
     Public ReadOnly MatchSource As String
     Public ReadOnly MatchScore As Double
     Public ReadOnly SemanticType As String
+    Public ReadOnly SemanticTypeTuis As IReadOnlyList(Of String)
 
     Public Sub New(
             id As Long,
@@ -36,12 +43,14 @@ Public Structure UmlsRetryResult
             umlsName As String,
             matchSource As String,
             matchScore As Double,
-            semanticType As String)
+            semanticType As String,
+            semanticTypeTuis As IReadOnlyList(Of String))
         Me.Id = id
         Me.ConceptCode = conceptCode
         Me.UmlsName = umlsName
         Me.MatchSource = matchSource
         Me.MatchScore = matchScore
         Me.SemanticType = semanticType
+        Me.SemanticTypeTuis = If(semanticTypeTuis, CType(Array.Empty(Of String)(), IReadOnlyList(Of String)))
     End Sub
 End Structure

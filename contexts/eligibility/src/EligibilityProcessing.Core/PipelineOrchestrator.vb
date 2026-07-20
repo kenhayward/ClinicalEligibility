@@ -416,14 +416,14 @@ Public NotInheritable Class PipelineOrchestrator
             Dim umlsWatch = Stopwatch.StartNew()
 
             ' Pass 1 — lexical resolution per criterion (local store / REST API).
-            Dim lexical As New List(Of (Criterion As CriterionRecord, Match As UmlsMatch, SemTypes As IReadOnlyList(Of String)))(parsed.Count)
+            Dim lexical As New List(Of (Criterion As CriterionRecord, Match As UmlsMatch, SemTypes As IReadOnlyList(Of SemanticTypeAssignment)))(parsed.Count)
             For Each criterion In parsed
                 Dim candidates = Await _umlsClient.SearchAsync(criterion.Concept, cancellationToken).ConfigureAwait(False)
                 Dim match = _scorer.PickBestMatch(criterion.Concept, candidates)
 
-                Dim semanticTypes As IReadOnlyList(Of String) = Array.Empty(Of String)()
+                Dim semanticTypes As IReadOnlyList(Of SemanticTypeAssignment) = Array.Empty(Of SemanticTypeAssignment)()
                 If match.IsResolved Then
-                    semanticTypes = Await _umlsClient.GetSemanticTypesAsync(
+                    semanticTypes = Await _umlsClient.GetSemanticTypeAssignmentsAsync(
                             match.ConceptCode, cancellationToken).ConfigureAwait(False)
                 End If
 
@@ -462,11 +462,17 @@ Public NotInheritable Class PipelineOrchestrator
                     Dim hit As CachedConceptResolution = Nothing
                     If cacheHits.TryGetValue(item.Criterion.Concept, hit) Then
                         match = New UmlsMatch(hit.ConceptCode, hit.UmlsName, hit.MatchSource, hit.MatchScore)
-                        ' Cache stores semantic_type as the already comma-joined string;
-                        ' wrap as a one-element list (ResolvedRecord re-joins it verbatim).
-                        semanticTypes = If(String.IsNullOrEmpty(hit.SemanticType),
-                                           CType(Array.Empty(Of String)(), IReadOnlyList(Of String)),
-                                           New String() {hit.SemanticType})
+                        ' Look the assignments up from the cached CUI rather than
+                        ' reusing the cache's own semantic_type string. That string
+                        ' is the legacy comma-joined form and used to be wrapped as
+                        ' a ONE-ELEMENT list here so ResolvedRecord re-joined it
+                        ' verbatim - a shim that cannot survive a real TUI list.
+                        ' The cache stores concept_code, so the CUI is enough; no
+                        ' new column is needed on umls.concept_normalization.
+                        If match.IsResolved Then
+                            semanticTypes = Await _umlsClient.GetSemanticTypeAssignmentsAsync(
+                                    match.ConceptCode, cancellationToken).ConfigureAwait(False)
+                        End If
                     End If
                 End If
                 resolved.Add(New ResolvedRecord(item.Criterion, match, semanticTypes))

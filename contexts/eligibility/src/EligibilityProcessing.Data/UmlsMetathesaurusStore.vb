@@ -231,21 +231,21 @@ ORDER BY top.best DESC"
         Return String.Join(" | ", lexemes)
     End Function
 
-    ''' <summary>Semantic-type names for a CUI (umls.semantic_type). Empty when none.</summary>
-    Public Async Function GetSemanticTypesAsync(
+    ''' <summary>Semantic-type assignments for a CUI (umls.semantic_type). Empty when none.</summary>
+    Public Async Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String))
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment))
 
-        If String.IsNullOrWhiteSpace(cui) Then Return Array.Empty(Of String)()
+        If String.IsNullOrWhiteSpace(cui) Then Return Array.Empty(Of SemanticTypeAssignment)()
 
-        Dim result As New List(Of String)
+        Dim result As New List(Of SemanticTypeAssignment)
         Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
             Using cmd = conn.CreateCommand()
-                cmd.CommandText = "SELECT sty FROM umls.semantic_type WHERE cui = @cui ORDER BY sty"
+                cmd.CommandText = "SELECT tui, sty FROM umls.semantic_type WHERE cui = @cui ORDER BY sty"
                 cmd.Parameters.Add(New NpgsqlParameter("cui", NpgsqlDbType.Text) With {.Value = cui.Trim()})
                 Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
                     While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
-                        result.Add(reader.GetString(0))
+                        result.Add(New SemanticTypeAssignment(reader.GetString(0), reader.GetString(1)))
                     End While
                 End Using
             End Using

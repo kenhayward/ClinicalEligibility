@@ -25,11 +25,18 @@ Public Interface IUmlsClient
 
     ''' <summary>
     ''' Spec section 2.6.3: GET /content/current/CUI/{cui}.
-    ''' Returns the comma-equivalent list of semanticTypes[].name values for
-    ''' the given CUI. Empty list on error or when the CUI has no semantic types.
+    ''' Returns the semantic-type assignments (TUI + name) for the given CUI.
+    ''' Empty list on error or when the CUI has no semantic types.
     ''' </summary>
-    Function GetSemanticTypesAsync(
+    ''' <remarks>
+    ''' Returns pairs rather than names because the TUI is what
+    ''' public.eligibility.semantic_type_tuis stores - TUIs are stable across
+    ''' UMLS releases where names get reworded - while the display string is
+    ''' built from the names. Returning only names would force one side to be
+    ''' re-derived, which is how they drift.
+    ''' </remarks>
+    Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String))
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment))
 
 End Interface

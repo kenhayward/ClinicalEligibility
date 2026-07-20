@@ -171,20 +171,20 @@ Public NotInheritable Class PostgresUmlsClient
         Return result
     End Function
 
-    Public Async Function GetSemanticTypesAsync(
+    Public Async Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
-            Implements IUmlsClient.GetSemanticTypesAsync
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment)) _
+            Implements IUmlsClient.GetSemanticTypeAssignmentsAsync
 
-        If String.IsNullOrWhiteSpace(cui) Then Return Array.Empty(Of String)()
+        If String.IsNullOrWhiteSpace(cui) Then Return Array.Empty(Of SemanticTypeAssignment)()
         Try
-            Return Await _store.GetSemanticTypesAsync(cui, cancellationToken).ConfigureAwait(False)
+            Return Await _store.GetSemanticTypeAssignmentsAsync(cui, cancellationToken).ConfigureAwait(False)
         Catch ex As OperationCanceledException When cancellationToken.IsCancellationRequested
             Throw
         Catch ex As Exception
             _logger.LogWarning(ex,
                     "Local UMLS semantic-type lookup failed for cui {Cui}; treating as empty result", cui)
-            Return Array.Empty(Of String)()
+            Return Array.Empty(Of SemanticTypeAssignment)()
         End Try
     End Function
 

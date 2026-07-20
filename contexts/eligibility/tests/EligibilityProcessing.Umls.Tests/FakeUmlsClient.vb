@@ -19,7 +19,7 @@ Friend NotInheritable Class FakeUmlsClient
             StringComparer.OrdinalIgnoreCase)
 
     ' Keyed by exact CUI (CUIs are case-sensitive on the UMLS API).
-    Public ReadOnly Property SemanticTypesResults As New Dictionary(Of String, IReadOnlyList(Of String))(
+    Public ReadOnly Property SemanticTypesResults As New Dictionary(Of String, IReadOnlyList(Of SemanticTypeAssignment))(
             StringComparer.Ordinal)
 
     Public Property ExceptionToThrow As Exception
@@ -40,19 +40,19 @@ Friend NotInheritable Class FakeUmlsClient
         Return Task.FromResult(CType(Array.Empty(Of UmlsCandidate)(), IReadOnlyList(Of UmlsCandidate)))
     End Function
 
-    Public Function GetSemanticTypesAsync(
+    Public Function GetSemanticTypeAssignmentsAsync(
             cui As String,
-            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
-            Implements IUmlsClient.GetSemanticTypesAsync
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeAssignment)) _
+            Implements IUmlsClient.GetSemanticTypeAssignmentsAsync
         SemanticTypesCalls.Add(cui)
         cancellationToken.ThrowIfCancellationRequested()
         If ExceptionToThrow IsNot Nothing Then Throw ExceptionToThrow
 
-        Dim result As IReadOnlyList(Of String) = Nothing
+        Dim result As IReadOnlyList(Of SemanticTypeAssignment) = Nothing
         If SemanticTypesResults.TryGetValue(cui, result) Then
             Return Task.FromResult(result)
         End If
-        Return Task.FromResult(CType(Array.Empty(Of String)(), IReadOnlyList(Of String)))
+        Return Task.FromResult(CType(Array.Empty(Of SemanticTypeAssignment)(), IReadOnlyList(Of SemanticTypeAssignment)))
     End Function
 
 End Class

@@ -19,7 +19,7 @@ Public Class ResolvedRecordTests
         Dim resolved = New ResolvedRecord(
                 criterion,
                 UmlsMatch.Unresolved,
-                semanticTypes:=Array.Empty(Of String)())
+                semanticTypes:=Array.Empty(Of SemanticTypeAssignment)())
 
         Assert.Equal("NCT00000001", resolved.NctId)
         Assert.Equal("Inclusion", resolved.Criterion)
@@ -48,7 +48,7 @@ Public Class ResolvedRecordTests
         Dim resolved = New ResolvedRecord(
                 criterion,
                 match,
-                semanticTypes:=Array.Empty(Of String)())
+                semanticTypes:=Array.Empty(Of SemanticTypeAssignment)())
 
         Assert.Equal("C0011860", resolved.ConceptCode)
         Assert.Equal("Diabetes Mellitus", resolved.UmlsName)
@@ -56,29 +56,70 @@ Public Class ResolvedRecordTests
         Assert.Equal(0.875, resolved.MatchScore)
     End Sub
 
-    ' ============ semantic type joining ============
+    ' ============ semantic types ============
 
     <Fact>
-    Public Sub Semantic_types_are_joined_comma_space()
-        Dim resolved = MakeResolved(semanticTypes:=New String() {"Disease or Syndrome", "Mental Process"})
+    Public Sub Semantic_type_string_is_sorted_by_name_and_comma_joined()
+        ' Sorted by STY, not by input order, so one CUI yields one string
+        ' corpus-wide. Legacy REST-era values preserved UMLS API order, which is
+        ' not alphabetical - the phase 2 backfill rewrites them to this form.
+        Dim resolved = MakeResolved(semanticTypes:={
+            New SemanticTypeAssignment("T041", "Mental Process"),
+            New SemanticTypeAssignment("T047", "Disease or Syndrome")})
         Assert.Equal("Disease or Syndrome, Mental Process", resolved.SemanticType)
     End Sub
 
     <Fact>
-    Public Sub Semantic_types_empty_list_yields_empty_string()
-        Dim resolved = MakeResolved(semanticTypes:=Array.Empty(Of String)())
+    Public Sub Semantic_type_tuis_preserve_every_assignment()
+        Dim resolved = MakeResolved(semanticTypes:={
+            New SemanticTypeAssignment("T041", "Mental Process"),
+            New SemanticTypeAssignment("T047", "Disease or Syndrome")})
+        Assert.Equal({"T041", "T047"}, resolved.SemanticTypeTuis.OrderBy(Function(t) t).ToArray())
+    End Sub
+
+    ' The case the joined string cannot express. Splitting
+    ' "Amino Acid, Peptide, or Protein, Enzyme" on ", " yields four fragments,
+    ' none of which is a real semantic type - which is why the TUI array exists.
+    <Fact>
+    Public Sub Semantic_type_tuis_survive_names_containing_commas()
+        Dim resolved = MakeResolved(semanticTypes:={
+            New SemanticTypeAssignment("T116", "Amino Acid, Peptide, or Protein"),
+            New SemanticTypeAssignment("T126", "Enzyme")})
+        Assert.Equal(2, resolved.SemanticTypeTuis.Count)
+        Assert.Contains("T116", resolved.SemanticTypeTuis)
+        Assert.Contains("T126", resolved.SemanticTypeTuis)
+        Assert.Equal("Amino Acid, Peptide, or Protein, Enzyme", resolved.SemanticType)
+    End Sub
+
+    ' An empty TUI is not a semantic type id. The REST backend derives TUIs from
+    ' a URI and can come up empty; "" must not become an array member that
+    ' containment queries could match.
+    <Fact>
+    Public Sub Semantic_type_tuis_drop_empty_ids_but_keep_the_name()
+        Dim resolved = MakeResolved(semanticTypes:={
+            New SemanticTypeAssignment("", "Disease or Syndrome")})
+        Assert.Empty(resolved.SemanticTypeTuis)
+        Assert.Equal("Disease or Syndrome", resolved.SemanticType)
+    End Sub
+
+    <Fact>
+    Public Sub Semantic_types_empty_list_yields_empty_string_and_no_tuis()
+        Dim resolved = MakeResolved(semanticTypes:=Array.Empty(Of SemanticTypeAssignment)())
         Assert.Equal("", resolved.SemanticType)
+        Assert.Empty(resolved.SemanticTypeTuis)
     End Sub
 
     <Fact>
     Public Sub Semantic_types_null_list_yields_empty_string()
         Dim resolved = MakeResolved(semanticTypes:=Nothing)
         Assert.Equal("", resolved.SemanticType)
+        Assert.Empty(resolved.SemanticTypeTuis)
     End Sub
 
     <Fact>
     Public Sub Semantic_types_single_item_has_no_comma()
-        Dim resolved = MakeResolved(semanticTypes:=New String() {"Disease or Syndrome"})
+        Dim resolved = MakeResolved(semanticTypes:={
+            New SemanticTypeAssignment("T047", "Disease or Syndrome")})
         Assert.Equal("Disease or Syndrome", resolved.SemanticType)
     End Sub
 
@@ -98,14 +139,14 @@ Public Class ResolvedRecordTests
     <Fact>
     Public Sub Constructor_throws_on_null_criterion()
         Assert.Throws(Of ArgumentNullException)(
-            Function() New ResolvedRecord(Nothing, UmlsMatch.Unresolved, Array.Empty(Of String)()))
+            Function() New ResolvedRecord(Nothing, UmlsMatch.Unresolved, Array.Empty(Of SemanticTypeAssignment)()))
     End Sub
 
     <Fact>
     Public Sub Constructor_throws_on_null_umls_match()
         Dim criterion = MakeCriterion()
         Assert.Throws(Of ArgumentNullException)(
-            Function() New ResolvedRecord(criterion, Nothing, Array.Empty(Of String)()))
+            Function() New ResolvedRecord(criterion, Nothing, Array.Empty(Of SemanticTypeAssignment)()))
     End Sub
 
     ' ============ helpers ============
@@ -123,11 +164,11 @@ Public Class ResolvedRecordTests
 
     Private Shared Function MakeResolved(
             Optional match As UmlsMatch = Nothing,
-            Optional semanticTypes As IReadOnlyList(Of String) = Nothing) As ResolvedRecord
+            Optional semanticTypes As IReadOnlyList(Of SemanticTypeAssignment) = Nothing) As ResolvedRecord
         Return New ResolvedRecord(
                 MakeCriterion(),
                 If(match, UmlsMatch.Unresolved),
-                If(semanticTypes, Array.Empty(Of String)()))
+                If(semanticTypes, Array.Empty(Of SemanticTypeAssignment)()))
     End Function
 
 End Class

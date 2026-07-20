@@ -512,7 +512,7 @@ WHERE nct_id = ANY(@nct_ids)"
     Friend Shared Sub BuildMultiRowInsert(cmd As NpgsqlCommand, records As IReadOnlyList(Of ResolvedRecord))
         Dim sb As New StringBuilder()
         sb.Append("INSERT INTO public.eligibility (")
-        sb.Append("nct_id, criterion, domain, concept, concept_code, semantic_type, ")
+        sb.Append("nct_id, criterion, domain, concept, concept_code, semantic_type, semantic_type_tuis, ")
         sb.Append("qualifier, time_window, original_text, umls_name, match_score, match_source")
         sb.Append(") VALUES ")
 
@@ -525,6 +525,7 @@ WHERE nct_id = ANY(@nct_ids)"
             sb.Append("@p").Append(i).Append("_concept, ")
             sb.Append("@p").Append(i).Append("_concept_code, ")
             sb.Append("@p").Append(i).Append("_semantic_type, ")
+            sb.Append("@p").Append(i).Append("_semantic_type_tuis, ")
             sb.Append("@p").Append(i).Append("_qualifier, ")
             sb.Append("@p").Append(i).Append("_time_window, ")
             sb.Append("@p").Append(i).Append("_original_text, ")
@@ -540,6 +541,13 @@ WHERE nct_id = ANY(@nct_ids)"
             cmd.Parameters.Add(New NpgsqlParameter($"p{i}_concept", NpgsqlDbType.Text) With {.Value = r.Concept})
             cmd.Parameters.Add(New NpgsqlParameter($"p{i}_concept_code", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.ConceptCode)})
             cmd.Parameters.Add(New NpgsqlParameter($"p{i}_semantic_type", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.SemanticType)})
+            ' NULL rather than an empty array for unresolved rows. NULL means "no
+            ' concept, so no semantic types"; an empty array is a distinct value
+            ' that containment queries could match, making unresolved rows look
+            ' like a category of their own.
+            cmd.Parameters.Add(New NpgsqlParameter($"p{i}_semantic_type_tuis", NpgsqlDbType.Array Or NpgsqlDbType.Text) With {
+                    .Value = If(r.SemanticTypeTuis Is Nothing OrElse r.SemanticTypeTuis.Count = 0,
+                                CObj(DBNull.Value), CObj(r.SemanticTypeTuis.ToArray()))})
             cmd.Parameters.Add(New NpgsqlParameter($"p{i}_qualifier", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.Qualifier)})
             cmd.Parameters.Add(New NpgsqlParameter($"p{i}_time_window", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.TimeWindow)})
             cmd.Parameters.Add(New NpgsqlParameter($"p{i}_original_text", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.OriginalText)})
@@ -655,13 +663,19 @@ ORDER BY id"
                         updateCmd.CommandText =
 "UPDATE public.eligibility
 SET concept_code = @cc, umls_name = @un, match_source = @ms,
-    match_score = @sc, semantic_type = @st
+    match_score = @sc, semantic_type = @st, semantic_type_tuis = @stt
 WHERE id = @id"
                         updateCmd.Parameters.Add(New NpgsqlParameter("cc", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.ConceptCode)})
                         updateCmd.Parameters.Add(New NpgsqlParameter("un", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.UmlsName)})
                         updateCmd.Parameters.Add(New NpgsqlParameter("ms", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.MatchSource)})
                         updateCmd.Parameters.Add(New NpgsqlParameter("sc", NpgsqlDbType.Numeric) With {.Value = CDec(r.MatchScore)})
                         updateCmd.Parameters.Add(New NpgsqlParameter("st", NpgsqlDbType.Text) With {.Value = NullIfEmpty(r.SemanticType)})
+                        ' NULL rather than an empty array when there are no TUIs -
+                        ' NULL means "no semantic types", and an empty array would
+                        ' be a distinct, matchable value to containment queries.
+                        updateCmd.Parameters.Add(New NpgsqlParameter("stt", NpgsqlDbType.Array Or NpgsqlDbType.Text) With {
+                                .Value = If(r.SemanticTypeTuis Is Nothing OrElse r.SemanticTypeTuis.Count = 0,
+                                            CObj(DBNull.Value), CObj(r.SemanticTypeTuis.ToArray()))})
                         updateCmd.Parameters.Add(New NpgsqlParameter("id", NpgsqlDbType.Bigint) With {.Value = r.Id})
                         Await updateCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
                     End Using

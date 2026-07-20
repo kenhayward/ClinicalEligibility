@@ -2658,7 +2658,8 @@ Public Class PostgresGatewayIntegrationTests
 
         ' Resolve ONE of the two; record the attempt (attempted = 2, resolved = 1).
         Dim updates = {New UmlsRetryResult(
-                target.Id, "C0020615", "Hypoglycemia", "SNOMEDCT_US", 0.812, "Disease or Syndrome")}
+                target.Id, "C0020615", "Hypoglycemia", "SNOMEDCT_US", 0.812, "Disease or Syndrome",
+                New String() {"T047"})}
         Await _fixture.Gateway.ApplyUmlsRetryAsync("NCT00000010", updates, rowsAttempted:=2, CancellationToken.None)
 
         ' The targeted row now carries the five UMLS columns (in place — id preserved).
@@ -2844,7 +2845,7 @@ Public Class PostgresGatewayIntegrationTests
                 timeWindow:="",
                 originalText:="seed")
         Dim match = New UmlsMatch("C0000000", "Test Concept", "MSH", 0.75)
-        Return New ResolvedRecord(criterionRecord, match, Array.Empty(Of String)())
+        Return New ResolvedRecord(criterionRecord, match, Array.Empty(Of SemanticTypeAssignment)())
     End Function
 
     Private Shared Function MakeUnresolvedWithCriterion(
@@ -2857,7 +2858,7 @@ Public Class PostgresGatewayIntegrationTests
                 qualifier:="",
                 timeWindow:="",
                 originalText:="seed")
-        Return New ResolvedRecord(criterionRecord, UmlsMatch.Unresolved, Array.Empty(Of String)())
+        Return New ResolvedRecord(criterionRecord, UmlsMatch.Unresolved, Array.Empty(Of SemanticTypeAssignment)())
     End Function
 
     Private Async Function SeedThreeTrials() As Task
@@ -3384,7 +3385,7 @@ SELECT DISTINCT tui, sty FROM umls.semantic_type ON CONFLICT (tui) DO NOTHING;"
         Else
             match = New UmlsMatch("C0000000", "Test Concept", "MSH", 0.75)
         End If
-        Return New ResolvedRecord(criterion, match, Array.Empty(Of String)())
+        Return New ResolvedRecord(criterion, match, Array.Empty(Of SemanticTypeAssignment)())
     End Function
 
 End Class

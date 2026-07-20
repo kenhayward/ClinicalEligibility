@@ -185,7 +185,7 @@ Public Class UmlsClientTests
     Public Async Function SemanticTypes_returns_empty_for_empty_cui(cui As String) As Task
         Dim handler = StubHttpMessageHandler.WithJson("{}")
         Dim client = MakeClient(handler)
-        Dim result = Await client.GetSemanticTypesAsync(cui, CancellationToken.None)
+        Dim result = Await client.GetSemanticTypeAssignmentsAsync(cui, CancellationToken.None)
         Assert.Empty(result)
         Assert.Equal(0, handler.CallCount)
     End Function
@@ -197,7 +197,7 @@ Public Class UmlsClientTests
         Const ResponseJson As String = "{ ""result"": { ""semanticTypes"": [] } }"
         Dim handler = StubHttpMessageHandler.WithJson(ResponseJson)
         Dim client = MakeClient(handler)
-        Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
 
         Dim uri = handler.CapturedRequest.RequestUri
         Assert.Equal("/rest/content/current/CUI/C0011860", uri.AbsolutePath)
@@ -221,11 +221,11 @@ Public Class UmlsClientTests
 }"
         Dim handler = StubHttpMessageHandler.WithJson(ResponseJson)
         Dim client = MakeClient(handler)
-        Dim result = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Dim result = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
 
         Assert.Equal(2, result.Count)
-        Assert.Equal("Disease or Syndrome", result(0))
-        Assert.Equal("Mental or Behavioral Dysfunction", result(1))
+        Assert.Equal("Disease or Syndrome", result(0).Sty)
+        Assert.Equal("Mental or Behavioral Dysfunction", result(1).Sty)
     End Function
 
     <Fact>
@@ -233,7 +233,7 @@ Public Class UmlsClientTests
         Const ResponseJson As String = "{ ""result"": { ""ui"": ""C0011860"" } }"
         Dim handler = StubHttpMessageHandler.WithJson(ResponseJson)
         Dim client = MakeClient(handler)
-        Dim result = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Dim result = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
         Assert.Empty(result)
     End Function
 
@@ -250,9 +250,10 @@ Public Class UmlsClientTests
 }"
         Dim handler = StubHttpMessageHandler.WithJson(ResponseJson)
         Dim client = MakeClient(handler)
-        Dim result = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Dim result = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
 
-        Assert.Equal(New String() {"Disease or Syndrome", "Body Part"}, result.ToArray())
+        Assert.Equal(New String() {"Disease or Syndrome", "Body Part"},
+                     result.Select(Function(a) a.Sty).ToArray())
     End Function
 
     ' ============ GetSemanticTypes: error swallowing ============
@@ -261,7 +262,7 @@ Public Class UmlsClientTests
     Public Async Function SemanticTypes_returns_empty_on_500_response() As Task
         Dim handler = StubHttpMessageHandler.WithStatus(HttpStatusCode.InternalServerError)
         Dim client = MakeClient(handler)
-        Dim result = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Dim result = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
         Assert.Empty(result)
     End Function
 
@@ -269,7 +270,7 @@ Public Class UmlsClientTests
     Public Async Function SemanticTypes_returns_empty_on_network_exception() As Task
         Dim handler = StubHttpMessageHandler.ThatThrows(New HttpRequestException("dns failure"))
         Dim client = MakeClient(handler)
-        Dim result = Await client.GetSemanticTypesAsync("C0011860", CancellationToken.None)
+        Dim result = Await client.GetSemanticTypeAssignmentsAsync("C0011860", CancellationToken.None)
         Assert.Empty(result)
     End Function
 
@@ -280,7 +281,7 @@ Public Class UmlsClientTests
         Using cts As New CancellationTokenSource()
             cts.Cancel()
             Await Assert.ThrowsAnyAsync(Of OperationCanceledException)(
-                Function() client.GetSemanticTypesAsync("C0011860", cts.Token))
+                Function() client.GetSemanticTypeAssignmentsAsync("C0011860", cts.Token))
         End Using
     End Function
 

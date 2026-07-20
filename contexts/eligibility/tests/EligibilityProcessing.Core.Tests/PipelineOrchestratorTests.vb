@@ -41,8 +41,8 @@ Public Class PipelineOrchestratorTests
                 New UmlsCandidate("C0011860", "Diabetes", "MSH")}
         umls.SearchResults("Pregnancy") = New UmlsCandidate() {
                 New UmlsCandidate("C0032961", "Pregnancy", "MSH")}
-        umls.SemanticTypesResults("C0011860") = New String() {"Disease or Syndrome"}
-        umls.SemanticTypesResults("C0032961") = New String() {"Organism Function"}
+        umls.SemanticTypesResults("C0011860") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T047", "Disease or Syndrome")}
+        umls.SemanticTypesResults("C0032961") = New SemanticTypeAssignment() {New SemanticTypeAssignment("T040", "Organism Function")}
 
         Dim notifications = New FakeNotificationSink()
         Dim orch = NewOrchestrator(gateway, llm:=llm, umls:=umls, sink:=notifications)
@@ -128,8 +128,11 @@ Public Class PipelineOrchestratorTests
                 "NCT00000001",
                 CriterionJson("NCT00000001", "Inclusion", "Disease", "low blood sugar", "has low blood sugar"))
 
-        ' Lexical UMLS knows nothing about "low blood sugar" -> the cache fills it in.
+        ' Lexical UMLS knows nothing about "low blood sugar" -> the cache fills in
+        ' the match. Semantic types come from a lookup on the cached CUI.
         Dim umls = New FakeUmlsClient()
+        umls.SemanticTypesResults("C0020615") = New SemanticTypeAssignment() {
+                New SemanticTypeAssignment("T047", "Disease or Syndrome")}
         Dim orch = NewOrchestrator(gateway, llm:=llm, umls:=umls)
 
         Dim result = Await orch.ExecuteAsync(MakeConfig(studyCount:=10), CancellationToken.None)
@@ -139,11 +142,15 @@ Public Class PipelineOrchestratorTests
         Assert.Equal("Hypoglycemia", record.UmlsName)
         Assert.Equal("SNOMEDCT_US", record.MatchSource)
         Assert.Equal("Disease or Syndrome", record.SemanticType)
+        Assert.Equal({"T047"}, record.SemanticTypeTuis.ToArray())
         Assert.Equal(1.0, result.Metrics.ResolutionRate)
-        ' The cache was consulted for the unresolved concept, and no UMLS CUI fetch
-        ' happened (the cache already carries the semantic type).
         Assert.NotEmpty(gateway.GetCachedNormalizationsCalls)
-        Assert.Empty(umls.SemanticTypesCalls)
+        ' BEHAVIOUR CHANGE (V22): a cache hit now DOES fetch semantic types for the
+        ' cached CUI. It used to reuse the cache's own comma-joined string, wrapped
+        ' as a one-element list - a shim that cannot produce TUIs. The cost is one
+        ' extra lookup per cache hit, which is a sub-millisecond local query under
+        ' the postgres backend and memoized per run by UmlsCache.
+        Assert.Single(umls.SemanticTypesCalls)
     End Function
 
     <Fact>
