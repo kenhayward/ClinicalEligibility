@@ -320,6 +320,33 @@ public class WebTests : IClassFixture<WebTests.Factory>
         Assert.Contains("auto-refresh-toggle", body);
     }
 
+    // Smoke tests for the app's first multi-value GET filter.
+    //
+    // WHAT THESE DO NOT COVER: this factory points at an unreachable database
+    // (port 1), so Results always takes its error path and the filter form -
+    // which lives in the `else` branch of Results.cshtml - never renders. These
+    // therefore prove only that the new parameter shapes bind without throwing;
+    // they cannot assert the multi-select is emitted, that the pager preserves a
+    // selection, or that the legacy name resolves to a TUI. Those are covered by
+    // the gateway integration tests (containment semantics) and by manual
+    // verification (the UI round-trip). Do not read a pass here as more than it
+    // is.
+    [Fact]
+    public async Task Results_accepts_repeated_semantic_type_parameters()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Home/Results?semanticTypeTuis=T121&semanticTypeTuis=T047");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Results_tolerates_the_legacy_semantic_type_parameter()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Home/Results?semanticType=Pharmacologic+Substance");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     public async Task Unknown_path_returns_404()
     {

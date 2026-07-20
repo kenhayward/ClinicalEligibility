@@ -3,11 +3,37 @@
     ViewData["Title"] = "Results";
 
     // Per-column UI choice: a dropdown when the gateway gave us <= threshold
-    // distinct values, free-text otherwise. Same control set across all six
-    // filterable columns; the layout below renders whichever the column
-    // earned.
+    // distinct values, free-text otherwise. That applies to five of the six
+    // filterable columns; semantic type is a multi-select sourced from the
+    // bounded UMLS dimension and never falls back to text.
     string TextInput(string id, string name, string? value, string? placeholder = null) =>
         $"<input id=\"{id}\" name=\"{name}\" value=\"{Html.Encode(value ?? "")}\" type=\"text\" class=\"form-control form-control-sm\" placeholder=\"{Html.Encode(placeholder ?? "")}\" />";
+
+    // Pager hrefs are built by hand rather than with asp-route-*, because
+    // asp-route-* CANNOT express a repeated query parameter: given a collection
+    // it stringifies the whole list into one value, producing a link that
+    // silently drops the filter. semanticTypeTuis is multi-value, so every
+    // pager link has to emit one `semanticTypeTuis=` per selected TUI.
+    string PageUrl(int targetPage)
+    {
+        var qs = new List<string>();
+        void Add(string key, string? value)
+        {
+            if (!string.IsNullOrEmpty(value)) { qs.Add($"{key}={Uri.EscapeDataString(value)}"); }
+        }
+        Add("nctId", Model.Filter.NctId);
+        Add("criterion", Model.Filter.Criterion);
+        Add("domain", Model.Filter.Domain);
+        Add("concept", Model.Filter.Concept);
+        Add("conceptCode", Model.Filter.ConceptCode);
+        foreach (var tui in Model.Filter.SemanticTypeTuis)
+        {
+            qs.Add($"semanticTypeTuis={Uri.EscapeDataString(tui)}");
+        }
+        Add("sortBy", Model.SortBy);
+        qs.Add($"page={targetPage}");
+        return $"{Url.Action("Results", "Home")}?{string.Join("&", qs)}";
+    }
 }
 
 <h1 class="h3 mb-1">Results</h1>
@@ -58,22 +84,27 @@ else
                         @Html.Raw(TextInput("f-domain", "domain", Model.Filter.Domain))
                     }
                 </div>
+                @* The one multi-value control. A criterion can carry several
+                   semantic types, and matching the whole joined display string
+                   under-reported by 62% on the production corpus (44,800 rows
+                   matched "Pharmacologic Substance" where 118,867 carry it).
+
+                   Values are TUIs - stable across UMLS releases - and the names
+                   are display only. No text-input fallback, unlike the other
+                   five controls: the dimension is bounded by UMLS at ~132
+                   entries, so the "too many distinct values" path cannot apply. *@
                 <div class="col-md-4 col-lg-3">
-                    <label for="f-semanticType" class="form-label small text-muted mb-1">Semantic type</label>
-                    @if (Model.Options.SemanticTypes.Count > 0)
-                    {
-                        <select id="f-semanticType" name="semanticType" class="form-select form-select-sm">
-                            <option value="">(any)</option>
-                            @foreach (var v in Model.Options.SemanticTypes)
-                            {
-                                <option value="@v" selected="@(v == Model.Filter.SemanticType)">@v</option>
-                            }
-                        </select>
-                    }
-                    else
-                    {
-                        @Html.Raw(TextInput("f-semanticType", "semanticType", Model.Filter.SemanticType))
-                    }
+                    <label for="f-semanticTypeTuis" class="form-label small text-muted mb-1">
+                        Semantic type <span class="text-muted">(any of)</span>
+                    </label>
+                    <select id="f-semanticTypeTuis" name="semanticTypeTuis" multiple size="4"
+                            class="form-select form-select-sm">
+                        @foreach (var opt in Model.Options.SemanticTypes)
+                        {
+                            <option value="@opt.Tui"
+                                    selected="@Model.Filter.SemanticTypeTuis.Contains(opt.Tui)">@opt.Name</option>
+                        }
+                    </select>
                 </div>
                 <div class="col-md-4 col-lg-3">
                     <label for="f-conceptCode" class="form-label small text-muted mb-1">Concept code</label>
@@ -202,21 +233,15 @@ else
 
         @if (Model.TotalPages > 1)
         {
-            @* Pager preserves filter + sort by carrying every relevant query param
-               through asp-route-*; only `page` changes between links. *@
+            @* Pager preserves filter + sort; only `page` changes between links.
+               Built via PageUrl (see the top of this file) rather than
+               asp-route-*, which cannot emit the repeated semanticTypeTuis
+               parameter and would silently drop the semantic-type filter. *@
             <nav aria-label="Results pages">
                 <ul class="pagination pagination-sm">
                     <li class="page-item @(Model.HasPrev ? "" : "disabled")">
                         <a class="page-link"
-                           asp-action="Results"
-                           asp-route-nctId="@Model.Filter.NctId"
-                           asp-route-criterion="@Model.Filter.Criterion"
-                           asp-route-domain="@Model.Filter.Domain"
-                           asp-route-concept="@Model.Filter.Concept"
-                           asp-route-conceptCode="@Model.Filter.ConceptCode"
-                           asp-route-semanticType="@Model.Filter.SemanticType"
-                           asp-route-sortBy="@Model.SortBy"
-                           asp-route-page="@(Model.CurrentPage - 1)"
+                           href="@PageUrl(Model.CurrentPage - 1)"
                            tabindex="@(Model.HasPrev ? 0 : -1)"
                            aria-disabled="@(Model.HasPrev ? "false" : "true")">Prev</a>
                     </li>
@@ -225,15 +250,7 @@ else
                     </li>
                     <li class="page-item @(Model.HasNext ? "" : "disabled")">
                         <a class="page-link"
-                           asp-action="Results"
-                           asp-route-nctId="@Model.Filter.NctId"
-                           asp-route-criterion="@Model.Filter.Criterion"
-                           asp-route-domain="@Model.Filter.Domain"
-                           asp-route-concept="@Model.Filter.Concept"
-                           asp-route-conceptCode="@Model.Filter.ConceptCode"
-                           asp-route-semanticType="@Model.Filter.SemanticType"
-                           asp-route-sortBy="@Model.SortBy"
-                           asp-route-page="@(Model.CurrentPage + 1)"
+                           href="@PageUrl(Model.CurrentPage + 1)"
                            tabindex="@(Model.HasNext ? 0 : -1)"
                            aria-disabled="@(Model.HasNext ? "false" : "true")">Next</a>
                     </li>

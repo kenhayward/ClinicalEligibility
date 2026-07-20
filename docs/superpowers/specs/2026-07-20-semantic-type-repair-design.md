@@ -301,8 +301,14 @@ No migration. Version bump: **build only**.
   "any of these types" a natural query.
 - **Sort** (`PostgresGateway.vb:2151`, `semantic_type_asc`) continues to sort the
   display string.
-- **Results CSV export** (`Export/ExportResults.cs`) currently **omits**
-  `semantic_type`. Add it.
+- **Results CSV export - this line was wrong and is withdrawn.** It claimed
+  `Export/ExportResults.cs` omits `semantic_type`. There is no Results export at
+  all: that file is a 29-line generic helper (`CsvFile(string csv, string
+  downloadName)`) with no column list, no `EligibilityFilter` and no rows. The
+  only CSV carrying a semantic-type column is the **authoring** export. Building
+  a Results export is greenfield work - streaming a filtered slice of ~4.4M rows,
+  with its own decisions about row caps and download UX - and is out of scope
+  here. Decided 2026-07-20: not planned.
 - **Analysis tab** (`Views/Home/Analysis.cshtml:428`) renders the string; the
   cluster query aggregates with `COALESCE(max(semantic_type), '')`
   (`PostgresGateway.vb:3403`), which is arbitrary across a group. Revisit against
