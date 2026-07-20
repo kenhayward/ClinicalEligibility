@@ -503,6 +503,8 @@ Module Program
             args As String(),
             cancellationToken As CancellationToken) As Task(Of Integer)
 
+        Dim semanticTypesOnly = IsSemanticTypesOnly(args)
+
         Dim rrfDir = GetOptionValue(args, "--rrf-dir")
         If String.IsNullOrWhiteSpace(rrfDir) Then
             System.Console.Error.WriteLine("load-umls requires --rrf-dir <path> (unpacked UMLS release with MRCONSO.RRF + MRSTY.RRF).")
@@ -510,27 +512,68 @@ Module Program
         End If
         Dim mrconso = Path.Combine(rrfDir, "MRCONSO.RRF")
         Dim mrsty = Path.Combine(rrfDir, "MRSTY.RRF")
-        If Not File.Exists(mrconso) Then System.Console.Error.WriteLine($"Not found: {mrconso}") : Return 1
+        ' --semantic-types-only never reads MRCONSO, so do not demand it: the
+        ' repair must work from an MRSTY-only directory.
+        If Not semanticTypesOnly AndAlso Not File.Exists(mrconso) Then
+            System.Console.Error.WriteLine($"Not found: {mrconso}") : Return 1
+        End If
         If Not File.Exists(mrsty) Then System.Console.Error.WriteLine($"Not found: {mrsty}") : Return 1
 
         Dim store = appHost.Services.GetRequiredService(Of UmlsMetathesaurusStore)()
         Dim opts = appHost.Services.GetRequiredService(Of IOptions(Of UmlsOptions))().Value
         Dim sabs = If(opts.SourceVocabularies, Array.Empty(Of String)())
 
+        Dim atoms As Long = 0
+        Dim concepts As Long = 0
+
         System.Console.WriteLine($"Loading UMLS from {rrfDir}")
-        System.Console.WriteLine($"  vocabularies: {If(sabs.Length = 0, "(all English)", String.Join(", ", sabs))}")
-        System.Console.WriteLine("  truncating umls.* ...")
-        Await store.TruncateAsync(cancellationToken).ConfigureAwait(False)
-        System.Console.WriteLine("  COPY atoms from MRCONSO.RRF ...")
-        Dim atoms = Await store.BulkLoadAtomsAsync(UmlsRrfReader.ReadAtoms(mrconso, sabs), cancellationToken).ConfigureAwait(False)
-        System.Console.WriteLine($"    {atoms:N0} atoms")
-        System.Console.WriteLine("  building umls.concept (preferred names) ...")
-        Dim concepts = Await store.RebuildConceptTableAsync(cancellationToken).ConfigureAwait(False)
-        System.Console.WriteLine($"    {concepts:N0} concepts")
+        If semanticTypesOnly Then
+            ' Repair path: leave umls.atom and umls.concept untouched. Safe to run
+            ' against a live system - LoadSemanticTypesAsync stages into a temp
+            ' table and inserts ON CONFLICT DO NOTHING, touching only
+            ' umls.semantic_type.
+            System.Console.WriteLine("  --semantic-types-only: skipping truncate, atoms and concepts")
+            atoms = Await store.CountAsync("umls.atom", cancellationToken).ConfigureAwait(False)
+            concepts = Await store.CountAsync("umls.concept", cancellationToken).ConfigureAwait(False)
+            If concepts = 0 Then
+                System.Console.Error.WriteLine(
+                    "umls.concept is empty. --semantic-types-only filters MRSTY to CUIs already in umls.concept, " &
+                    "so this would load nothing. Run a full load-umls first.")
+                Return 1
+            End If
+        Else
+            System.Console.WriteLine($"  vocabularies: {If(sabs.Length = 0, "(all English)", String.Join(", ", sabs))}")
+            System.Console.WriteLine("  truncating umls.* ...")
+            Await store.TruncateAsync(cancellationToken).ConfigureAwait(False)
+            System.Console.WriteLine("  COPY atoms from MRCONSO.RRF ...")
+            atoms = Await store.BulkLoadAtomsAsync(UmlsRrfReader.ReadAtoms(mrconso, sabs), cancellationToken).ConfigureAwait(False)
+            System.Console.WriteLine($"    {atoms:N0} atoms")
+            System.Console.WriteLine("  building umls.concept (preferred names) ...")
+            concepts = Await store.RebuildConceptTableAsync(cancellationToken).ConfigureAwait(False)
+            System.Console.WriteLine($"    {concepts:N0} concepts")
+        End If
+
         System.Console.WriteLine("  loading semantic types from MRSTY.RRF ...")
         Dim stys = Await store.LoadSemanticTypesAsync(UmlsRrfReader.ReadSemanticTypes(mrsty), cancellationToken).ConfigureAwait(False)
         System.Console.WriteLine($"    {stys:N0} semantic-type rows")
+
+        ' The load reporting a row count is not evidence it worked. In May 2026 a
+        ' load left umls.semantic_type with 100 rows covering 49 CUIs against
+        ' 1,265,171 concepts, returned success, and nothing noticed for two
+        ' months - by which point 3.48M eligibility rows had been written with no
+        ' semantic type. Exit 2 (not 1) so wrapper scripts can distinguish "ran
+        ' but produced a bad result" from "bad arguments".
+        Dim completeness = Await store.GetLoadCompletenessAsync(cancellationToken).ConfigureAwait(False)
+        If Not completeness.IsComplete Then
+            System.Console.Error.WriteLine("LOAD INCOMPLETE - " & completeness.Describe())
+            System.Console.Error.WriteLine(
+                "Every UMLS concept has at least one semantic type, so coverage should be total. " &
+                "Re-run with --semantic-types-only against a complete MRSTY.RRF.")
+            Return 2
+        End If
+
         System.Console.WriteLine($"Done. atoms={atoms:N0} concepts={concepts:N0} semantic_types={stys:N0}.")
+        System.Console.WriteLine("  " & completeness.Describe())
         Return 0
     End Function
 
@@ -859,6 +902,16 @@ Module Program
         Return (100.0 * n / total).ToString("F1") & "%"
     End Function
 
+    ''' <summary>
+    ''' True when --semantic-types-only is present. Exact match (not a prefix),
+    ''' so an unrelated flag beginning with the same text does not trigger it.
+    ''' Friend rather than Private so CliCompositionTests can exercise it without
+    ''' a database (the Cli vbproj declares InternalsVisibleTo for that project).
+    ''' </summary>
+    Friend Function IsSemanticTypesOnly(args As String()) As Boolean
+        Return args.Any(Function(a) String.Equals(a, "--semantic-types-only", StringComparison.OrdinalIgnoreCase))
+    End Function
+
     Friend Function ParseStudyCount(args As String()) As Integer
         ' Look for --count N or --count=N. Default 10 per spec section 2.1.
         For i = 1 To args.Length - 1
@@ -900,10 +953,14 @@ Module Program
         System.Console.WriteLine("      under the configured model. Safe to re-run; requests run in parallel")
         System.Console.WriteLine("      at --concurrency (default Pipeline:LlmConcurrencyCap).")
         System.Console.WriteLine()
-        System.Console.WriteLine("  EligibilityProcessing.Cli load-umls --rrf-dir <path>")
+        System.Console.WriteLine("  EligibilityProcessing.Cli load-umls --rrf-dir <path> [--semantic-types-only]")
         System.Console.WriteLine("      Load a curated UMLS subset into the umls.* schema from an unpacked")
         System.Console.WriteLine("      release (MRCONSO.RRF + MRSTY.RRF). Full rebuild per release. Backs the")
         System.Console.WriteLine("      Umls:Backend=postgres resolver. Run on a build box, then pg_dump/restore.")
+        System.Console.WriteLine("      --semantic-types-only reloads umls.semantic_type alone from MRSTY.RRF,")
+        System.Console.WriteLine("      leaving atoms and concepts untouched. Use to repair a partial load")
+        System.Console.WriteLine("      without rebuilding healthy tables; safe against a running system.")
+        System.Console.WriteLine("      Exits 2 if semantic types do not cover every loaded concept.")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli umls-compare [--count N]")
         System.Console.WriteLine("      Resolve a sample of concepts through both the REST and Postgres")

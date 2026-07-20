@@ -135,6 +135,34 @@ Public Class CliCompositionTests
         Assert.Equal(expected, Program.ParseStudyCount(args))
     End Sub
 
+    ' ============ load-umls --semantic-types-only ============
+    '
+    ' The repair path. The default load TRUNCATEs umls.atom and umls.concept
+    ' before reloading them; in production those two tables are healthy and only
+    ' semantic types are broken, so the destructive path is both wasteful and
+    ' unusable against a live system (resolution returns nothing mid-rebuild).
+
+    <Fact>
+    Public Sub SemanticTypesOnly_flag_is_detected()
+        Assert.True(Program.IsSemanticTypesOnly({"load-umls", "--rrf-dir", "D:\umls", "--semantic-types-only"}))
+    End Sub
+
+    <Fact>
+    Public Sub SemanticTypesOnly_flag_is_case_insensitive()
+        Assert.True(Program.IsSemanticTypesOnly({"load-umls", "--SEMANTIC-TYPES-ONLY"}))
+    End Sub
+
+    <Fact>
+    Public Sub SemanticTypesOnly_is_false_when_absent()
+        Assert.False(Program.IsSemanticTypesOnly({"load-umls", "--rrf-dir", "D:\umls"}))
+    End Sub
+
+    ' Guards against a prefix match treating an unrelated flag as the real one.
+    <Fact>
+    Public Sub SemanticTypesOnly_does_not_match_a_different_flag()
+        Assert.False(Program.IsSemanticTypesOnly({"load-umls", "--semantic-types-only-please"}))
+    End Sub
+
     ' ============ helpers ============
 
     Private Shared Function BuildServices() As IServiceCollection
