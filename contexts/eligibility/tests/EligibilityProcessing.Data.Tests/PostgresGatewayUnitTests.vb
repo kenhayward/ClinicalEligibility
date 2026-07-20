@@ -57,7 +57,7 @@ Public Class PostgresGatewayUnitTests
                           End Sub)
         ' The last entry is the current target schema level (drives the CLI
         ' migrate banner).
-        Assert.Equal("V22__semantic_type_tuis", names(names.Count - 1))
+        Assert.Equal("V23__concept_hierarchy", names(names.Count - 1))
     End Sub
 
     ' ============ NullIfEmpty ============

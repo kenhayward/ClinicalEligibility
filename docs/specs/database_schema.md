@@ -548,6 +548,35 @@ UPDATE`) so a renamed semantic type updates here rather than going stale.
 | `tui` | `text` | no | | PK. |
 | `sty` | `text` | no | | Semantic type name. |
 
+### umls.concept_ancestor
+
+CUI → ancestor CUI with shortest path length, for rolling criteria clusters up to
+broader concepts. Populated by `load-umls --hierarchy-only` from `MRREL.RRF`,
+scoped to `SAB='SNOMEDCT_US'` and `REL IN ('PAR','CHD')`, then closed
+transitively to a bounded depth.
+
+**SNOMED-only, so coverage is partial by design.** Roughly half the corpus's
+distinct CUIs (66,514 of 132,243, measured 2026-07-20) have SNOMED edges; the
+rest have no ancestors and do not roll up. Concepts matched via MeSH, MedDRA or
+LOINC are absent unless they also carry a SNOMED atom.
+
+Deliberately shaped like OMOP's `CONCEPT_ANCESTOR` (ancestor, descendant,
+distance) so adopting OMOP later — which would cover the other vocabularies, at
+the cost of an ATHENA download and a CUI-to-OMOP crosswalk — is a load change
+rather than a rewrite of the rollup SQL.
+
+| Column | Type | Null | Default | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `descendant_cui` | `text` | no | | PK part — the more specific concept. |
+| `ancestor_cui` | `text` | no | | PK part — the broader concept. |
+| `min_distance` | `integer` | no | | Shortest path length. The graph is a DAG with multiple paths between the same pair; the minimum is what "roll up at most N levels" measures against. |
+
+**Primary key:** `(descendant_cui, ancestor_cui)` — also serves the rollup
+direction (descendant → ancestors).
+
+**Indexes:** `ix_umls_concept_ancestor_ancestor (ancestor_cui)` — the reverse
+direction, expanding a rolled-up cluster back to its member concepts.
+
 ### umls.concept_normalization
 
 LLM concept-normalization cache (the `normalize-umls` command + the pipeline's
@@ -600,6 +629,7 @@ case + spacing variants share one row. *(V20.)*
 | `V20__umls_concept_normalization.sql` | adds `umls.concept_normalization` (LLM concept→CUI normalization cache; backs `normalize-umls` + the pipeline's inline cache consult) |
 | `V21__signing_credentials.sql` | adds three columns to `public.app_user`: `signing_password_hash` (BCrypt hash for e-signature re-auth), `password_updated_at` (timestamp of last login-password change), `signing_password_updated_at` (timestamp of last signing-password change). All nullable via `ADD COLUMN IF NOT EXISTS`. |
 | `V22__semantic_type_tuis.sql` | adds `public.eligibility.semantic_type_tuis text[]` + GIN index `ix_eligibility_semantic_type_tuis`; re-keys `umls.semantic_type` from `(cui, sty)` to `(cui, tui)` with `tui NOT NULL` and adds `ix_umls_semantic_type_sty`; adds `umls.semantic_type_dim` (TUI → name, ~132 rows) populated from existing data |
+| `V23__concept_hierarchy.sql` | adds `umls.concept_ancestor` (SNOMED-derived CUI hierarchy with precomputed transitive closure) + index `ix_umls_concept_ancestor_ancestor`. Shaped like OMOP `CONCEPT_ANCESTOR`. Populated by `load-umls --hierarchy-only`; empty until then |
 
 ## Related specs
 
