@@ -39,19 +39,39 @@ surviving rows are a *prefix* of the file, not a sample:
 | All 100 rows pass the `umls.concept` filter | The `WHERE cui IN (...)` filter is not implicated |
 | `tui` non-null on every row | The data itself is valid |
 
-Semantic types are the **last** step of `load-umls` (atoms -> concepts ->
-semantic types, `Cli/Program.vb:525-531`). Atoms and concepts completed; the
-COPY stream into `mrsty_stage` stopped about 100 rows in. An interrupted
-`pg_restore` of the `umls` schema onto the target would produce the same prefix.
+The 100th line of the operator's file is `C0000340` while the table's max is
+`C0000343`, so the table is a *filtered* prefix - the `WHERE cui IN (...)` clause
+dropped some early CUIs, and 100 survivors reach roughly line 105-110.
 
-Nothing detected it for two months. **This is what makes the completeness
+**The mechanism is not established.** Two hypotheses, and the tidier one does not
+survive scrutiny:
+
+- *Interrupted COPY / `pg_restore`.* *Does not fit.* A binary COPY is
+  transactional - aborting it mid-stream yields zero rows, not a committed
+  prefix. The same applies to an interrupted `pg_restore` of the table.
+- *The INSERT ran against a partially-populated `umls.concept`.* **Fits the
+  evidence.** If `mrsty_stage` loaded fully but `umls.concept` held only ~49 CUIs
+  when the final INSERT executed, the filter would produce exactly this shape:
+  100 rows, 49 distinct CUIs clustered at the start of CUI order, all passing the
+  filter, all with valid TUIs. That points at `RebuildConceptTableAsync` and
+  `LoadSemanticTypesAsync` overlapping, or the steps being run out of order -
+  not at the COPY.
+
+Confirming this needs the load's console output or server logs from May 2026,
+which may no longer exist. **The repair does not depend on resolving it**, but
+the guard does: an assertion that only checks the final row count catches either
+mechanism, which is the argument for adding it regardless.
+
+The seed is ruled out - `SeedDump.cs:31` covers `eligibility_umls_retry` only and
+never touches the `umls` schema.
+
+Nothing detected this for two months. **That is what makes the completeness
 assertion below the primary fix rather than a safeguard.**
 
-An open question this raises: a cancelled load should throw and exit non-zero.
-Either the failure occurred during `pg_restore` rather than `load-umls`, or an
-exception was swallowed. Phase 1 should establish whether `load-umls` can return
-0 after a partial COPY - if it can, the assertion is treating a symptom and the
-exit-code path needs fixing too.
+A related open question: whichever mechanism applied, the run should not have
+reported success. Phase 1 should establish whether `load-umls` can return 0 after
+a partial or empty semantic-type load - if it can, the assertion is treating a
+symptom and the exit-code path needs fixing too.
 
 ### 2. The representation is ambiguous and the filter under-reports
 
