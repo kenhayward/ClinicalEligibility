@@ -26,8 +26,32 @@ Postgres path reads them from `umls.semantic_type`
 **3,479,090 resolved rows currently have `semantic_type IS NULL`.**
 
 The loader code and its call order are correct (`UmlsMetathesaurusStore.vb:306`,
-`Cli/Program.vb:520-533`). This is an incomplete *data* load - most likely a
-truncated or sample `MRSTY.RRF`. Nothing detected it for two months.
+`Cli/Program.vb:520-533`), and **the source file is intact** - the operator's
+`MRSTY.RRF` is 212,736,397 bytes / ~3.877M lines, with well-formed records.
+
+**Root cause: the load was interrupted partway through its final step.** The 100
+surviving rows are a *prefix* of the file, not a sample:
+
+| Evidence | Reading |
+|---|---|
+| `min(cui)` = `C0000005` | The first CUI in MRSTY, matching line 1 of the file |
+| `max(cui)` = `C0000343` | 49 consecutive CUIs from the start |
+| All 100 rows pass the `umls.concept` filter | The `WHERE cui IN (...)` filter is not implicated |
+| `tui` non-null on every row | The data itself is valid |
+
+Semantic types are the **last** step of `load-umls` (atoms -> concepts ->
+semantic types, `Cli/Program.vb:525-531`). Atoms and concepts completed; the
+COPY stream into `mrsty_stage` stopped about 100 rows in. An interrupted
+`pg_restore` of the `umls` schema onto the target would produce the same prefix.
+
+Nothing detected it for two months. **This is what makes the completeness
+assertion below the primary fix rather than a safeguard.**
+
+An open question this raises: a cancelled load should throw and exit non-zero.
+Either the failure occurred during `pg_restore` rather than `load-umls`, or an
+exception was swallowed. Phase 1 should establish whether `load-umls` can return
+0 after a partial COPY - if it can, the assertion is treating a symptom and the
+exit-code path needs fixing too.
 
 ### 2. The representation is ambiguous and the filter under-reports
 
@@ -116,11 +140,19 @@ have been a hard error in May.
 
 Applies to both the full and `--semantic-types-only` paths.
 
+### Exit-code integrity
+
+Establish whether `load-umls` can exit 0 after a partial COPY. The evidence above
+shows a run that left a 100-row prefix without anyone noticing, which means
+either the failure was outside the CLI (`pg_restore`) or a non-fatal path exists
+inside it. If the latter, fix the exit code as well - an assertion that catches a
+bad state is weaker than a load that refuses to claim success.
+
 ### Verification
 
-Row count moves from 100 to several million, and
-`SELECT count(DISTINCT cui) FROM umls.semantic_type` approaches the
-`umls.concept` count. Check the size of the source `MRSTY.RRF` first.
+`umls.semantic_type` moves from 100 rows to roughly 1.3M-1.8M (1,265,171
+concepts at ~1.0-1.4 semantic types each), and `count(DISTINCT cui)` approaches
+the `umls.concept` count. The source file needs no attention - it is intact.
 
 ## Phase 2: data model, write path, backfill
 
