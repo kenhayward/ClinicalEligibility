@@ -86,7 +86,8 @@ Written per-trial as `DELETE WHERE nct_id = X; INSERT …` inside one transactio
 | `domain` | `text` | no | | |
 | `concept` | `text` | no | | |
 | `concept_code` | `text` | yes | | UMLS CUI; empty when below the 0.45 match threshold. |
-| `semantic_type` | `text` | yes | | Empty when unresolved. |
+| `semantic_type` | `text` | yes | | Display string: semantic type names, `", "`-joined and sorted by name. **Derived from `semantic_type_tuis`** — do not filter on it, several UMLS names contain commas so the value cannot be parsed back into parts. Empty when unresolved. |
+| `semantic_type_tuis` | `text[]` | yes | | Semantic type ids (`{T047,T121}`). The analytic representation — TUIs are stable across UMLS releases where names are not. NULL when unresolved (never an empty array). Added V22. |
 | `qualifier` | `text` | yes | | |
 | `time_window` | `text` | yes | | |
 | `original_text` | `text` | yes | | Source snippet(s); merged duplicates are space-joined. |
@@ -102,7 +103,9 @@ Written per-trial as `DELETE WHERE nct_id = X; INSERT …` inside one transactio
 `ix_eligibility_criterion_trgm`, `ix_eligibility_concept_trgm` — GIN trigram for
 `ILIKE` filters (all V8); `ix_eligibility_unresolved (nct_id) WHERE concept_code
 IS NULL OR concept_code = ''` — partial index backing the `retry-umls` trial
-selection (V19).
+selection (V19); `ix_eligibility_semantic_type_tuis` — GIN on
+`semantic_type_tuis`, backing containment queries
+(`semantic_type_tuis && ARRAY['T121']`) (V22).
 
 ### public.eligibility_run
 
@@ -511,15 +514,39 @@ One row per CUI with a chosen preferred name + source vocab; supplies
 
 ### umls.semantic_type
 
-CUI → semantic type name(s), from MRSTY. Backs `GetSemanticTypesAsync`.
+CUI → semantic type(s), from MRSTY.
+
+Loaded for **every CUI in MRSTY**, not only those in `umls.concept`: the corpus
+contains CUIs the REST backend resolved from outside the six curated source
+vocabularies, which would otherwise be permanently unable to carry a semantic
+type. So this table is a **superset** of `umls.concept` (~3.9M rows over ~3.5M
+CUIs, against ~1.27M concepts).
 
 | Column | Type | Null | Default | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | `cui` | `text` | no | | PK part. |
-| `tui` | `text` | yes | | Semantic type id (`T047`, …). |
-| `sty` | `text` | no | | PK part — semantic type name. |
+| `tui` | `text` | no | | PK part — semantic type id (`T047`, …). NOT NULL since V22. |
+| `sty` | `text` | no | | Semantic type name. |
 
-**Primary key:** `(cui, sty)` (also serves the `WHERE cui = @cui` lookup).
+**Primary key:** `(cui, tui)` since V22 (also serves the `WHERE cui = @cui`
+lookup). Keyed on TUI rather than STY because `load-umls --semantic-types-only`
+is additive — under a `(cui, sty)` key, a UMLS release that renamed a semantic
+type would insert a second row for the same `(cui, tui)`.
+
+**Indexes:** `ix_umls_semantic_type_sty (sty)` — `sty` left the primary key in
+V22, so this backs the dimension rebuild and name-based lookup.
+
+### umls.semantic_type_dim
+
+TUI → name, ~132 rows. Lets a TUI resolve to a display name without touching the
+3.9M-row `umls.semantic_type`. Populated by V22 from existing data, and
+refreshed by `LoadSemanticTypesAsync` on every load (`ON CONFLICT (tui) DO
+UPDATE`) so a renamed semantic type updates here rather than going stale.
+
+| Column | Type | Null | Default | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `tui` | `text` | no | | PK. |
+| `sty` | `text` | no | | Semantic type name. |
 
 ### umls.concept_normalization
 
@@ -572,6 +599,7 @@ case + spacing variants share one row. *(V20.)*
 | `V19__umls_retry.sql` | adds `eligibility_umls_retry` (per-trial UMLS-only retry bookkeeping) + partial index `ix_eligibility_unresolved` on `eligibility(nct_id)` WHERE `concept_code` empty |
 | `V20__umls_concept_normalization.sql` | adds `umls.concept_normalization` (LLM concept→CUI normalization cache; backs `normalize-umls` + the pipeline's inline cache consult) |
 | `V21__signing_credentials.sql` | adds three columns to `public.app_user`: `signing_password_hash` (BCrypt hash for e-signature re-auth), `password_updated_at` (timestamp of last login-password change), `signing_password_updated_at` (timestamp of last signing-password change). All nullable via `ADD COLUMN IF NOT EXISTS`. |
+| `V22__semantic_type_tuis.sql` | adds `public.eligibility.semantic_type_tuis text[]` + GIN index `ix_eligibility_semantic_type_tuis`; re-keys `umls.semantic_type` from `(cui, sty)` to `(cui, tui)` with `tui NOT NULL` and adds `ix_umls_semantic_type_sty`; adds `umls.semantic_type_dim` (TUI → name, ~132 rows) populated from existing data |
 
 ## Related specs
 
