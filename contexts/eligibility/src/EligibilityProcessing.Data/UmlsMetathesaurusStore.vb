@@ -427,6 +427,43 @@ ORDER BY cui,
         End Using
     End Function
 
+    ''' <summary>
+    ''' Concept vs semantic-type coverage for the local mirror, used to assert a
+    ''' load actually completed.
+    ''' </summary>
+    ''' <remarks>
+    ''' Keys on CUI COVERAGE, not raw row count. Every UMLS concept carries at
+    ''' least one semantic type in MRSTY, and LoadSemanticTypesAsync filters to
+    ''' CUIs already present in umls.concept - so after a correct load every
+    ''' concept CUI must appear in umls.semantic_type. A raw-row rule would pass
+    ''' if one CUI had a large number of semantic types while the rest had none.
+    '''
+    ''' Exists because a May 2026 load left 100 rows covering 49 CUIs against
+    ''' 1,265,171 concepts and reported success. Nothing detected it for two
+    ''' months, and 3.48M eligibility rows were written with no semantic type.
+    ''' </remarks>
+    Public Async Function GetLoadCompletenessAsync(
+            cancellationToken As CancellationToken) As Task(Of UmlsLoadCompleteness)
+
+        Const Sql As String = "
+SELECT (SELECT count(*) FROM umls.concept)                  AS concept_count,
+       (SELECT count(*) FROM umls.semantic_type)            AS sty_rows,
+       (SELECT count(DISTINCT cui) FROM umls.semantic_type) AS sty_cuis"
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                    Return New UmlsLoadCompleteness(
+                            conceptCount:=reader.GetInt64(0),
+                            semanticTypeRowCount:=reader.GetInt64(1),
+                            semanticTypeCuiCount:=reader.GetInt64(2))
+                End Using
+            End Using
+        End Using
+    End Function
+
 End Class
 
 ''' <summary>One atom row for bulk loading umls.atom. StrNorm must be produced by
@@ -446,3 +483,40 @@ Public Structure SemanticTypeRow
     Public Property Tui As String
     Public Property Sty As String
 End Structure
+
+''' <summary>
+''' Outcome of <see cref="UmlsMetathesaurusStore.GetLoadCompletenessAsync"/>.
+''' </summary>
+Public NotInheritable Class UmlsLoadCompleteness
+
+    Public Sub New(conceptCount As Long, semanticTypeRowCount As Long, semanticTypeCuiCount As Long)
+        Me.ConceptCount = conceptCount
+        Me.SemanticTypeRowCount = semanticTypeRowCount
+        Me.SemanticTypeCuiCount = semanticTypeCuiCount
+    End Sub
+
+    Public ReadOnly Property ConceptCount As Long
+    Public ReadOnly Property SemanticTypeRowCount As Long
+    Public ReadOnly Property SemanticTypeCuiCount As Long
+
+    ''' <summary>
+    ''' True when every concept CUI has at least one semantic type. An empty
+    ''' store is vacuously complete - otherwise the check would refuse to run
+    ''' against a fresh database, where 0 of 0 is the correct answer.
+    ''' </summary>
+    Public ReadOnly Property IsComplete As Boolean
+        Get
+            Return SemanticTypeCuiCount >= ConceptCount
+        End Get
+    End Property
+
+    ''' <summary>
+    ''' Operator-facing summary. Carries both numbers deliberately: "incomplete"
+    ''' alone does not distinguish a near-miss from a total failure.
+    ''' </summary>
+    Public Function Describe() As String
+        Return $"umls.concept has {ConceptCount:N0} concepts; umls.semantic_type covers " &
+               $"{SemanticTypeCuiCount:N0} of them ({SemanticTypeRowCount:N0} rows)."
+    End Function
+
+End Class

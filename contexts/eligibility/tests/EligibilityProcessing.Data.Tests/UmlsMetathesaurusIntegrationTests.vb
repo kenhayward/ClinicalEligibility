@@ -210,6 +210,151 @@ Public Class UmlsMetathesaurusIntegrationTests
                         Function(c) c.Ui = "C0020615")
     End Function
 
+    ' ============ GetLoadCompletenessAsync ============
+    '
+    ' The guard that would have caught the May 2026 failure: umls.semantic_type
+    ' held 100 rows / 49 CUIs against 1.27M concepts and nothing noticed for two
+    ' months. Keys on CUI COVERAGE rather than raw row count - a raw-row rule
+    ' would pass if a single CUI had a huge number of semantic types.
+
+    <SkippableFact>
+    Public Async Function LoadCompleteness_is_complete_when_every_concept_has_a_semantic_type() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.BulkLoadAtomsAsync({
+            Atom("C0011860", "Diabetes Mellitus, Non-Insulin-Dependent", "MSH", "MH", True),
+            Atom("C0020615", "Hypoglycemia", "SNOMEDCT_US", "PT", True)
+        }, CancellationToken.None)
+        Await store.RebuildConceptTableAsync(CancellationToken.None)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0011860", .Tui = "T047", .Sty = "Disease or Syndrome"},
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(2L, c.ConceptCount)
+        Assert.Equal(2L, c.SemanticTypeCuiCount)
+        Assert.Equal(2L, c.SemanticTypeRowCount)
+        Assert.True(c.IsComplete)
+    End Function
+
+    ' Reproduces the production shape: concepts loaded, semantic types almost
+    ' entirely absent.
+    <SkippableFact>
+    Public Async Function LoadCompleteness_is_incomplete_when_semantic_types_are_a_prefix() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.BulkLoadAtomsAsync({
+            Atom("C0011860", "Diabetes Mellitus, Non-Insulin-Dependent", "MSH", "MH", True),
+            Atom("C0020615", "Hypoglycemia", "SNOMEDCT_US", "PT", True),
+            Atom("C0000005", "Thyroxine-Binding Globulin", "MSH", "MH", True)
+        }, CancellationToken.None)
+        Await store.RebuildConceptTableAsync(CancellationToken.None)
+        ' Only one of the three concepts gets a semantic type.
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0000005", .Tui = "T116", .Sty = "Amino Acid, Peptide, or Protein"}
+        }, CancellationToken.None)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(3L, c.ConceptCount)
+        Assert.Equal(1L, c.SemanticTypeCuiCount)
+        Assert.False(c.IsComplete)
+        ' The message must carry both numbers - an operator seeing only "incomplete"
+        ' cannot tell a near-miss from a total failure.
+        Assert.Contains("3", c.Describe())
+        Assert.Contains("1", c.Describe())
+    End Function
+
+    <SkippableFact>
+    Public Async Function LoadCompleteness_is_incomplete_when_semantic_types_are_empty() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.BulkLoadAtomsAsync({
+            Atom("C0020615", "Hypoglycemia", "SNOMEDCT_US", "PT", True)
+        }, CancellationToken.None)
+        Await store.RebuildConceptTableAsync(CancellationToken.None)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(1L, c.ConceptCount)
+        Assert.Equal(0L, c.SemanticTypeCuiCount)
+        Assert.False(c.IsComplete)
+    End Function
+
+    ' Degenerate case: an empty store is vacuously complete. Without this the CLI
+    ' would refuse to run on a fresh database, where 0 of 0 is the correct answer.
+    <SkippableFact>
+    Public Async Function LoadCompleteness_is_complete_for_an_empty_store() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(0L, c.ConceptCount)
+        Assert.True(c.IsComplete)
+    End Function
+
+    ' The load reports what it wrote, but the completeness check is what decides
+    ' success. This asserts the two agree on a healthy load - the CLI's exit-code
+    ' branch is exercised manually, since the CLI entry point needs a full host.
+    <SkippableFact>
+    Public Async Function LoadCompleteness_agrees_with_a_healthy_full_load() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.BulkLoadAtomsAsync({
+            Atom("C0011860", "Diabetes Mellitus, Non-Insulin-Dependent", "MSH", "MH", True),
+            Atom("C0020615", "Hypoglycemia", "SNOMEDCT_US", "PT", True)
+        }, CancellationToken.None)
+        Await store.RebuildConceptTableAsync(CancellationToken.None)
+        Dim written = Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0011860", .Tui = "T047", .Sty = "Disease or Syndrome"},
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(2L, written)
+        Assert.Equal(written, c.SemanticTypeRowCount)
+        Assert.True(c.IsComplete)
+    End Function
+
+    ' MRSTY rows for CUIs outside the curated atom subset are filtered out by
+    ' LoadSemanticTypesAsync. Coverage must still be judged against the concepts
+    ' that WERE loaded, not against the input file, or every curated load would
+    ' look incomplete.
+    <SkippableFact>
+    Public Async Function LoadCompleteness_ignores_semantic_types_for_unloaded_concepts() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.BulkLoadAtomsAsync({
+            Atom("C0020615", "Hypoglycemia", "SNOMEDCT_US", "PT", True)
+        }, CancellationToken.None)
+        Await store.RebuildConceptTableAsync(CancellationToken.None)
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"},
+            New SemanticTypeRow With {.Cui = "C9999999", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(1L, c.ConceptCount)
+        Assert.Equal(1L, c.SemanticTypeCuiCount)   ' C9999999 was filtered out
+        Assert.True(c.IsComplete)
+    End Function
+
     Private Shared Function Atom(cui As String, str As String, sab As String, tty As String, pref As Boolean) As AtomRow
         Return New AtomRow With {
             .Cui = cui, .Str = str, .StrNorm = UmlsMetathesaurusStore.NormalizeConcept(str),
