@@ -1,7 +1,18 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 2, "build": 0, "releaseDate": "2026-07-20" },
+  "current": { "major": 0, "minor": 2, "build": 1, "releaseDate": "2026-07-20" },
   "releases": [
+    {
+      "version": "0.2.1",
+      "releaseDate": "2026-07-20",
+      "enhancements": [
+        "Results: the semantic type filter now returns every row carrying the selected type, not only rows where it was the sole type. On the current corpus that is 118,867 rows for Pharmacologic Substance against 44,800 before.",
+        "The semantic type filter lists the 132 real UMLS types instead of 215 combinations of them, and accepts more than one at a time (matching any of the selected types). It also no longer costs a scan of the whole corpus to build."
+      ],
+      "fixes": [
+        "The Analysis tab showed a single semantic type for a group of criteria that could span several; it now lists all of them."
+      ]
+    },
     {
       "version": "0.2.0",
       "releaseDate": "2026-07-20",

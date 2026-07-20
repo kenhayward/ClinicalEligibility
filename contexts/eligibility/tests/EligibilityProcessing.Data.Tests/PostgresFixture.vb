@@ -80,6 +80,7 @@ Public NotInheritable Class PostgresFixture
                     umls.atom,
                     umls.concept,
                     umls.semantic_type,
+                    umls.semantic_type_dim,
                     umls.concept_normalization,
                     ctgov.eligibilities,
                     ctgov.studies,
@@ -261,6 +262,23 @@ Public NotInheritable Class PostgresFixture
     ''' Inserts one public.eligibility row. Authoring Analysis tests use this to
     ''' seed criterion records to cluster. An empty conceptCode persists as NULL.
     ''' </summary>
+    ''' <summary>Inserts one public.eligibility row with an explicit TUI array.</summary>
+    Public Async Function InsertEligibilityRowWithTuisAsync(
+            nctId As String, conceptCode As String, tuis As String()) As Task
+        Using conn = Await DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+                    INSERT INTO public.eligibility
+                        (nct_id, criterion, domain, concept, concept_code, semantic_type_tuis, match_score)
+                    VALUES (@n, 'Inclusion', 'Disease', 'concept', @cc, @tuis, 0)"
+                cmd.Parameters.AddWithValue("n", nctId)
+                cmd.Parameters.AddWithValue("cc", conceptCode)
+                cmd.Parameters.AddWithValue("tuis", tuis)
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
     Public Async Function InsertEligibilityRowAsync(
             nctId As String,
             criterion As String,

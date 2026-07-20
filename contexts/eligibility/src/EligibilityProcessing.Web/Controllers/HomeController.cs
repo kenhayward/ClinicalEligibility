@@ -113,6 +113,7 @@ public class HomeController : Controller
         string? domain = null,
         string? concept = null,
         string? conceptCode = null,
+        string[]? semanticTypeTuis = null,
         string? semanticType = null,
         string? sortBy = null,
         int page = 1)
@@ -125,9 +126,25 @@ public class HomeController : Controller
             var options = await _corpusReads.GetEligibilityFilterOptionsAsync(
                 ResultsDropdownThreshold, cancellationToken);
 
+            var tuis = (semanticTypeTuis ?? Array.Empty<string>())
+                .Select(s => s?.Trim() ?? "")
+                .Where(s => s.Length > 0)
+                .ToList();
+
+            // Legacy support: links saved before the filter moved to TUIs carry
+            // ?semanticType=<display name>. Resolve it rather than ignoring it -
+            // silently returning unfiltered rows would look like the filter had
+            // been applied. Only consulted when no TUI was supplied.
+            if (tuis.Count == 0 && !string.IsNullOrWhiteSpace(semanticType))
+            {
+                var match = options.SemanticTypes.FirstOrDefault(
+                    o => string.Equals(o.Name, semanticType, StringComparison.OrdinalIgnoreCase));
+                if (match is not null) { tuis.Add(match.Tui); }
+            }
+
             var filter = new EligibilityFilter(
                 nctId: nctId, criterion: criterion, domain: domain,
-                concept: concept, conceptCode: conceptCode, semanticType: semanticType);
+                concept: concept, conceptCode: conceptCode, semanticTypeTuis: tuis);
 
             var effectiveSort = string.IsNullOrWhiteSpace(sortBy)
                 ? ResultsViewModel.SortChoices.Default

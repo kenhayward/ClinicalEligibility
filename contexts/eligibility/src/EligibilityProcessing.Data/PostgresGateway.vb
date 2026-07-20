@@ -1449,7 +1449,7 @@ WHERE (@nct_id        IS NULL OR nct_id = @nct_id)
   AND (@domain        IS NULL OR domain = @domain)
   AND (@concept       IS NULL OR concept ILIKE '%' || @concept || '%')
   AND (@concept_code  IS NULL OR concept_code = @concept_code)
-  AND (@semantic_type IS NULL OR semantic_type = @semantic_type)"
+  AND (@semantic_type_tuis IS NULL OR semantic_type_tuis && @semantic_type_tuis)"
 
         Dim pageSql = $"
 SELECT id, nct_id, criterion, domain, concept, concept_code, semantic_type,
@@ -1470,7 +1470,7 @@ OFFSET @offset LIMIT @limit"
                 AddTextParam(cmd, "domain", filter.Domain)
                 AddTextParam(cmd, "concept", filter.Concept)
                 AddTextParam(cmd, "concept_code", filter.ConceptCode)
-                AddTextParam(cmd, "semantic_type", filter.SemanticType)
+                AddSemanticTypeTuisParam(cmd, filter)
                 cmd.Parameters.Add(New NpgsqlParameter("offset", NpgsqlDbType.Integer) With {.Value = offset})
                 cmd.Parameters.Add(New NpgsqlParameter("limit", NpgsqlDbType.Integer) With {.Value = cappedPageSize})
 
@@ -1502,7 +1502,7 @@ OFFSET @offset LIMIT @limit"
                 AddTextParam(countCmd, "domain", filter.Domain)
                 AddTextParam(countCmd, "concept", filter.Concept)
                 AddTextParam(countCmd, "concept_code", filter.ConceptCode)
-                AddTextParam(countCmd, "semantic_type", filter.SemanticType)
+                AddSemanticTypeTuisParam(countCmd, filter)
                 totalRows = Convert.ToInt64(Await countCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False))
             End Using
         End Using
@@ -1524,8 +1524,11 @@ OFFSET @offset LIMIT @limit"
         ' One query per column, each LIMIT cap+1. If a column returns > cap rows,
         ' it's "too big for a dropdown" and we hand back an empty list — the
         ' view renders a text input instead.
+        ' semantic_type is NOT here any more: it comes from umls.semantic_type_dim
+        ' (see below), which removed the only other column that still needed a
+        ' real scan after the estimate pre-filter.
         Dim columns = New String() {
-            "nct_id", "criterion", "domain", "concept", "concept_code", "semantic_type"}
+            "nct_id", "criterion", "domain", "concept", "concept_code"}
 
         ' Cheap pre-filter. SELECT DISTINCT over public.eligibility costs a full
         ' scan of ~3.9M rows per column (measured: `concept` alone is ~780 ms),
@@ -1533,8 +1536,9 @@ OFFSET @offset LIMIT @limit"
         ' result blows the cap and LoadDistinctAsync throws it away. The planner
         ' already keeps a distinct-count estimate per column, so ask it first and
         ' skip the scan for columns it says are provably over the cap. Measured
-        ' on the production corpus this drops the six-column total from ~1150 ms
-        ' to ~240 ms (only `criterion` and `semantic_type` still get scanned).
+        ' on the production corpus this dropped the then-six-column total from
+        ' ~1150 ms to ~240 ms; only `criterion` still gets scanned now that
+        ' semantic_type is served from the dimension.
         '
         ' Correctness rests on only ever skipping when the estimate clears the
         ' cap by a wide margin - see ShouldSkipDistinctScan.
@@ -1558,7 +1562,36 @@ OFFSET @offset LIMIT @limit"
                 domains:=results("domain"),
                 concepts:=results("concept"),
                 conceptCodes:=results("concept_code"),
-                semanticTypes:=results("semantic_type"))
+                semanticTypes:=Await LoadSemanticTypeOptionsAsync(cancellationToken).ConfigureAwait(False))
+    End Function
+
+    ''' <summary>
+    ''' Selectable semantic types, from the ~132-row umls.semantic_type_dim.
+    ''' </summary>
+    ''' <remarks>
+    ''' Not a DISTINCT over public.eligibility. That scan covered ~3.9M rows and
+    ''' was one of only two the estimate pre-filter could not skip - the values
+    ''' it produced were joined *combinations* (215 of them on the production
+    ''' corpus) rather than the 132 real semantic types, so it was both slower
+    ''' and wrong. The maxDropdownSize cap does not apply: the dimension is
+    ''' bounded by UMLS.
+    ''' </remarks>
+    Private Async Function LoadSemanticTypeOptionsAsync(
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of SemanticTypeOption))
+
+        Dim result As New List(Of SemanticTypeOption)
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                ' Ordered by display name so the dropdown reads alphabetically.
+                cmd.CommandText = "SELECT tui, sty FROM umls.semantic_type_dim ORDER BY sty"
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        result.Add(New SemanticTypeOption(reader.GetString(0), reader.GetString(1)))
+                    End While
+                End Using
+            End Using
+        End Using
+        Return result
     End Function
 
     ' How far past the cap a planner estimate must sit before we trust it enough
@@ -1669,6 +1702,19 @@ LIMIT @cap"
     Private Shared Sub AddTextParam(cmd As NpgsqlCommand, name As String, value As String)
         cmd.Parameters.Add(New NpgsqlParameter(name, NpgsqlDbType.Text) With {
                 .Value = If(String.IsNullOrEmpty(value), CObj(DBNull.Value), value)})
+    End Sub
+
+    ''' <summary>
+    ''' Binds the semantic-type filter as a text array for the `&&` (overlap)
+    ''' predicate. DBNull when the list is empty, so the `@semantic_type_tuis IS
+    ''' NULL` arm short-circuits and the filter is skipped entirely - an empty
+    ''' selection means "no filter", not "match nothing".
+    ''' </summary>
+    Private Shared Sub AddSemanticTypeTuisParam(cmd As NpgsqlCommand, filter As EligibilityFilter)
+        cmd.Parameters.Add(New NpgsqlParameter("semantic_type_tuis", NpgsqlDbType.Array Or NpgsqlDbType.Text) With {
+                .Value = If(filter.SemanticTypeTuis.Count = 0,
+                            CObj(DBNull.Value),
+                            CObj(filter.SemanticTypeTuis.ToArray()))})
     End Sub
 
     ' ============ GetStudyDetailsAsync (source DB, Analysis tab ID card) ============
@@ -3415,7 +3461,14 @@ SELECT criterion,
        (concept_code IS NOT NULL AND concept_code <> '') AS resolved,
        max(concept) AS concept,
        COALESCE(max(concept_code), '') AS concept_code,
-       COALESCE(max(semantic_type), '') AS semantic_type,
+       -- Every distinct semantic type in the group, not one arbitrary pick.
+       -- max() over text returns the lexicographically largest string, which was
+       -- harmless while a group meant one CUI. It is not: the group key falls
+       -- back to lowercased concept TEXT for unresolved criteria, so one cluster
+       -- can span several CUIs with genuinely different semantic types.
+       COALESCE((SELECT string_agg(DISTINCT s, ', ' ORDER BY s)
+                   FROM unnest(array_agg(semantic_type)) AS s
+                  WHERE s IS NOT NULL AND s <> ''), '') AS semantic_type,
        count(DISTINCT nct_id) AS study_count,
        count(*) AS record_count
 FROM public.eligibility

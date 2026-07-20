@@ -716,7 +716,13 @@ Public Class PostgresGatewayIntegrationTests
         Assert.Equal(scanned.NctIds, skipped.NctIds)
         Assert.Equal(scanned.Domains, skipped.Domains)
         Assert.Equal(scanned.ConceptCodes, skipped.ConceptCodes)
-        Assert.Equal(scanned.SemanticTypes, skipped.SemanticTypes)
+        ' Semantic types deliberately not compared here: since V22 they come from
+        ' umls.semantic_type_dim, not a DISTINCT scan, so the estimate pre-filter
+        ' this test exercises does not apply to them. Comparing the two lists
+        ' would also be meaningless - SemanticTypeOption has reference equality,
+        ' so it would only ever pass while both are empty. Coverage for the
+        ' dimension-sourced list lives in the FilterOptions_semantic_types_*
+        ' tests below.
     End Function
 
     ' A column under the cap must still produce a dropdown after ANALYZE - the
@@ -3312,6 +3318,157 @@ Public Class PostgresGatewayIntegrationTests
                 New AuditLogFilter With {.Action = "update"}, page:=1, pageSize:=10, CancellationToken.None)
         Assert.Equal(1L, page.TotalRows)
         Assert.Equal(runId, page.Rows(0).EntityId)
+    End Function
+
+    ' Unresolved criteria group by lowercased concept TEXT, so one cluster can
+    ' span rows with genuinely different semantic types. max() picked one
+    ' lexicographically and dropped the rest silently.
+    <SkippableFact>
+    Public Async Function ClusterCommonCriteria_reports_every_semantic_type_in_a_group() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "anaemia",
+                conceptCode:="", semanticType:="Disease or Syndrome")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "anaemia",
+                conceptCode:="", semanticType:="Finding")
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, CancellationToken.None)
+
+        Dim cluster = clusters.Single(Function(c) c.Concept = "anaemia")
+        ' Both present, in a stable order - previously this returned "Finding"
+        ' alone, because F sorts after D.
+        Assert.Equal("Disease or Syndrome, Finding", cluster.SemanticType)
+    End Function
+
+    ' ============ semantic-type filter options (from the dimension) ============
+
+    <SkippableFact>
+    Public Async Function FilterOptions_semantic_types_come_from_the_dimension_not_the_corpus() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.semantic_type_dim (tui, sty) VALUES
+  ('T121','Pharmacologic Substance'), ('T047','Disease or Syndrome')
+ON CONFLICT (tui) DO NOTHING"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+
+        ' No eligibility rows at all: the list must still populate, which is only
+        ' possible if it does NOT come from a DISTINCT over the corpus.
+        Dim options = Await _fixture.Gateway.GetEligibilityFilterOptionsAsync(100, CancellationToken.None)
+
+        Assert.Equal(2, options.SemanticTypes.Count)
+        ' Ordered by display name so the dropdown reads alphabetically.
+        Assert.Equal("Disease or Syndrome", options.SemanticTypes(0).Name)
+        Assert.Equal("T047", options.SemanticTypes(0).Tui)
+        Assert.Equal("Pharmacologic Substance", options.SemanticTypes(1).Name)
+    End Function
+
+    ' The dropdown cap bounds the corpus-scanned columns. It must not bound the
+    ' dimension - UMLS already does, at ~132 entries.
+    <SkippableFact>
+    Public Async Function FilterOptions_semantic_types_ignore_the_dropdown_cap() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.semantic_type_dim (tui, sty)
+SELECT 'T' || lpad(g::text, 3, '0'), 'Type ' || g
+FROM generate_series(1, 10) AS g
+ON CONFLICT (tui) DO NOTHING"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+
+        ' Cap of 2 - far below the 10 available.
+        Dim options = Await _fixture.Gateway.GetEligibilityFilterOptionsAsync(2, CancellationToken.None)
+
+        Assert.Equal(10, options.SemanticTypes.Count)
+    End Function
+
+    ' ============ semantic-type containment filter ============
+    '
+    ' The old filter matched the whole joined display string, so a row carrying
+    ' several semantic types was invisible unless the user picked that exact
+    ' combination. Measured on production after the phase 2 backfill: 44,800 rows
+    ' matched "Pharmacologic Substance" exactly, against 118,867 that carry it.
+
+    <SkippableFact>
+    Public Async Function SearchEligibility_matches_a_row_carrying_the_type_among_others() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' One row whose ONLY type is T121, one where T121 is one of three.
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000001", "C0000001", {"T121"})
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000002", "C0000002", {"T116", "T121", "T126"})
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000003", "C0000003", {"T047"})
+
+        Dim page = Await _fixture.Gateway.SearchEligibilityAsync(
+                New EligibilityFilter(semanticTypeTuis:={"T121"}), "", 1, 50, CancellationToken.None)
+
+        Assert.Equal(2L, page.TotalRows)
+    End Function
+
+    ' Multi-select is OR, not AND: "anything that is either of these".
+    <SkippableFact>
+    Public Async Function SearchEligibility_treats_multiple_tuis_as_any_of() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000001", "C0000001", {"T121"})
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000002", "C0000002", {"T047"})
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000003", "C0000003", {"T999"})
+
+        Dim page = Await _fixture.Gateway.SearchEligibilityAsync(
+                New EligibilityFilter(semanticTypeTuis:={"T121", "T047"}), "", 1, 50, CancellationToken.None)
+
+        Assert.Equal(2L, page.TotalRows)
+    End Function
+
+    ' Empty means "no filter", NOT "match nothing" - getting this backwards makes
+    ' an unfiltered Results page return zero rows.
+    <SkippableFact>
+    Public Async Function SearchEligibility_ignores_an_empty_tui_filter() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000001", "C0000001", {"T121"})
+
+        Dim page = Await _fixture.Gateway.SearchEligibilityAsync(
+                New EligibilityFilter(semanticTypeTuis:=Array.Empty(Of String)()), "", 1, 50, CancellationToken.None)
+
+        Assert.Equal(1L, page.TotalRows)
+    End Function
+
+    ' A blank entry from a form post must not turn "no filter" into "match nothing".
+    <SkippableFact>
+    Public Async Function SearchEligibility_drops_blank_tui_entries() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowWithTuisAsync("NCT00000001", "C0000001", {"T121"})
+
+        Dim page = Await _fixture.Gateway.SearchEligibilityAsync(
+                New EligibilityFilter(semanticTypeTuis:={"", "   "}), "", 1, 50, CancellationToken.None)
+
+        Assert.Equal(1L, page.TotalRows)
+    End Function
+
+    ' Unresolved rows have a NULL array. Containment must exclude them without
+    ' erroring on the NULL.
+    <SkippableFact>
+    Public Async Function SearchEligibility_excludes_rows_with_no_semantic_types() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000009", "crit", "concept", conceptCode:="")
+
+        Dim page = Await _fixture.Gateway.SearchEligibilityAsync(
+                New EligibilityFilter(semanticTypeTuis:={"T121"}), "", 1, 50, CancellationToken.None)
+
+        Assert.Equal(0L, page.TotalRows)
     End Function
 
     ' ============ V22 schema ============
