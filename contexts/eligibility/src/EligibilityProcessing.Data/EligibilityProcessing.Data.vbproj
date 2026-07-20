@@ -80,6 +80,9 @@
     <EmbeddedResource Include="Migrations\V21__signing_credentials.sql">
       <LogicalName>EligibilityProcessing.Data.Migrations.V21__signing_credentials.sql</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V22__semantic_type_tuis.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V22__semantic_type_tuis.sql</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <PropertyGroup>

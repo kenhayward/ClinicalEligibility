@@ -351,10 +351,23 @@ CREATE TEMP TABLE mrsty_stage (cui text, tui text, sty text)"
             Using cmd = conn.CreateCommand()
                 cmd.CommandText = "
 INSERT INTO umls.semantic_type (cui, tui, sty)
-SELECT DISTINCT ON (cui, sty) cui, tui, sty
+SELECT DISTINCT ON (cui, tui) cui, tui, sty
 FROM pg_temp.mrsty_stage
-ORDER BY cui, sty
-ON CONFLICT (cui, sty) DO NOTHING"
+ORDER BY cui, tui
+ON CONFLICT (cui, tui) DO NOTHING"
+                Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+
+            ' Refresh the TUI -> name dimension (~132 rows) so a vocabulary
+            ' release that renames a semantic type updates the display name
+            ' without a separate step. The main table is keyed on (cui, tui), so
+            ' a rename does NOT create a duplicate row there - but the dim row
+            ' would otherwise keep the old name, hence the explicit UPDATE.
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.semantic_type_dim (tui, sty)
+SELECT DISTINCT tui, sty FROM pg_temp.mrsty_stage WHERE tui IS NOT NULL AND tui <> ''
+ON CONFLICT (tui) DO UPDATE SET sty = excluded.sty"
                 Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
             End Using
         End Using

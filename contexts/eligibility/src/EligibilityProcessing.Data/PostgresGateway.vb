@@ -50,7 +50,8 @@ Public NotInheritable Class PostgresGateway
             "EligibilityProcessing.Data.Migrations.V18__umls_fts.sql",
             "EligibilityProcessing.Data.Migrations.V19__umls_retry.sql",
             "EligibilityProcessing.Data.Migrations.V20__umls_concept_normalization.sql",
-            "EligibilityProcessing.Data.Migrations.V21__signing_credentials.sql"
+            "EligibilityProcessing.Data.Migrations.V21__signing_credentials.sql",
+            "EligibilityProcessing.Data.Migrations.V22__semantic_type_tuis.sql"
         }
 
     ''' <summary>

@@ -3313,6 +3313,59 @@ Public Class PostgresGatewayIntegrationTests
         Assert.Equal(runId, page.Rows(0).EntityId)
     End Function
 
+    ' ============ V22 schema ============
+
+    <SkippableFact>
+    Public Async Function V22_adds_semantic_type_tuis_and_dim_table() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+SELECT (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='eligibility'
+           AND column_name='semantic_type_tuis' AND data_type='ARRAY')            AS has_tuis_col,
+       (SELECT count(*) FROM information_schema.tables
+         WHERE table_schema='umls' AND table_name='semantic_type_dim')            AS has_dim,
+       (SELECT count(*) FROM pg_indexes
+         WHERE schemaname='public' AND indexname='ix_eligibility_semantic_type_tuis') AS has_gin,
+       (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema='umls' AND table_name='semantic_type'
+           AND column_name='tui' AND is_nullable='NO')                            AS tui_not_null"
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Await reader.ReadAsync()
+                    Assert.Equal(1L, reader.GetInt64(0))
+                    Assert.Equal(1L, reader.GetInt64(1))
+                    Assert.Equal(1L, reader.GetInt64(2))
+                    Assert.Equal(1L, reader.GetInt64(3))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    ' The dim table is populated by the migration itself from existing data, so a
+    ' vocabulary reload is not required to make it usable.
+    <SkippableFact>
+    Public Async Function V22_dim_table_is_populated_from_existing_semantic_types() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.semantic_type (cui, tui, sty) VALUES ('C0011860','T047','Disease or Syndrome')
+  ON CONFLICT DO NOTHING;
+INSERT INTO umls.semantic_type_dim (tui, sty)
+SELECT DISTINCT tui, sty FROM umls.semantic_type ON CONFLICT (tui) DO NOTHING;"
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT sty FROM umls.semantic_type_dim WHERE tui = 'T047'"
+                Assert.Equal("Disease or Syndrome", CStr(Await cmd.ExecuteScalarAsync()))
+            End Using
+        End Using
+    End Function
+
     Private Shared Function MakeResolved(
             nctId As String,
             concept As String,
