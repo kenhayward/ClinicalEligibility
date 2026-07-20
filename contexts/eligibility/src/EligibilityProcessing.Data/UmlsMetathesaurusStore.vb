@@ -297,12 +297,29 @@ ORDER BY top.best DESC"
     End Function
 
     ''' <summary>
-    ''' Loads semantic types into umls.semantic_type, keeping only CUIs that the
-    ''' curated atom load actually imported (joined to umls.concept). MRSTY covers
-    ''' all of UMLS, so it is streamed into a temp staging table on one connection,
-    ''' then filtered + deduped into the real table. Call AFTER atoms are loaded
-    ''' and RebuildConceptTableAsync has run. Returns the final row count.
+    ''' Loads semantic types into umls.semantic_type for EVERY CUI in MRSTY, not
+    ''' just those the curated atom load imported. Streamed into a temp staging
+    ''' table on one connection, then deduped into the real table. Returns the
+    ''' final row count.
     ''' </summary>
+    ''' <remarks>
+    ''' This deliberately does NOT filter to umls.concept. public.eligibility
+    ''' contains 19,133 distinct CUIs that the REST backend resolved from outside
+    ''' the six curated source vocabularies, so they have no atom and no concept
+    ''' row - and under a concept-filtered load they could never receive a
+    ''' semantic type, leaving ~3% of the corpus permanently unfillable.
+    '''
+    ''' Filtering by the corpus instead (public.eligibility.concept_code) was
+    ''' rejected: it would couple this store to the eligibility schema, against
+    ''' its "owns all umls.* SQL" contract, and would need re-running whenever a
+    ''' new out-of-subset CUI appeared. Semantic types do not depend on which
+    ''' vocabulary an atom came from, lookups are by CUI primary key so a larger
+    ''' table costs nothing at read time, and loading all of MRSTY covers any CUI
+    ''' the REST backend may return in future.
+    '''
+    ''' Unlike the atom load, this no longer depends on RebuildConceptTableAsync
+    ''' having run first.
+    ''' </remarks>
     Public Async Function LoadSemanticTypesAsync(
             rows As IEnumerable(Of SemanticTypeRow),
             cancellationToken As CancellationToken) As Task(Of Long)
@@ -336,7 +353,6 @@ CREATE TEMP TABLE mrsty_stage (cui text, tui text, sty text)"
 INSERT INTO umls.semantic_type (cui, tui, sty)
 SELECT DISTINCT ON (cui, sty) cui, tui, sty
 FROM pg_temp.mrsty_stage
-WHERE cui IN (SELECT cui FROM umls.concept)
 ORDER BY cui, sty
 ON CONFLICT (cui, sty) DO NOTHING"
                 Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
@@ -427,6 +443,51 @@ ORDER BY cui,
         End Using
     End Function
 
+    ''' <summary>
+    ''' Concept vs semantic-type coverage for the local mirror, used to assert a
+    ''' load actually completed.
+    ''' </summary>
+    ''' <remarks>
+    ''' Keys on CUI COVERAGE, not raw row count. Every UMLS concept carries at
+    ''' least one semantic type in MRSTY, and LoadSemanticTypesAsync filters to
+    ''' CUIs already present in umls.concept - so after a correct load every
+    ''' concept CUI must appear in umls.semantic_type. A raw-row rule would pass
+    ''' if one CUI had a large number of semantic types while the rest had none.
+    '''
+    ''' Exists because a May 2026 load left 100 rows covering 49 CUIs against
+    ''' 1,265,171 concepts and reported success. Nothing detected it for two
+    ''' months, and 3.48M eligibility rows were written with no semantic type.
+    ''' </remarks>
+    Public Async Function GetLoadCompletenessAsync(
+            cancellationToken As CancellationToken) As Task(Of UmlsLoadCompleteness)
+
+        ' The uncovered count is a true anti-join, NOT a count comparison. Since
+        ' the loader keeps every MRSTY CUI, umls.semantic_type is a superset of
+        ' umls.concept - so "sty_cuis >= concept_count" would be satisfied by a
+        ' large load that happened to miss the concepts entirely. Containment is
+        ' the property the resolver actually depends on.
+        Const Sql As String = "
+SELECT (SELECT count(*) FROM umls.concept)                  AS concept_count,
+       (SELECT count(*) FROM umls.semantic_type)            AS sty_rows,
+       (SELECT count(DISTINCT cui) FROM umls.semantic_type) AS sty_cuis,
+       (SELECT count(*) FROM umls.concept c
+         WHERE NOT EXISTS (SELECT 1 FROM umls.semantic_type s WHERE s.cui = c.cui)) AS uncovered"
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                    Return New UmlsLoadCompleteness(
+                            conceptCount:=reader.GetInt64(0),
+                            semanticTypeRowCount:=reader.GetInt64(1),
+                            semanticTypeCuiCount:=reader.GetInt64(2),
+                            conceptsWithoutSemanticType:=reader.GetInt64(3))
+                End Using
+            End Using
+        End Using
+    End Function
+
 End Class
 
 ''' <summary>One atom row for bulk loading umls.atom. StrNorm must be produced by
@@ -446,3 +507,53 @@ Public Structure SemanticTypeRow
     Public Property Tui As String
     Public Property Sty As String
 End Structure
+
+''' <summary>
+''' Outcome of <see cref="UmlsMetathesaurusStore.GetLoadCompletenessAsync"/>.
+''' </summary>
+Public NotInheritable Class UmlsLoadCompleteness
+
+    Public Sub New(conceptCount As Long,
+                   semanticTypeRowCount As Long,
+                   semanticTypeCuiCount As Long,
+                   conceptsWithoutSemanticType As Long)
+        Me.ConceptCount = conceptCount
+        Me.SemanticTypeRowCount = semanticTypeRowCount
+        Me.SemanticTypeCuiCount = semanticTypeCuiCount
+        Me.ConceptsWithoutSemanticType = conceptsWithoutSemanticType
+    End Sub
+
+    Public ReadOnly Property ConceptCount As Long
+    Public ReadOnly Property SemanticTypeRowCount As Long
+    Public ReadOnly Property SemanticTypeCuiCount As Long
+
+    ''' <summary>Concepts with no row in umls.semantic_type. Zero when healthy.</summary>
+    Public ReadOnly Property ConceptsWithoutSemanticType As Long
+
+    ''' <summary>
+    ''' True when every concept CUI has at least one semantic type. An empty
+    ''' store is vacuously complete - otherwise the check would refuse to run
+    ''' against a fresh database, where nothing uncovered is the correct answer.
+    ''' </summary>
+    ''' <remarks>
+    ''' Deliberately containment, not a count comparison. umls.semantic_type is a
+    ''' superset of umls.concept (the loader keeps every MRSTY CUI), so comparing
+    ''' counts would be satisfied by a large load that missed the concepts.
+    ''' </remarks>
+    Public ReadOnly Property IsComplete As Boolean
+        Get
+            Return ConceptsWithoutSemanticType = 0
+        End Get
+    End Property
+
+    ''' <summary>
+    ''' Operator-facing summary. Names the uncovered count explicitly: "incomplete"
+    ''' alone does not distinguish a near-miss from a total failure.
+    ''' </summary>
+    Public Function Describe() As String
+        Return $"umls.semantic_type holds {SemanticTypeRowCount:N0} rows over " &
+               $"{SemanticTypeCuiCount:N0} CUIs; of {ConceptCount:N0} concepts, " &
+               $"{ConceptsWithoutSemanticType:N0} have no semantic type."
+    End Function
+
+End Class

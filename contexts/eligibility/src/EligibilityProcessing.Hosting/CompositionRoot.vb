@@ -180,7 +180,15 @@ Public Module CompositionRoot
         services.AddKeyedSingleton(Of NpgsqlDataSource)(OutputDataSourceKey,
                 Function(sp As IServiceProvider, key As Object) As NpgsqlDataSource
                     Dim opts = sp.GetRequiredService(Of IOptions(Of PostgresOptions)).Value
-                    Return BuildDataSource(opts.ConnectionStringOutput, sp, opts.SlowCommandLogThresholdMs)
+                    ' Same ceiling as the SOURCE connection above, for the same
+                    ' reason. Demonstrated on the output side by load-umls: the
+                    ' full-MRSTY INSERT writes ~5M rows in one statement and dies
+                    ' on the 30s default with "Exception while reading from
+                    ' stream". Pipeline writes are per-trial and unaffected; this
+                    ' only matters for the bulk maintenance paths.
+                    Dim outputConn As New NpgsqlConnectionStringBuilder(opts.ConnectionStringOutput) With {
+                            .CommandTimeout = Math.Max(0, opts.OutputCommandTimeoutSeconds)}
+                    Return BuildDataSource(outputConn.ConnectionString, sp, opts.SlowCommandLogThresholdMs)
                 End Function)
 
         services.AddSingleton(Of IPostgresGateway)(

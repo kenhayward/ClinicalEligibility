@@ -73,4 +73,15 @@ Public Class PostgresOptions
     ''' </summary>
     Public Property SourceCommandTimeoutSeconds As Integer = 300
 
+    ''' <summary>
+    ''' Command timeout (seconds) applied to the OUTPUT data source. Same failure
+    ''' mode as the source ceiling above, and demonstrated: loading all of MRSTY
+    ''' inserts roughly 5M rows in one statement, which exceeds Npgsql's 30s
+    ''' default and dies with "Exception while reading from stream". The regular
+    ''' pipeline writes are per-trial and nowhere near this, so the default only
+    ''' bites the bulk maintenance paths (load-umls, and the phase 2 backfill).
+    ''' 0 means no timeout (infinite). Config: Postgres:OutputCommandTimeoutSeconds.
+    ''' </summary>
+    Public Property OutputCommandTimeoutSeconds As Integer = 600
+
 End Class
