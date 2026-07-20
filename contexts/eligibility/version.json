@@ -6,10 +6,12 @@
       "version": "0.1.35",
       "releaseDate": "2026-07-20",
       "enhancements": [
-        "load-umls gained --semantic-types-only, which reloads umls.semantic_type alone from MRSTY.RRF without touching atoms or concepts - use it to repair a partial load without rebuilding healthy tables."
+        "load-umls gained --semantic-types-only, which reloads umls.semantic_type alone from MRSTY.RRF without touching atoms or concepts - use it to repair a partial load without rebuilding healthy tables.",
+        "Semantic types are now loaded for every CUI in MRSTY rather than only the curated vocabularies, so criteria resolved against CUIs outside those vocabularies can still carry a semantic type."
       ],
       "fixes": [
-        "load-umls now fails (exit 2) when the loaded semantic types do not cover every concept, instead of reporting success. A partial load previously went undetected."
+        "load-umls now fails (exit 4) when any loaded concept has no semantic type, instead of reporting success. A partial load previously went undetected.",
+        "The output database connection now honours Postgres:OutputCommandTimeoutSeconds (default 600). Npgsql's 30s default killed long bulk statements with 'Exception while reading from stream'."
       ]
     },
     {

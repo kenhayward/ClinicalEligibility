@@ -44,16 +44,23 @@ dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- load-
 # dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- embed-umls
 ```
 
-`load-umls` prints atom / concept / semantic-type counts **and asserts that
-semantic types cover every loaded concept**. It exits `2` if they do not - a
-non-zero exit here means the umls schema is not fit to ship, whatever the printed
-counts say.
+`load-umls` prints atom / concept / semantic-type counts **and asserts that every
+loaded concept has a semantic type**. It exits `4` if any do not - a non-zero exit
+here means the umls schema is not fit to ship, whatever the printed counts say.
+(Exit codes: 1 usage, 2 unhandled exception, 3 cancelled, 4 incomplete load.)
+
+Note that `umls.semantic_type` is a **superset** of `umls.concept`: semantic types
+are loaded for every CUI in MRSTY, not just the curated vocabularies, because
+`public.eligibility` contains CUIs the REST backend resolved from outside the six
+configured SABs. Expect roughly 3.9M semantic-type rows against 1.27M concepts.
 
 ```sql
 SELECT count(*) FROM umls.atom;            -- millions (curated subset)
 SELECT count(*) FROM umls.concept;         -- ~ unique CUIs loaded
-SELECT count(*) FROM umls.semantic_type;   -- >= concept count
-SELECT count(DISTINCT cui) FROM umls.semantic_type;  -- == concept count
+SELECT count(*) FROM umls.semantic_type;   -- ~3.9M (all of MRSTY)
+-- The real check: every concept must have a semantic type. Expect 0.
+SELECT count(*) FROM umls.concept c
+ WHERE NOT EXISTS (SELECT 1 FROM umls.semantic_type s WHERE s.cui = c.cui);
 SELECT cui, pref_name, root_source FROM umls.concept WHERE cui = 'C0020615';  -- Hypoglycemia
 ```
 
@@ -69,8 +76,10 @@ dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- `
 
 This skips the TRUNCATE and the MRCONSO pass, so `umls.atom` and `umls.concept`
 are untouched and resolution keeps working throughout. Only `MRSTY.RRF` needs to
-be present. It refuses to run against an empty `umls.concept`, since the MRSTY
-filter would then match nothing and load zero rows.
+be present, and the load is idempotent - re-running it converges.
+
+Takes ~60s for the full ~3.9M rows, which is why `Postgres:OutputCommandTimeoutSeconds`
+exists; Npgsql's 30s default kills it mid-INSERT.
 
 > **This happened.** A May 2026 load left `umls.semantic_type` with 100 rows
 > covering 49 CUIs against 1,265,171 concepts and reported success. It went

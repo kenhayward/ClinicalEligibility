@@ -329,12 +329,12 @@ Public Class UmlsMetathesaurusIntegrationTests
         Assert.True(c.IsComplete)
     End Function
 
-    ' MRSTY rows for CUIs outside the curated atom subset are filtered out by
-    ' LoadSemanticTypesAsync. Coverage must still be judged against the concepts
-    ' that WERE loaded, not against the input file, or every curated load would
-    ' look incomplete.
+    ' Semantic types are loaded for EVERY CUI in MRSTY, including ones with no
+    ' atom in the curated subset. public.eligibility holds 19,133 such CUIs -
+    ' resolved by the REST backend from outside the six curated vocabularies - and
+    ' a concept-filtered load would leave ~3% of the corpus permanently unfillable.
     <SkippableFact>
-    Public Async Function LoadCompleteness_ignores_semantic_types_for_unloaded_concepts() As Task
+    Public Async Function LoadSemanticTypes_retains_cuis_with_no_atom_in_the_curated_subset() As Task
         Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
         Await _fixture.ResetAsync()
         Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
@@ -351,8 +351,57 @@ Public Class UmlsMetathesaurusIntegrationTests
         Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
 
         Assert.Equal(1L, c.ConceptCount)
-        Assert.Equal(1L, c.SemanticTypeCuiCount)   ' C9999999 was filtered out
+        Assert.Equal(2L, c.SemanticTypeCuiCount)   ' C9999999 is kept, not filtered
+        ' Coverage is still judged against concepts, so a superset stays complete.
         Assert.True(c.IsComplete)
+    End Function
+
+    ' The case a count comparison would wave through. umls.semantic_type is a
+    ' superset of umls.concept, so "sty_cuis >= concept_count" can hold while the
+    ' concepts themselves are entirely uncovered. Only containment catches this.
+    <SkippableFact>
+    Public Async Function LoadCompleteness_is_incomplete_when_semantic_types_outnumber_but_miss_the_concepts() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.BulkLoadAtomsAsync({
+            Atom("C0020615", "Hypoglycemia", "SNOMEDCT_US", "PT", True)
+        }, CancellationToken.None)
+        Await store.RebuildConceptTableAsync(CancellationToken.None)
+        ' Three semantic-type CUIs against one concept - but none of them IS the
+        ' concept, so coverage is zero despite the counts looking healthy.
+        Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C9999997", .Tui = "T047", .Sty = "Disease or Syndrome"},
+            New SemanticTypeRow With {.Cui = "C9999998", .Tui = "T047", .Sty = "Disease or Syndrome"},
+            New SemanticTypeRow With {.Cui = "C9999999", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+
+        Dim c = Await store.GetLoadCompletenessAsync(CancellationToken.None)
+
+        Assert.Equal(1L, c.ConceptCount)
+        Assert.Equal(3L, c.SemanticTypeCuiCount)      ' outnumbers concepts...
+        Assert.Equal(1L, c.ConceptsWithoutSemanticType)  ' ...but covers none of them
+        Assert.False(c.IsComplete)
+    End Function
+
+    ' The load no longer depends on concepts existing first. Guards the ordering
+    ' hazard that is the leading explanation for the original May 2026 failure:
+    ' under the old concept-filtered INSERT, running this step before the concept
+    ' rebuild silently loaded almost nothing.
+    <SkippableFact>
+    Public Async Function LoadSemanticTypes_does_not_require_concepts_to_exist_first() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        ' No atoms, no concepts - just semantic types.
+        Dim written = Await store.LoadSemanticTypesAsync({
+            New SemanticTypeRow With {.Cui = "C0020615", .Tui = "T047", .Sty = "Disease or Syndrome"},
+            New SemanticTypeRow With {.Cui = "C0011860", .Tui = "T047", .Sty = "Disease or Syndrome"}
+        }, CancellationToken.None)
+
+        Assert.Equal(2L, written)
     End Function
 
     Private Shared Function Atom(cui As String, str As String, sab As String, tty As String, pref As Boolean) As AtomRow

@@ -535,12 +535,6 @@ Module Program
             System.Console.WriteLine("  --semantic-types-only: skipping truncate, atoms and concepts")
             atoms = Await store.CountAsync("umls.atom", cancellationToken).ConfigureAwait(False)
             concepts = Await store.CountAsync("umls.concept", cancellationToken).ConfigureAwait(False)
-            If concepts = 0 Then
-                System.Console.Error.WriteLine(
-                    "umls.concept is empty. --semantic-types-only filters MRSTY to CUIs already in umls.concept, " &
-                    "so this would load nothing. Run a full load-umls first.")
-                Return 1
-            End If
         Else
             System.Console.WriteLine($"  vocabularies: {If(sabs.Length = 0, "(all English)", String.Join(", ", sabs))}")
             System.Console.WriteLine("  truncating umls.* ...")
@@ -561,15 +555,19 @@ Module Program
         ' load left umls.semantic_type with 100 rows covering 49 CUIs against
         ' 1,265,171 concepts, returned success, and nothing noticed for two
         ' months - by which point 3.48M eligibility rows had been written with no
-        ' semantic type. Exit 2 (not 1) so wrapper scripts can distinguish "ran
-        ' but produced a bad result" from "bad arguments".
+        ' semantic type.
+        '
+        ' Exit 4, not 2. DispatchAsync already uses 1 = usage, 2 = unhandled
+        ' exception, 3 = cancelled, so "ran to completion but produced a bad
+        ' result" needs its own code - otherwise a wrapper script cannot tell an
+        ' incomplete load from a crash.
         Dim completeness = Await store.GetLoadCompletenessAsync(cancellationToken).ConfigureAwait(False)
         If Not completeness.IsComplete Then
             System.Console.Error.WriteLine("LOAD INCOMPLETE - " & completeness.Describe())
             System.Console.Error.WriteLine(
                 "Every UMLS concept has at least one semantic type, so coverage should be total. " &
                 "Re-run with --semantic-types-only against a complete MRSTY.RRF.")
-            Return 2
+            Return 4
         End If
 
         System.Console.WriteLine($"Done. atoms={atoms:N0} concepts={concepts:N0} semantic_types={stys:N0}.")
@@ -960,7 +958,7 @@ Module Program
         System.Console.WriteLine("      --semantic-types-only reloads umls.semantic_type alone from MRSTY.RRF,")
         System.Console.WriteLine("      leaving atoms and concepts untouched. Use to repair a partial load")
         System.Console.WriteLine("      without rebuilding healthy tables; safe against a running system.")
-        System.Console.WriteLine("      Exits 2 if semantic types do not cover every loaded concept.")
+        System.Console.WriteLine("      Exits 4 if semantic types do not cover every loaded concept.")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli umls-compare [--count N]")
         System.Console.WriteLine("      Resolve a sample of concepts through both the REST and Postgres")
