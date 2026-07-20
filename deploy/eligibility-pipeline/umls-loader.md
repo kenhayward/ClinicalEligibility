@@ -44,14 +44,39 @@ dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- load-
 # dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- embed-umls
 ```
 
-`load-umls` prints atom / concept / semantic-type counts. Sanity-check:
+`load-umls` prints atom / concept / semantic-type counts **and asserts that
+semantic types cover every loaded concept**. It exits `2` if they do not - a
+non-zero exit here means the umls schema is not fit to ship, whatever the printed
+counts say.
 
 ```sql
 SELECT count(*) FROM umls.atom;            -- millions (curated subset)
 SELECT count(*) FROM umls.concept;         -- ~ unique CUIs loaded
-SELECT count(*) FROM umls.semantic_type;
+SELECT count(*) FROM umls.semantic_type;   -- >= concept count
+SELECT count(DISTINCT cui) FROM umls.semantic_type;  -- == concept count
 SELECT cui, pref_name, root_source FROM umls.concept WHERE cui = 'C0020615';  -- Hypoglycemia
 ```
+
+### Repairing a partial semantic-type load
+
+If `umls.semantic_type` is short but atoms and concepts are healthy, reload
+semantic types alone rather than rebuilding everything:
+
+```powershell
+dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- `
+  load-umls --rrf-dir D:\umls\2025AB\META --semantic-types-only
+```
+
+This skips the TRUNCATE and the MRCONSO pass, so `umls.atom` and `umls.concept`
+are untouched and resolution keeps working throughout. Only `MRSTY.RRF` needs to
+be present. It refuses to run against an empty `umls.concept`, since the MRSTY
+filter would then match nothing and load zero rows.
+
+> **This happened.** A May 2026 load left `umls.semantic_type` with 100 rows
+> covering 49 CUIs against 1,265,171 concepts and reported success. It went
+> unnoticed for two months, during which 3.48M `public.eligibility` rows were
+> written with no semantic type. The assertion above exists so that a partial
+> load fails loudly instead of shipping.
 
 ### Validate before shipping
 
@@ -128,3 +153,6 @@ schema just stops being read.
 Repeat steps 1–4 with the new release directory. `load-umls` TRUNCATEs and
 repopulates, so it is a clean full rebuild; the dump/restore replaces the target
 schema in place. Nothing else changes.
+
+`--semantic-types-only` is the exception: it repairs `umls.semantic_type` in
+place without touching atoms or concepts, and is not part of a release refresh.

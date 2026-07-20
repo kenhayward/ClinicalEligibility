@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 1, "build": 34, "releaseDate": "2026-07-19" },
+  "current": { "major": 0, "minor": 1, "build": 35, "releaseDate": "2026-07-20" },
   "releases": [
+    {
+      "version": "0.1.35",
+      "releaseDate": "2026-07-20",
+      "enhancements": [
+        "load-umls gained --semantic-types-only, which reloads umls.semantic_type alone from MRSTY.RRF without touching atoms or concepts - use it to repair a partial load without rebuilding healthy tables."
+      ],
+      "fixes": [
+        "load-umls now fails (exit 2) when the loaded semantic types do not cover every concept, instead of reporting success. A partial load previously went undetected."
+      ]
+    },
     {
       "version": "0.1.34",
       "releaseDate": "2026-07-19",
