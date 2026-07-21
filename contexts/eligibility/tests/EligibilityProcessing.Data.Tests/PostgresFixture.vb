@@ -88,6 +88,7 @@ Public NotInheritable Class PostgresFixture
                     public.eligibility_umls_retry,
                     public.eligibility_study,
                     public.eligibility_study_detail,
+                    public.condition_concept,
                     public.authoring_study,
                     public.authoring_eligibility,
                     public.authoring_criterion,

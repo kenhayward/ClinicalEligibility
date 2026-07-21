@@ -252,6 +252,32 @@ per AACT trial that has `public.eligibility` rows. *(V7; `embedding` pinned to
 **Index:** `ix_eligibility_study_embedding_hnsw` — HNSW on
 `(embedding vector_cosine_ops)` for the `<=>` cosine operator (V8).
 
+### public.condition_concept
+
+Condition -> UMLS CUI dictionary, keyed on the NORMALIZED condition string
+(not on `(nct_id, condition)`), so corpus analytics can slice by condition.
+`public.eligibility_study_detail.conditions` is raw AACT free text - 91,600
+distinct strings over 611,329 mentions, unnormalized - and cannot back an
+analytic dimension as-is. Normalization is study-independent, so this
+dictionary is ~90,076 rows rather than 611,329, is re-runnable, and lets a new
+pipeline run reuse every earlier resolution. *(V24.)*
+
+| Column | Type | Null | Default | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `condition_norm` | `text` | no | | Primary key. `ConceptKey.Normalize(raw)`: lower-invariant, internal whitespace collapsed, trimmed; SQL mirror is `regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')`. |
+| `raw_form` | `text` | no | | Most frequent ORIGINAL casing of this normalized string; the string handed to the matcher. Load-bearing for acronym matching (e.g. COPD vs Copd). |
+| `study_count` | `integer` | no | `0` | Corpus frequency; orders backfill work. Recomputed in bulk, not incrementally maintained. |
+| `concept_code` | `text` | yes | | UMLS CUI; NULL when unresolved. |
+| `umls_name` | `text` | yes | | |
+| `match_tier` | `text` | no | `'unresolved'` | `exact` \| `exact_ambiguous` \| `fuzzy` \| `unresolved`. Not called `match_source` - that name is reserved for the root source vocabulary (MSH, SNOMEDCT_US) elsewhere in the schema. |
+| `match_score` | `numeric(4,3)` | no | `0` | `0` when unresolved. |
+| `resolved_at` | `timestamptz` | yes | | NULL means never attempted; set even on failure so a re-run skips it unless forced. |
+| `created_at` | `timestamptz` | no | `now()` | |
+
+**Indexes:**
+- `ix_condition_concept_code` — on `(concept_code)` where `concept_code IS NOT NULL`; serves the analytics join `condition_concept -> concept_code -> eligibility`.
+- `ix_condition_concept_pending` — on `(study_count DESC)` where `resolved_at IS NULL`; serves the backfill's highest-value-unresolved-first ordering.
+
 ---
 
 ## Authoring tables
@@ -630,6 +656,7 @@ case + spacing variants share one row. *(V20.)*
 | `V21__signing_credentials.sql` | adds three columns to `public.app_user`: `signing_password_hash` (BCrypt hash for e-signature re-auth), `password_updated_at` (timestamp of last login-password change), `signing_password_updated_at` (timestamp of last signing-password change). All nullable via `ADD COLUMN IF NOT EXISTS`. |
 | `V22__semantic_type_tuis.sql` | adds `public.eligibility.semantic_type_tuis text[]` + GIN index `ix_eligibility_semantic_type_tuis`; re-keys `umls.semantic_type` from `(cui, sty)` to `(cui, tui)` with `tui NOT NULL` and adds `ix_umls_semantic_type_sty`; adds `umls.semantic_type_dim` (TUI → name, ~132 rows) populated from existing data |
 | `V23__concept_hierarchy.sql` | adds `umls.concept_ancestor` (SNOMED-derived CUI hierarchy with precomputed transitive closure) + index `ix_umls_concept_ancestor_ancestor`. Shaped like OMOP `CONCEPT_ANCESTOR`. Populated by `load-umls --hierarchy-only`; empty until then |
+| `V24__condition_concept.sql` | adds `public.condition_concept` (condition -> UMLS CUI dictionary keyed on normalized condition string) + indexes `ix_condition_concept_code` and `ix_condition_concept_pending` |
 
 ## Related specs
 
