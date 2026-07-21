@@ -521,10 +521,12 @@ Module Program
         ' single-line progress renderer, fed from the job's snapshots.
         Using scope = appHost.Services.CreateScope()
             Dim job = scope.ServiceProvider.GetRequiredService(Of IConditionNormalizeJob)()
-            Dim total = Await job.CountRemainingAsync(force, cancellationToken).ConfigureAwait(False)
+            Dim remaining = Await job.CountRemainingAsync(force, cancellationToken).ConfigureAwait(False)
+            Dim total = If(count > 0, Math.Min(count, remaining), remaining)
             System.Console.WriteLine(
-                    $"Normalizing {If(count > 0, Math.Min(count, total), total)} condition string(s)" &
+                    $"Normalizing {total} condition string(s)" &
                     If(dryRun, " (dry-run)", "") & If(force, " (force)", "") & "...")
+            If total = 0 Then Return 0
 
             Dim latest As ToolJobSnapshot = Nothing
             Dim sink As New SnapshotSink(Sub(s) latest = s)
@@ -555,10 +557,13 @@ Module Program
             End Try
             If Not System.Console.IsOutputRedirected Then System.Console.WriteLine()
 
-            ' Unlike the other maintenance verbs, a failure here reports on stderr
-            ' and returns 1 rather than re-throwing to exit code 2 - the job has no
-            ' per-item error counter, so any caught exception here is a hard stop.
+            ' Re-throw a captured cancellation so DispatchAsync maps it to exit code 3,
+            ' matching the other maintenance verbs. Unlike those verbs, a genuine
+            ' failure here still reports on stderr and returns 1 rather than
+            ' re-throwing to exit code 2 - the job has no per-item error counter, so
+            ' any other caught exception is a hard stop.
             If caught IsNot Nothing Then
+                If TypeOf caught Is OperationCanceledException Then Throw caught
                 System.Console.Error.WriteLine($"normalize-conditions failed: {caught.Message}")
                 Return 1
             End If
