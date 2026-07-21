@@ -5,16 +5,26 @@ Imports Npgsql
 Imports Testcontainers.PostgreSql
 Imports Xunit
 
-' xUnit ClassFixture that spins up a Postgres container, applies the V1
-' migration, and exposes a ready-to-use PostgresGateway.
+' xUnit ClassFixture that spins up a Postgres container, applies the schema
+' migrations, and exposes a ready-to-use PostgresGateway.
 '
-' If Docker is not available on the host (no daemon, no socket), the fixture
-' captures the failure in SkipReason and every integration test calls
-' Skip.If(SkipReason IsNot Nothing, ...). This keeps the suite green on
-' developer machines without Docker while running fully in CI.
+' If Docker is not available on the host (no daemon, no socket), the CONTAINER
+' START fails, the fixture captures that in SkipReason, and every integration
+' test calls Skip.If(SkipReason IsNot Nothing, ...). This keeps the suite green
+' on developer machines without Docker while running fully in CI.
+'
+' ONLY the container start is treated as a skip. Everything after it - the data
+' source, EnsureSchemaAsync, the source schema - is allowed to throw, because a
+' failure there is a CODE DEFECT and must fail the run.
+'
+' That distinction is the whole point of the split below. This Try used to wrap
+' all four steps, so a broken migration (most often a new .sql missing its
+' <EmbeddedResource> entry in EligibilityProcessing.Data.vbproj) was relabelled
+' "Docker likely unavailable" and silently skipped ~350 tests, which reads as a
+' green suite. That happened twice during the V22/V23 work.
 '
 ' The same container is reused for all tests in a class; each test calls
-' ResetAsync() to TRUNCATE all four tables back to a clean slate.
+' ResetAsync() to TRUNCATE every table back to a clean slate.
 
 Public NotInheritable Class PostgresFixture
     Implements IAsyncLifetime
@@ -26,29 +36,37 @@ Public NotInheritable Class PostgresFixture
     Public Property ConnectionString As String
 
     Public Async Function InitializeAsync() As Task Implements IAsyncLifetime.InitializeAsync
+        ' ONLY the container start is guarded. See the class comment: widening
+        ' this Try turns code defects into silent skips.
         Try
             ' pgvector image (Postgres 16 + the vector extension) — migration
             ' V7 runs CREATE EXTENSION vector, which a stock postgres image
             ' cannot satisfy.
             _container = New PostgreSqlBuilder("pgvector/pgvector:pg16").Build()
             Await _container.StartAsync()
-
-            ' Capture the unsanitised string (with password) for tests that
-            ' need to spin up their own NpgsqlDataSource — NpgsqlDataSource.ConnectionString
-            ' redacts the password by design.
-            ConnectionString = _container.GetConnectionString()
-            DataSource = NpgsqlDataSource.Create(ConnectionString)
-            ' Single DB doubles as source + output in tests — we create the
-            ' ctgov.eligibilities table ourselves so SelectNextTrials can be
-            ' exercised against fixture-controlled data.
-            Gateway = New PostgresGateway(
-                    outputDataSource:=DataSource,
-                    sourceDataSource:=DataSource)
-            Await Gateway.EnsureSchemaAsync(CancellationToken.None)
-            Await CreateSourceSchemaAsync()
         Catch ex As Exception
             SkipReason = $"Postgres test container could not start (Docker likely unavailable): {ex.GetType().Name}: {ex.Message}"
+            ' Must return. Falling through would run the steps below against a
+            ' null container and replace a clean skip with a NullReferenceException.
+            Return
         End Try
+
+        ' Everything below is deliberately UNGUARDED. A failure here means the
+        ' schema or the fixture is broken, and the run must go red.
+        '
+        ' Capture the unsanitised string (with password) for tests that need to
+        ' spin up their own NpgsqlDataSource — NpgsqlDataSource.ConnectionString
+        ' redacts the password by design.
+        ConnectionString = _container.GetConnectionString()
+        DataSource = NpgsqlDataSource.Create(ConnectionString)
+        ' Single DB doubles as source + output in tests — we create the
+        ' ctgov.eligibilities table ourselves so SelectNextTrials can be
+        ' exercised against fixture-controlled data.
+        Gateway = New PostgresGateway(
+                outputDataSource:=DataSource,
+                sourceDataSource:=DataSource)
+        Await Gateway.EnsureSchemaAsync(CancellationToken.None)
+        Await CreateSourceSchemaAsync()
     End Function
 
     Public Async Function DisposeAsync() As Task Implements IAsyncLifetime.DisposeAsync
