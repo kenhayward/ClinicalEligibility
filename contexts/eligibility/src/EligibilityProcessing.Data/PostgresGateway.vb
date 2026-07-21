@@ -53,7 +53,8 @@ Public NotInheritable Class PostgresGateway
             "EligibilityProcessing.Data.Migrations.V21__signing_credentials.sql",
             "EligibilityProcessing.Data.Migrations.V22__semantic_type_tuis.sql",
             "EligibilityProcessing.Data.Migrations.V23__concept_hierarchy.sql",
-            "EligibilityProcessing.Data.Migrations.V24__condition_concept.sql"
+            "EligibilityProcessing.Data.Migrations.V24__condition_concept.sql",
+            "EligibilityProcessing.Data.Migrations.V25__analytics_indexes.sql"
         }
 
     ''' <summary>

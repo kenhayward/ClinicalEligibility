@@ -89,6 +89,9 @@
     <EmbeddedResource Include="Migrations\V24__condition_concept.sql">
       <LogicalName>EligibilityProcessing.Data.Migrations.V24__condition_concept.sql</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V25__analytics_indexes.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V25__analytics_indexes.sql</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <PropertyGroup>
