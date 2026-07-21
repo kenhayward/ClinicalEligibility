@@ -8,7 +8,7 @@
       "enhancements": [
         "New Analytics area with three views. Distinctiveness ranks what is unusual about a chosen set of trials against the whole corpus - by how many percentage points more common a criterion is there than in the corpus overall, so common boilerplate like Adult no longer crowds out the findings that actually set the cohort apart. A cohort can be defined four ways - a concept in the criteria, a study's condition, its phase, or its start year - and concept and condition cohorts can include hierarchy descendants.",
         "Analytics: a trend view shows how a criterion's prevalence moves year on year, always as a share of that year's studies rather than a raw count, with the current in-progress year labelled as such.",
-        "Analytics: a concept lookup shows everything known about a single concept - overall prevalence, its breakdown by phase and by year, and example criterion text - reachable by clicking a concept code from Results or Analysis.",
+        "Analytics: a concept lookup shows everything known about a single concept - overall prevalence, its breakdown by phase, and example criterion text - reachable by clicking a concept code from Results or Analysis, or by typing a CUI or a name.",
         "The lift view exports to CSV, including the raw counts behind each figure, so a shared file can be checked independently."
       ],
       "fixes": []

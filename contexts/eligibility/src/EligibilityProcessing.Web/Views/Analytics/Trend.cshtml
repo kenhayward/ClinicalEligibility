@@ -15,41 +15,43 @@
 </p>
 <p><a asp-action="Index">Back to distinctiveness</a></p>
 
+@* The form is always rendered, even after a backend error - a transient
+   database error is a normal condition, and hiding the form behind it would
+   leave the user with no way to retry or change the query except by editing
+   the URL. Matches the Home/Analysis.cshtml precedent. *@
+<form method="get" asp-action="Trend" class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-8">
+                <label for="f-codes" class="form-label small text-muted mb-1">Concept codes (comma-separated, up to 5)</label>
+                <input id="f-codes" name="codes" value="@Model.CodesInput" type="text"
+                       class="form-control form-control-sm"
+                       placeholder="e.g. C0011849, C0018802" />
+            </div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+            <a asp-action="Trend" class="btn btn-outline-secondary btn-sm">Clear</a>
+        </div>
+    </div>
+</form>
+
 @if (Model.HasError)
 {
     <div class="alert alert-warning" role="alert">
         <strong>Backend unavailable.</strong> @Model.ErrorMessage
     </div>
 }
+else if (!Model.HasSearched)
+{
+    <p class="text-muted">Enter one or more concept codes above to see how their prevalence has moved over time.</p>
+}
+else if (Model.Series.Count == 0 || !Model.Series.Any(s => s.Points.Count > 0))
+{
+    <p class="text-muted">No processed studies with a start date were found for these concepts.</p>
+}
 else
 {
-    <form method="get" asp-action="Trend" class="card mb-3">
-        <div class="card-body">
-            <div class="row g-2">
-                <div class="col-md-8">
-                    <label for="f-codes" class="form-label small text-muted mb-1">Concept codes (comma-separated, up to 5)</label>
-                    <input id="f-codes" name="codes" value="@Model.CodesInput" type="text"
-                           class="form-control form-control-sm"
-                           placeholder="e.g. C0011849, C0018802" />
-                </div>
-            </div>
-            <div class="d-flex gap-2 mt-3">
-                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-                <a asp-action="Trend" class="btn btn-outline-secondary btn-sm">Clear</a>
-            </div>
-        </div>
-    </form>
-
-    @if (!Model.HasSearched)
-    {
-        <p class="text-muted">Enter one or more concept codes above to see how their prevalence has moved over time.</p>
-    }
-    else if (Model.Series.Count == 0 || !Model.Series.Any(s => s.Points.Count > 0))
-    {
-        <p class="text-muted">No processed studies with a start date were found for these concepts.</p>
-    }
-    else
-    {
         var allPoints = Model.Series.SelectMany(s => s.Points).ToList();
         var minYear = allPoints.Min(p => p.Year);
         var maxYear = allPoints.Max(p => p.Year);
@@ -155,4 +157,3 @@ else
             }
         }
     }
-}

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using EligibilityProcessing.Core;
 using EligibilityProcessing.Web.Export;
 using EligibilityProcessing.Web.Models;
@@ -251,12 +252,25 @@ public class AnalyticsController : Controller
     }
 
     /// <summary>
-    /// The concept lookup view: everything known about one CUI. Renders the
-    /// empty form when no code is supplied (mirrors Index/Trend above), the
-    /// clean not-found state when the gateway returns Nothing for an
-    /// unrecognised code - never an exception, never a blank page, since a
-    /// user can type anything into the URL - and the inline "backend
-    /// unavailable" warning if the gateway itself throws.
+    /// Matches this corpus's CUIs (umls.concept.cui, always "C" + 7 digits).
+    /// A submitted value that does not match is treated as a name search
+    /// instead of a CUI lookup - see <see cref="Concept"/>.
+    /// </summary>
+    private static readonly Regex CuiPattern = new("^C[0-9]{7}$", RegexOptions.Compiled);
+
+    /// <summary>Cap on name-search results - a pick-list, not a paged search page.</summary>
+    private const int NameSearchLimit = 25;
+
+    /// <summary>
+    /// The concept lookup view: everything known about one CUI, reachable by
+    /// typing a CUI or a name (the spec's own wording). Renders the empty
+    /// form when no code is supplied (mirrors Index/Trend above); when the
+    /// submitted value does not look like a CUI, it is searched by name via
+    /// <see cref="IAnalyticsGateway.SearchConceptsAsync"/> and rendered as a
+    /// pick-list; otherwise it renders the clean not-found state when the
+    /// gateway returns Nothing for an unrecognised CUI - never an exception,
+    /// never a blank page, since a user can type anything into the URL - and
+    /// the inline "backend unavailable" warning if the gateway itself throws.
     /// </summary>
     public async Task<IActionResult> Concept(
         CancellationToken cancellationToken,
@@ -269,8 +283,21 @@ public class AnalyticsController : Controller
             return View(new AnalyticsConceptViewModel());
         }
 
+        var looksLikeCui = CuiPattern.IsMatch(trimmedCode);
+
         try
         {
+            if (!looksLikeCui)
+            {
+                var matches = await _analytics.SearchConceptsAsync(trimmedCode, NameSearchLimit, cancellationToken);
+                return View(new AnalyticsConceptViewModel
+                {
+                    Code = trimmedCode,
+                    IsNameSearch = true,
+                    NameSearchResults = matches
+                });
+            }
+
             var summary = await _analytics.GetConceptSummaryAsync(trimmedCode, cancellationToken);
             return View(new AnalyticsConceptViewModel
             {

@@ -98,6 +98,18 @@ public sealed class AnalyticsConceptViewModel
     /// found nothing for it - see <see cref="NotFound"/> to distinguish those.</summary>
     public ConceptSummary? Summary { get; init; }
 
+    /// <summary>True when <see cref="Code"/> did not look like a CUI
+    /// (<c>^C\d{7}$</c>) and was searched by name via
+    /// <c>IAnalyticsGateway.SearchConceptsAsync</c> instead of looked up
+    /// directly - the spec's "by typing a CUI or name" lookup. When true,
+    /// <see cref="NameSearchResults"/> holds the matches (possibly empty) and
+    /// <see cref="Summary"/>/<see cref="NotFound"/> are not applicable.</summary>
+    public bool IsNameSearch { get; init; }
+
+    /// <summary>The name-search matches when <see cref="IsNameSearch"/> is
+    /// true - each one a pick-list entry linking to the exact-CUI view.</summary>
+    public IReadOnlyList<ConceptSummary> NameSearchResults { get; init; } = Array.Empty<ConceptSummary>();
+
     public string? ErrorMessage { get; init; }
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
@@ -106,8 +118,8 @@ public sealed class AnalyticsConceptViewModel
     /// empty form from "the lookup ran and found nothing".</summary>
     public bool HasSearched => !string.IsNullOrWhiteSpace(Code);
 
-    /// <summary>True when a code was searched, the gateway did not throw, and
-    /// it came back with no matching concept - the clean not-found state the
-    /// view must render instead of a blank page.</summary>
-    public bool NotFound => HasSearched && !HasError && Summary is null;
+    /// <summary>True when a code was searched, the gateway did not throw, it
+    /// was not a name search, and it came back with no matching concept - the
+    /// clean not-found state the view must render instead of a blank page.</summary>
+    public bool NotFound => HasSearched && !HasError && !IsNameSearch && Summary is null;
 }
