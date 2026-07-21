@@ -182,6 +182,11 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await _fixture.ResetAsync()
         Await SeedStudyDetailConditionsAsync("NCT001", {"breast cancer"})
         Await SeedConditionConceptAsync("breast cancer", "C_BREAST")
+        ' The Condition cohort's denominator must live in the same universe as
+        ' its numerator (public.eligibility) - see CohortSql's
+        ' RequireResolvedEligibilitySql comment - so this trial needs a
+        ' resolved eligibility row to be counted at all.
+        Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
         Dim size = Await g.GetCohortSizeAsync(
@@ -201,6 +206,7 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         ' trailing whitespace. The dictionary side holds the normalized form.
         Await SeedStudyDetailConditionsAsync("NCT001", {"  Breast   Cancer  "})
         Await SeedConditionConceptAsync("breast cancer", "C_BREAST")
+        Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
         Dim size = Await g.GetCohortSizeAsync(
@@ -219,6 +225,7 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await SeedStudyDetailConditionsAsync("NCT001", {"breast cancer", "stage iv breast cancer"})
         Await SeedConditionConceptAsync("breast cancer", "C_BREAST")
         Await SeedConditionConceptAsync("stage iv breast cancer", "C_BREAST")
+        Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
         Dim size = Await g.GetCohortSizeAsync(
@@ -234,8 +241,10 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await SeedAncestorAsync("C_CHILD", "C_PARENT")
         Await SeedStudyDetailConditionsAsync("NCT001", {"child condition"})
         Await SeedConditionConceptAsync("child condition", "C_CHILD")
+        Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
         Await SeedStudyDetailConditionsAsync("NCT002", {"unrelated condition"})
         Await SeedConditionConceptAsync("unrelated condition", "C_OTHER")
+        Await SeedRowAsync("NCT002", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
 
@@ -246,6 +255,38 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Dim withoutKids = Await g.GetCohortSizeAsync(
                 New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_PARENT", False), CancellationToken.None)
         Assert.Equal(0, withoutKids)
+    End Function
+
+    ''' <summary>
+    ''' Fix 1 (2026-07 whole-branch review): public.eligibility_study_detail is
+    ''' written by the pipeline BEFORE the LLM call, so it also holds trials
+    ''' whose LLM call later failed or resolved zero concepts - measured,
+    ''' 2,533 of 316,558 rows (0.8%) have no public.eligibility rows at all.
+    ''' Without the RequireResolvedEligibilitySql guard in CohortSql, a Phase
+    ''' cohort's size would include such a trial even though the numerator
+    ''' (GetCohortProfileAsync, which joins on public.eligibility) never can -
+    ''' silently deflating pct_cohort and excess_pp for Phase/Year/Condition
+    ''' cohorts relative to Concept cohorts, whose denominator already comes
+    ''' from public.eligibility itself.
+    '''
+    ''' Verified to FAIL when the "AND EXISTS (...)" guard was temporarily
+    ''' removed from CohortSql's Phase branch (cohort size came back 1, not
+    ''' 0), then verified to PASS again once the guard was restored.
+    ''' </summary>
+    <SkippableFact>
+    Public Async Function Phase_cohort_excludes_a_trial_with_no_resolved_eligibility_rows() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' NCT_NO_ELIG has a phase in the pre-LLM snapshot but never produced a
+        ' single public.eligibility row - exactly the "LLM call failed or
+        ' resolved zero concepts" case the fix targets.
+        Await SeedStudyDetailPhaseAsync("NCT_NO_ELIG", "PHASE3")
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+        Dim size = Await g.GetCohortSizeAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Phase, "PHASE3", False), CancellationToken.None)
+
+        Assert.Equal(0, size)
     End Function
 
     <SkippableFact>

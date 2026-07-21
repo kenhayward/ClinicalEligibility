@@ -88,16 +88,38 @@ else
     {
         <p class="text-muted">Choose a cohort and a value above to see what is distinctive about it.</p>
     }
-    else if (Model.Rows.Count == 0)
-    {
-        <p class="text-muted">No concepts met the minimum support threshold for this cohort.</p>
-    }
     else
     {
+        @* Always render the cohort-size caption once a value has been
+           submitted - previously this lived only inside the row-having
+           branch, so an empty-cohort outcome never told the reader the
+           cohort size was 0. *@
         <p class="text-muted small">
             Cohort: @Model.CohortSize trial@(Model.CohortSize == 1 ? "" : "s")
             of @Model.CorpusSize corpus trial@(Model.CorpusSize == 1 ? "" : "s").
         </p>
+
+        @* The empty-row message must name the actual reason, not one blanket
+           excuse - an empty cohort (no matching trials at all, possibly
+           because the value is not recognised - a CUI typo, an
+           unregistered phase string, or a year that failed to parse and
+           silently degraded to cohort size 0) is a different situation from
+           a non-empty cohort whose concepts all fell below the support
+           floor. *@
+        @if (Model.CohortSize == 0)
+        {
+            <p class="text-muted">
+                No trials matched this cohort. Check that the value is recognised -
+                a concept code, condition, phase, or year that does not exist in the
+                corpus also produces a cohort of size 0.
+            </p>
+        }
+        else if (Model.Rows.Count == 0)
+        {
+            <p class="text-muted">No concepts met the minimum support threshold for this cohort.</p>
+        }
+        else
+        {
         <p>
             <a asp-action="ExportLift"
                asp-route-kind="@Model.Kind"
@@ -141,6 +163,7 @@ else
                 </tbody>
             </table>
         </div>
+        }
     }
 }
 

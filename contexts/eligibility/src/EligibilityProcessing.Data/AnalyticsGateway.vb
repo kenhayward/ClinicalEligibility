@@ -7,11 +7,7 @@ Imports Npgsql
 Imports NpgsqlTypes
 
 ''' <summary>
-''' Read-only analytics queries over the processed corpus (V25 indexes). The
-''' six cohort/profile methods and GetTrendAsync are fully implemented here;
-''' GetConceptSummaryAsync and SearchConceptsAsync still carry minimal stub
-''' bodies - they are implemented in Task 8 but must resolve cleanly today
-''' because this class is registered in DI and constructed at startup.
+''' Read-only analytics queries over the processed corpus (V25 indexes).
 ''' </summary>
 Public NotInheritable Class AnalyticsGateway
     Implements IAnalyticsGateway
@@ -22,6 +18,24 @@ Public NotInheritable Class AnalyticsGateway
         If outputDataSource Is Nothing Then Throw New ArgumentNullException(NameOf(outputDataSource))
         _dataSource = outputDataSource
     End Sub
+
+    ' Referenced by the Condition/Phase/Year branches below. public.
+    ' eligibility_study_detail is written by the pipeline BEFORE the LLM call
+    ' runs, so it also contains trials whose LLM call later failed or that
+    ' resolved zero concepts (measured: 2,533 of 316,558 rows, 0.8%). The
+    ' numerator (GetCohortProfileAsync) can only ever count trials that have
+    ' public.eligibility rows, and the corpus denominator
+    ' (GetCorpusTrialCountAsync) is restricted to concept_code <> '' - so
+    ' without this filter, a detail-derived cohort's denominator would be
+    ' drawn from a different, larger universe than its numerator, deflating
+    ' pct_cohort and biasing excess_pp (the sort key) downward for exactly
+    ' these three cohort kinds. The Concept branch above needs no such
+    ' filter: it already selects FROM public.eligibility, so it can never
+    ' include a trial without a resolved eligibility row. Do not remove this
+    ' without also changing what the numerator/denominator draw from.
+    Private Const RequireResolvedEligibilitySql As String = "
+  AND EXISTS (SELECT 1 FROM public.eligibility e
+              WHERE e.nct_id = d.nct_id AND e.concept_code <> '')"
 
     ' Returns the SQL fragment selecting the cohort's nct_ids. All four kinds
     ' produce a single-column set of nct_id so the callers can treat them
@@ -46,8 +60,9 @@ FROM public.eligibility_study_detail d
 JOIN LATERAL unnest(d.conditions) AS cond(txt) ON true
 JOIN public.condition_concept cc
   ON cc.condition_norm = regexp_replace(btrim(lower(cond.txt)), '\s+', ' ', 'g')
-WHERE cc.concept_code = @val
-   OR cc.concept_code IN (SELECT descendant_cui FROM umls.concept_ancestor WHERE ancestor_cui = @val)"
+WHERE (cc.concept_code = @val
+   OR cc.concept_code IN (SELECT descendant_cui FROM umls.concept_ancestor WHERE ancestor_cui = @val))" &
+                    RequireResolvedEligibilitySql
                 End If
                 Return "
 SELECT DISTINCT d.nct_id
@@ -55,16 +70,18 @@ FROM public.eligibility_study_detail d
 JOIN LATERAL unnest(d.conditions) AS cond(txt) ON true
 JOIN public.condition_concept cc
   ON cc.condition_norm = regexp_replace(btrim(lower(cond.txt)), '\s+', ' ', 'g')
-WHERE cc.concept_code = @val"
+WHERE cc.concept_code = @val" & RequireResolvedEligibilitySql
 
             Case AnalyticsCohortKind.Phase
-                Return "SELECT DISTINCT d.nct_id FROM public.eligibility_study_detail d WHERE d.phase = @val"
+                Return "
+SELECT DISTINCT d.nct_id FROM public.eligibility_study_detail d
+WHERE d.phase = @val" & RequireResolvedEligibilitySql
 
             Case Else ' Year
                 Return "
 SELECT DISTINCT d.nct_id FROM public.eligibility_study_detail d
 WHERE d.start_date IS NOT NULL
-  AND EXTRACT(year FROM d.start_date)::int = @val_int"
+  AND EXTRACT(year FROM d.start_date)::int = @val_int" & RequireResolvedEligibilitySql
         End Select
     End Function
 
