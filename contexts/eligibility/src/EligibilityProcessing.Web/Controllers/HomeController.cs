@@ -364,8 +364,8 @@ public class HomeController : Controller
 
     /// <summary>
     /// Tools tab: web versions of the CLI maintenance commands. Shows the live
-    /// "remaining work" counts and lets an operator run normalize-umls / embed-studies
-    /// as background jobs that survive a browser close. The jobs share the pipeline's
+    /// "remaining work" counts and lets an operator run normalize-umls / embed-studies /
+    /// normalize-conditions as background jobs that survive a browser close. The jobs share the pipeline's
     /// <see cref="RunGate"/>, so they are mutually exclusive with the main pipeline and
     /// each other. Read-tolerant like the other tabs.
     /// </summary>
@@ -374,6 +374,7 @@ public class HomeController : Controller
         [FromServices] ToolJobState toolState,
         [FromServices] IConfiguration config,
         [FromServices] IOptions<OrchestratorOptions> orchestratorOptions,
+        [FromServices] IConditionNormalizeJob conditionJob,
         CancellationToken cancellationToken)
     {
         var model = config["Embedding:Model"] ?? "";
@@ -383,11 +384,13 @@ public class HomeController : Controller
             var normalizeRemaining = await _gateway.CountConceptsToNormalizeAsync(false, cancellationToken);
             var embedRemaining = await _gateway.CountStudiesToEmbedAsync(model, cancellationToken);
             var supersededCount = await _gateway.CountSupersededStudiesAsync(cancellationToken);
+            var conditionsRemaining = await conditionJob.CountRemainingAsync(false, cancellationToken);
             return View(new ToolsViewModel
             {
                 NormalizeRemaining = normalizeRemaining,
                 EmbedRemaining = embedRemaining,
                 SupersededCount = supersededCount,
+                ConditionsRemaining = conditionsRemaining,
                 EmbeddingModel = model,
                 DefaultConcurrency = cap,
                 BusyActivity = gate.CurrentActivity,
@@ -466,6 +469,7 @@ public class HomeController : Controller
     [HttpGet]
     public async Task<IActionResult> ToolCounts(
         [FromServices] IConfiguration config,
+        [FromServices] IConditionNormalizeJob conditionJob,
         CancellationToken cancellationToken)
     {
         try
@@ -474,7 +478,8 @@ public class HomeController : Controller
             var normalizeRemaining = await _gateway.CountConceptsToNormalizeAsync(false, cancellationToken);
             var embedRemaining = await _gateway.CountStudiesToEmbedAsync(model, cancellationToken);
             var supersededCount = await _gateway.CountSupersededStudiesAsync(cancellationToken);
-            return Json(new { normalizeRemaining, embedRemaining, supersededCount });
+            var conditionsRemaining = await conditionJob.CountRemainingAsync(false, cancellationToken);
+            return Json(new { normalizeRemaining, embedRemaining, supersededCount, conditionsRemaining });
         }
         catch (Exception ex)
         {
@@ -748,6 +753,41 @@ public class HomeController : Controller
         await _audit.WriteAsync("create", "tool_job", jobId.ToString(),
             $"embed-studies concurrency={options.Concurrency}", HttpContext.RequestAborted);
         return Accepted(new { job_id = jobId, kind = "embed-studies" });
+    }
+
+    [HttpPost]
+    [Authorize(Policy = "PipelineOps")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RunNormalizeConditions(
+        [FromServices] RunGate gate,
+        [FromServices] Channel<ToolJobRequest> channel,
+        int? count,
+        bool dryRun = false,
+        bool force = false)
+    {
+        var jobId = Guid.NewGuid();
+        if (!gate.TryAcquire(jobId, "normalize-conditions"))
+        {
+            return Conflict(new { current_run_id = gate.CurrentRunId, activity = gate.CurrentActivity });
+        }
+
+        var options = new NormalizeConditionsOptions
+        {
+            Count = count is > 0 ? count.Value : 0,
+            DryRun = dryRun,
+            Force = force
+        };
+        if (!channel.Writer.TryWrite(new ToolJobRequest(jobId, ToolJobKind.NormalizeConditions, null, null, options)))
+        {
+            gate.Release();
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        await _audit.WriteAsync("create", "tool_job", jobId.ToString(),
+            $"normalize-conditions count={options.Count}"
+                + (options.DryRun ? " dry-run" : "") + (options.Force ? " force" : ""),
+            HttpContext.RequestAborted);
+        return Accepted(new { job_id = jobId, kind = "normalize-conditions" });
     }
 
     /// <summary>Cancel the in-flight tool job (fires the shared gate's per-run token,

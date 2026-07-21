@@ -44,6 +44,7 @@ Public NotInheritable Class PipelineOrchestrator
     Private ReadOnly _notificationSink As INotificationSink
     Private ReadOnly _hooks As IPipelineHooks
     Private ReadOnly _embeddingClient As IEmbeddingClient
+    Private ReadOnly _conditionNormalizer As ConditionNormalizer
     Private ReadOnly _options As OrchestratorOptions
     Private ReadOnly _logger As ILogger(Of PipelineOrchestrator)
 
@@ -56,6 +57,7 @@ Public NotInheritable Class PipelineOrchestrator
             Optional notificationSink As INotificationSink = Nothing,
             Optional hooks As IPipelineHooks = Nothing,
             Optional embeddingClient As IEmbeddingClient = Nothing,
+            Optional conditionNormalizer As ConditionNormalizer = Nothing,
             Optional options As OrchestratorOptions = Nothing,
             Optional logger As ILogger(Of PipelineOrchestrator) = Nothing)
         If gateway Is Nothing Then Throw New ArgumentNullException(NameOf(gateway))
@@ -68,6 +70,10 @@ Public NotInheritable Class PipelineOrchestrator
         ' step is skipped and the Authoring similarity index is populated only
         ' by the CLI embed-studies backfill.
         _embeddingClient = embeddingClient
+        ' Optional - when no condition normalizer is wired (e.g. most existing
+        ' tests, which construct the orchestrator directly) the per-trial
+        ' condition-dictionary fill is simply skipped.
+        _conditionNormalizer = conditionNormalizer
         _parser = If(parser, New LlmResponseParser())
         _scorer = If(scorer, New UmlsMatchScorer())
         _notificationSink = If(notificationSink, NullNotificationSink.Instance)
@@ -709,13 +715,20 @@ Public NotInheritable Class PipelineOrchestrator
         Dim ex As Exception = Nothing
         Try
             Await _gateway.CaptureStudySnapshotAsync(nctId, cancellationToken).ConfigureAwait(False)
+            ' Fill the condition dictionary for any string this trial introduces.
+            ' In the steady state (after a backfill) this is one indexed query
+            ' returning nothing. Inside the same best-effort Try deliberately: a
+            ' normalization failure must never fail the trial.
+            If _conditionNormalizer IsNot Nothing Then
+                Await _conditionNormalizer.EnsureForStudyAsync(nctId, cancellationToken).ConfigureAwait(False)
+            End If
             Return
         Catch e As OperationCanceledException When cancellationToken.IsCancellationRequested
             Throw
         Catch e As Exception
             ex = e
         End Try
-        _logger.LogWarning(ex, "Failed to capture study snapshot for {Nct}", nctId)
+        _logger.LogWarning(ex, "Failed to capture study snapshot or normalize conditions for {Nct}", nctId)
     End Function
 
     ' Embeds the study's topic text and UPSERTs it into

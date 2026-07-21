@@ -120,6 +120,55 @@
         </div>
     </div>
 
+    @* ---------------- normalize-conditions ---------------- *@
+    <div class="col-12 col-lg-6">
+        <div class="card h-100" data-tool="normalize-conditions">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h2 class="h5 mb-1">Normalize conditions</h2>
+                        <p class="text-muted small mb-0">
+                            Map AACT condition strings to UMLS concepts so analytics
+                            can slice by condition. Highest-volume strings first.
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <div class="display-6 lh-1" data-remaining>@Model.ConditionsRemaining.ToString("N0")</div>
+                        <div class="text-muted small">unresolved conditions</div>
+                    </div>
+                </div>
+
+                @if (canRunPipeline)
+                {
+                    <form id="conditions-form" asp-action="RunNormalizeConditions" method="post"
+                          class="row g-2 align-items-end mt-2 tool-run-form">
+                        <div class="col-auto">
+                            <label for="conditions-count" class="form-label small text-muted mb-1">Count (0 = all)</label>
+                            <input id="conditions-count" name="count" type="number" min="0"
+                                   value="0" class="form-control form-control-sm" style="width: 7rem;" />
+                        </div>
+                        <div class="col-auto">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="conditions-dryrun" name="dryRun" value="true" />
+                                <label class="form-check-label small text-muted" for="conditions-dryrun">Dry run</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="conditions-force" name="force" value="true" />
+                                <label class="form-check-label small text-muted" for="conditions-force">Force re-resolve</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary btn-sm tool-run-btn"
+                                    disabled="@(busy ? "disabled" : null)">Run normalize</button>
+                        </div>
+                    </form>
+                }
+
+                @await Html.PartialAsync("_ToolJobPanel", "normalize-conditions")
+            </div>
+        </div>
+    </div>
+
     @* ---------------- exact-remaining ----------------
        Read-only and user-initiated, so no _ToolJobPanel, no RunGate, no progress bar:
        it is one (slow) query, not a background job. It is here rather than on the
@@ -373,6 +422,7 @@
                     };
                     set("normalize-umls", c.normalizeRemaining);
                     set("embed-studies", c.embedRemaining);
+                    set("normalize-conditions", c.conditionsRemaining);
                     // A pipeline batch re-attempting a trial creates a superseded row,
                     // so this count moves when a batch ends even though no tool ran.
                     set("remove-superseded", c.supersededCount);
@@ -431,6 +481,7 @@
             }
             bindRun("normalize-form");
             bindRun("embed-form");
+            bindRun("conditions-form");
 
             // Exact remaining trials. Not a job and not cached: one slow read-only query,
             // fired only when asked. Deliberately does NOT touch refreshCounts() - that is

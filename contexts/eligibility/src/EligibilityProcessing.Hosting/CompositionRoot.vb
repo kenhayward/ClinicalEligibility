@@ -373,6 +373,7 @@ Public Module CompositionRoot
                             notificationSink:=sp.GetRequiredService(Of INotificationSink)(),
                             hooks:=sp.GetRequiredService(Of IPipelineHooks)(),
                             embeddingClient:=sp.GetRequiredService(Of IEmbeddingClient)(),
+                            conditionNormalizer:=sp.GetRequiredService(Of ConditionNormalizer)(),
                             options:=sp.GetRequiredService(Of IOptions(Of OrchestratorOptions)).Value,
                             logger:=sp.GetRequiredService(Of ILogger(Of PipelineOrchestrator))())
                 End Function)
@@ -393,6 +394,28 @@ Public Module CompositionRoot
                     Return New StudyEmbeddingJob(
                             gateway:=sp.GetRequiredService(Of IPostgresGateway)(),
                             embeddingClient:=sp.GetRequiredService(Of IEmbeddingClient)())
+                End Function)
+
+        ' The condition dictionary store is stateless over one data source, like
+        ' UmlsMetathesaurusStore, so a singleton is right; the normalizer and job
+        ' are scoped to match the other tool jobs (they ride the scoped UMLS cache).
+        services.AddSingleton(Of IConditionConceptStore)(
+                Function(sp As IServiceProvider) As IConditionConceptStore
+                    Dim outputDs = sp.GetRequiredKeyedService(Of NpgsqlDataSource)(OutputDataSourceKey)
+                    Return New ConditionConceptStore(outputDs)
+                End Function)
+        services.AddScoped(Of ConditionNormalizer)(
+                Function(sp As IServiceProvider) As ConditionNormalizer
+                    Return New ConditionNormalizer(
+                            store:=sp.GetRequiredService(Of IConditionConceptStore)(),
+                            umlsClient:=sp.GetRequiredService(Of IUmlsClient)(),
+                            scorer:=sp.GetRequiredService(Of UmlsMatchScorer)())
+                End Function)
+        services.AddScoped(Of IConditionNormalizeJob)(
+                Function(sp As IServiceProvider) As IConditionNormalizeJob
+                    Return New ConditionNormalizeJob(
+                            store:=sp.GetRequiredService(Of IConditionConceptStore)(),
+                            normalizer:=sp.GetRequiredService(Of ConditionNormalizer)())
                 End Function)
 
         ' The framework's per-request HttpClient logging (the

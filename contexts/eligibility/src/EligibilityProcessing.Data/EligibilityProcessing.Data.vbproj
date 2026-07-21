@@ -86,6 +86,9 @@
     <EmbeddedResource Include="Migrations\V23__concept_hierarchy.sql">
       <LogicalName>EligibilityProcessing.Data.Migrations.V23__concept_hierarchy.sql</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\V24__condition_concept.sql">
+      <LogicalName>EligibilityProcessing.Data.Migrations.V24__condition_concept.sql</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <PropertyGroup>

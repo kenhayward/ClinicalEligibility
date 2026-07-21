@@ -76,6 +76,7 @@ public sealed class ToolJobState
     {
         ToolJobKind.NormalizeUmls => "normalize-umls",
         ToolJobKind.EmbedStudies => "embed-studies",
+        ToolJobKind.NormalizeConditions => "normalize-conditions",
         _ => kind.ToString()
     };
 }
