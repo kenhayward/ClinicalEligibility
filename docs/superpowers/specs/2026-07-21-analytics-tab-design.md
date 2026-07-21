@@ -191,14 +191,47 @@ a comparison that does not exist. The view states the covered share on screen.
 
 ### 4.2 View 1 - Distinctiveness (lift)
 
-For each concept in the cohort:
+For each concept in the cohort, two figures:
 
 ```
-lift = (cohort_trials / cohort_size) / (corpus_trials / corpus_size)
+pct_cohort = cohort_trials / cohort_size
+pct_corpus = corpus_trials / corpus_size
+
+excess_pp  = 100 * (pct_cohort - pct_corpus)     <-- the SORT KEY
+lift       = pct_cohort / pct_corpus             <-- displayed, not sorted on
 ```
 
-Columns: concept preferred name, cohort trials, % of cohort, % of corpus, lift.
-Sorted by lift descending.
+**Sorted by excess percentage points descending, not by lift.** This was changed
+after measuring, and the reason matters.
+
+Lift **saturates**. Its maximum is `corpus_size / cohort_size` - 9.82 for the
+diabetes cohort - and it is reached by every concept that appears *only* inside
+the cohort. Measured on that cohort, the top eleven rows by lift were all exactly
+9.82 and therefore unrankable; the order among them was arbitrary. Excluding the
+cohort-defining concepts did not help, because insulin, glucometer, C-peptide and
+"recurrent severe manic episodes" (10 trials, noise) all saturate too, so noise
+tied with signal.
+
+Sorting by excess percentage points instead produced a clinically meaningful
+ranking on the same cohort: hypertension +14.2pp, BMI +7.1, cardiovascular
+disease +6.2, smoking +6.1, HbA1c +5.3 - exactly what diabetes trials screen for.
+Boilerplate stays visible but self-evidently uninteresting, because its lift
+column reads 1.12 next to its excess.
+
+Both numbers are shown. Excess answers "how much more common", lift answers "how
+many times more common", and neither alone is enough: pregnancy at +16.0pp with
+lift 1.47 and HbA1c at +5.3pp with lift 7.49 are different kinds of finding.
+
+Columns: concept preferred name, cohort trials, % of cohort, % of corpus,
+excess pp, lift, and a **defines-cohort flag**.
+
+The defines-cohort flag marks concepts that are the cohort's own defining concept
+or one of its hierarchy descendants. Those rows are tautological - a diabetes
+cohort is trivially distinctive for mentioning diabetes - but they are **marked,
+not hidden**, because "Diabetes mellitus, 61.7% of cohort vs 6.3% of corpus" is a
+legitimate headline and removing it silently would be more confusing than
+labelling it. The flag is applicable only to the Concept and Condition cohorts;
+for Phase and Year it is always false.
 
 **Minimum support: a concept must appear in at least N cohort trials, default
 10, adjustable in the UI.** Section 2.3 is why. Raw counts are always displayed
@@ -265,6 +298,12 @@ Per the project rule, every new function ships with tests and verification is
 
 - lift arithmetic on known inputs, including a concept at exactly corpus rate
   scoring 1.0
+- excess percentage points on known inputs, including a negative value for a
+  concept *rarer* in the cohort than in the corpus
+- **rows are ordered by excess pp, not by lift** - give the calculator two rows
+  where the lift ordering and the excess ordering disagree, and assert the excess
+  ordering wins. This is the test that fails if anyone reverts the sort key, and
+  section 4.2 explains why that matters
 - the minimum-support filter: a concept at the threshold is kept, one below is
   dropped (boundary, inclusive)
 - a corpus count of zero cannot divide by zero
@@ -286,9 +325,13 @@ Per the project rule, every new function ships with tests and verification is
 1. `dotnet test contexts/eligibility/Eligibility.sln` passes with zero skipped.
 2. A cohort profile for a large cohort (diabetes, 32,162 trials) renders in
    under 2s warm.
-3. The lift view for a diabetes cohort ranks Type 2 diabetes and hypertension
-   above Adult and informed consent. This is the end-to-end check that the tab
-   does the job it exists for.
+3. The lift view for a diabetes cohort (C0011849, hierarchy included, minimum
+   support 10) ranks **hypertension, BMI, cardiovascular disease, smoking and
+   HbA1c above Adult and informed consent**, and Adult's lift column reads
+   approximately 1.1. This is the end-to-end check that the tab does the job it
+   exists for, and it fails if the sort key is reverted to lift - measured, the
+   lift ordering puts "insulin pen injector" and "recurrent severe manic
+   episodes" in the top ten.
 4. No view displays a label sourced from `eligibility.concept`.
 5. `database_schema.md` updated in the same commit as the migration.
 6. `version.json` bumped to **0.5.0** - a migration requires at least a MINOR
