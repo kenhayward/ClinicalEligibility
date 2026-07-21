@@ -60,13 +60,13 @@ Public NotInheritable Class ConditionNormalizer
         If exactCandidates IsNot Nothing AndAlso exactCandidates.Count = 1 Then
             ' Tier 1a. No scoring - see the class comment.
             Dim only = exactCandidates(0)
-            ' An empty Ui would otherwise produce match_tier='exact' with a NULL
+            ' An empty Cui would otherwise produce match_tier='exact' with a NULL
             ' concept_code - a state no downstream consumer expects (every other
             ' unresolved outcome is tier='unresolved'). Treat it as unresolved.
-            If String.IsNullOrEmpty(only.Ui) Then Return ConditionResolution.Unresolved
+            If String.IsNullOrEmpty(only.Cui) Then Return ConditionResolution.Unresolved
             Return New ConditionResolution(
-                    conceptCode:=only.Ui,
-                    umlsName:=If(only.Name, ""),
+                    conceptCode:=only.Cui,
+                    umlsName:=If(only.PrefName, ""),
                     tier:=ConditionMatchTier.Exact,
                     score:=1.0)
         End If
@@ -76,17 +76,18 @@ Public NotInheritable Class ConditionNormalizer
             Dim picked = PickAmbiguous(rawForm, norm, exactCandidates)
             ' PickAmbiguous returns Nothing only when every candidate in the list
             ' was itself Nothing - unreachable from ConditionConceptStore today
-            ' (its SQL never yields a null UmlsCandidate), but IConditionConceptStore
-            ' is a public port any implementation can satisfy. Fall back to
-            ' unresolved rather than dereferencing a null candidate below.
+            ' (its SQL never yields a null ConditionCandidate), but
+            ' IConditionConceptStore is a public port any implementation can
+            ' satisfy. Fall back to unresolved rather than dereferencing a null
+            ' candidate below.
             If picked Is Nothing Then Return ConditionResolution.Unresolved
-            ' Same hole as tier 1a above: an empty Ui on the picked candidate
+            ' Same hole as tier 1a above: an empty Cui on the picked candidate
             ' would otherwise produce match_tier='exact_ambiguous' with a NULL
             ' concept_code. Treat it as unresolved for consistency.
-            If String.IsNullOrEmpty(picked.Ui) Then Return ConditionResolution.Unresolved
+            If String.IsNullOrEmpty(picked.Cui) Then Return ConditionResolution.Unresolved
             Return New ConditionResolution(
-                    conceptCode:=picked.Ui,
-                    umlsName:=If(picked.Name, ""),
+                    conceptCode:=picked.Cui,
+                    umlsName:=If(picked.PrefName, ""),
                     tier:=ConditionMatchTier.ExactAmbiguous,
                     score:=1.0)
         End If
@@ -119,29 +120,41 @@ Public NotInheritable Class ConditionNormalizer
 
     ''' <summary>
     ''' Deterministic choice among several exact-match CUIs:
-    '''   1. the CUI whose preferred name normalizes to the query;
-    '''   2. otherwise the highest scorer value;
-    '''   3. otherwise the lexicographically lowest CUI.
-    ''' Rule 3 exists so a re-run reproduces the same answer.
+    '''   1. the candidate that can roll up (has at least one row in
+    '''      umls.concept_ancestor as a descendant);
+    '''   2. otherwise the CUI whose preferred name normalizes to the query;
+    '''   3. otherwise the highest scorer value;
+    '''   4. otherwise the lexicographically lowest CUI.
+    ''' Rule 4 exists so a re-run reproduces the same answer.
+    '''
+    ''' Rule 1 outranks rule 2 deliberately: a candidate whose preferred name is
+    ''' literally the query string "wins" on label prettiness alone, but if it
+    ''' has no concept_ancestor entry it can never roll up to a broader concept
+    ''' - the entire point of the hierarchy feature. Measured in production on
+    ''' "stroke": C5977286 (LOINC "Finding", pref_name "Stroke", no hierarchy)
+    ''' used to beat C0038454 (SNOMED "CVA - Cerebrovascular accident", has
+    ''' hierarchy) under the old rule 1, silently orphaning every study resolved
+    ''' to it from the rollup. Where no candidate has hierarchy, rule 1 does not
+    ''' discriminate and this falls through to the old behaviour unchanged.
     ''' </summary>
     Private Function PickAmbiguous(rawForm As String,
                                    norm As String,
-                                   candidates As IReadOnlyList(Of UmlsCandidate)) As UmlsCandidate
+                                   candidates As IReadOnlyList(Of ConditionCandidate)) As ConditionCandidate
 
         Dim usable = candidates.Where(Function(c) c IsNot Nothing).ToList()
-
-        Dim exactName = usable.
-                Where(Function(c) ConceptKey.Normalize(c.Name) = norm).
-                OrderBy(Function(c) If(c.Ui, ""), StringComparer.Ordinal).
-                FirstOrDefault()
-        If exactName IsNot Nothing Then Return exactName
 
         ' FirstOrDefault, not First: if candidates held only Nothing entries,
         ' usable is empty here and First() would throw InvalidOperationException.
         ' Returns Nothing in that case; ResolveAsync treats that as unresolved.
+        '
+        ' OrderByDescending on a Boolean puts True first (True > False), which is
+        ' what rule 1 needs - candidates that can roll up sort ahead of ones that
+        ' cannot.
         Return usable.
-                OrderByDescending(Function(c) _scorer.Score(rawForm, If(c.Name, ""))).
-                ThenBy(Function(c) If(c.Ui, ""), StringComparer.Ordinal).
+                OrderByDescending(Function(c) c.HasHierarchy).
+                ThenByDescending(Function(c) ConceptKey.Normalize(c.PrefName) = norm).
+                ThenByDescending(Function(c) _scorer.Score(rawForm, If(c.PrefName, ""))).
+                ThenBy(Function(c) If(c.Cui, ""), StringComparer.Ordinal).
                 FirstOrDefault()
     End Function
 

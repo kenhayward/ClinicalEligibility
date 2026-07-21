@@ -1,3 +1,4 @@
+Imports System.Linq
 Imports System.Threading
 Imports System.Threading.Tasks
 Imports EligibilityProcessing.Core
@@ -138,9 +139,9 @@ ON CONFLICT (cui) DO UPDATE SET pref_name = excluded.pref_name"
         Dim hits = Await store.LookupExactAsync("stroke", CancellationToken.None)
 
         Assert.Single(hits)
-        Assert.Equal("C0038454", hits(0).Ui)
+        Assert.Equal("C0038454", hits(0).Cui)
         ' The candidate carries the concept's PREFERRED name, not the atom string.
-        Assert.Equal("CVA - Cerebrovascular accident", hits(0).Name)
+        Assert.Equal("CVA - Cerebrovascular accident", hits(0).PrefName)
     End Function
 
     <SkippableFact>
@@ -154,6 +155,35 @@ ON CONFLICT (cui) DO UPDATE SET pref_name = excluded.pref_name"
         Dim hits = Await store.LookupExactAsync("cancer", CancellationToken.None)
 
         Assert.Equal(2, hits.Count)
+    End Function
+
+    ' Regression coverage for the PickAmbiguous hierarchy tie-break: HasHierarchy
+    ' must reflect a real umls.concept_ancestor row (descendant_cui, ancestor_cui,
+    ' min_distance), not just whichever candidate happens to come back first.
+    <SkippableFact>
+    Public Async Function LookupExact_reports_HasHierarchy_only_for_the_cui_with_an_ancestor_row() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedAtomAsync("C0000100", "Stroke", "CVA - Cerebrovascular accident")
+        Await SeedAtomAsync("C0000200", "Stroke", "Stroke")
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.concept_ancestor (descendant_cui, ancestor_cui, min_distance)
+VALUES (@descendant, @ancestor, 1)"
+                cmd.Parameters.AddWithValue("descendant", "C0000100")
+                cmd.Parameters.AddWithValue("ancestor", "C9999999")
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Dim hits = Await store.LookupExactAsync("stroke", CancellationToken.None)
+
+        Assert.Equal(2, hits.Count)
+        Assert.True(hits.Single(Function(h) h.Cui = "C0000100").HasHierarchy)
+        Assert.False(hits.Single(Function(h) h.Cui = "C0000200").HasHierarchy)
     End Function
 
     <SkippableFact>

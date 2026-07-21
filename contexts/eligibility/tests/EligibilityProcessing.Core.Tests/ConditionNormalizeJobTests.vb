@@ -14,14 +14,14 @@ Public Class ConditionNormalizeJobTests
         Public Property Pending As New List(Of ConditionConceptEntry)
         Public Property Upserted As New List(Of ConditionConceptEntry)
         Public Property SeedCalls As Integer
-        Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of UmlsCandidate))
+        Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of ConditionCandidate))
         Public Property LastForce As Boolean?
 
         Public Function LookupExactAsync(conditionNorm As String, cancellationToken As CancellationToken) _
-                As Task(Of IReadOnlyList(Of UmlsCandidate)) Implements IConditionConceptStore.LookupExactAsync
-            Dim hit As IReadOnlyList(Of UmlsCandidate) = Nothing
+                As Task(Of IReadOnlyList(Of ConditionCandidate)) Implements IConditionConceptStore.LookupExactAsync
+            Dim hit As IReadOnlyList(Of ConditionCandidate) = Nothing
             If ExactByNorm.TryGetValue(conditionNorm, hit) Then Return Task.FromResult(hit)
-            Return Task.FromResult(Of IReadOnlyList(Of UmlsCandidate))(Array.Empty(Of UmlsCandidate)())
+            Return Task.FromResult(Of IReadOnlyList(Of ConditionCandidate))(Array.Empty(Of ConditionCandidate)())
         End Function
 
         Public Function UpsertAsync(entry As ConditionConceptEntry, cancellationToken As CancellationToken) _
@@ -78,7 +78,7 @@ Public Class ConditionNormalizeJobTests
         Dim store As New JobStore()
         store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = "stroke", .RawForm = "Stroke", .StudyCount = 9})
         store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = "zzqq", .RawForm = "Zzqq", .StudyCount = 1})
-        store.ExactByNorm("stroke") = {New UmlsCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US")}
+        store.ExactByNorm("stroke") = {New ConditionCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US", hasHierarchy:=False)}
 
         Dim counters = Await NewJob(store).RunAsync(
                 New NormalizeConditionsOptions(), Nothing, CancellationToken.None)
@@ -95,7 +95,7 @@ Public Class ConditionNormalizeJobTests
     Public Async Function DryRun_resolves_but_writes_nothing() As Task
         Dim store As New JobStore()
         store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = "stroke", .RawForm = "Stroke", .StudyCount = 9})
-        store.ExactByNorm("stroke") = {New UmlsCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US")}
+        store.ExactByNorm("stroke") = {New ConditionCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US", hasHierarchy:=False)}
 
         Dim counters = Await NewJob(store).RunAsync(
                 New NormalizeConditionsOptions With {.DryRun = True}, Nothing, CancellationToken.None)
@@ -113,7 +113,7 @@ Public Class ConditionNormalizeJobTests
     Public Async Function Run_preserves_study_count_on_the_upserted_row() As Task
         Dim store As New JobStore()
         store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = "stroke", .RawForm = "Stroke", .StudyCount = 42})
-        store.ExactByNorm("stroke") = {New UmlsCandidate("C0038454", "CVA", "SNOMEDCT_US")}
+        store.ExactByNorm("stroke") = {New ConditionCandidate("C0038454", "CVA", "SNOMEDCT_US", hasHierarchy:=False)}
 
         Await NewJob(store).RunAsync(New NormalizeConditionsOptions(), Nothing, CancellationToken.None)
 

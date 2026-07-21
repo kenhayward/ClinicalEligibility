@@ -30,17 +30,22 @@ Public NotInheritable Class ConditionConceptStore
 
     Public Async Function LookupExactAsync(conditionNorm As String,
                                            cancellationToken As CancellationToken) _
-            As Task(Of IReadOnlyList(Of UmlsCandidate)) Implements IConditionConceptStore.LookupExactAsync
+            As Task(Of IReadOnlyList(Of ConditionCandidate)) Implements IConditionConceptStore.LookupExactAsync
 
-        If String.IsNullOrWhiteSpace(conditionNorm) Then Return Array.Empty(Of UmlsCandidate)()
+        If String.IsNullOrWhiteSpace(conditionNorm) Then Return Array.Empty(Of ConditionCandidate)()
 
-        Dim result As New List(Of UmlsCandidate)
+        Dim result As New List(Of ConditionCandidate)
         Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
             Using cmd = conn.CreateCommand()
                 ' DISTINCT on cui: several atoms of the same concept can share a
                 ' normalized string (different sources/term types).
+                ' has_hierarchy: whether the concept can roll up via
+                ' umls.concept_ancestor (SNOMED-scoped). A concept with no row
+                ' there - e.g. a LOINC "Finding" - can never roll up, which the
+                ' PickAmbiguous tie-break needs to know about.
                 cmd.CommandText = "
-SELECT DISTINCT c.cui, c.pref_name, c.root_source
+SELECT DISTINCT c.cui, c.pref_name, c.root_source,
+       EXISTS (SELECT 1 FROM umls.concept_ancestor anc WHERE anc.descendant_cui = c.cui) AS has_hierarchy
 FROM umls.atom a
 JOIN umls.concept c ON c.cui = a.cui
 WHERE a.str_norm = @norm
@@ -48,10 +53,11 @@ ORDER BY c.cui"
                 cmd.Parameters.Add(New NpgsqlParameter("norm", NpgsqlDbType.Text) With {.Value = conditionNorm})
                 Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
                     While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
-                        result.Add(New UmlsCandidate(
+                        result.Add(New ConditionCandidate(
                                 reader.GetString(0),
                                 If(reader.IsDBNull(1), "", reader.GetString(1)),
-                                If(reader.IsDBNull(2), "", reader.GetString(2))))
+                                If(reader.IsDBNull(2), "", reader.GetString(2)),
+                                reader.GetBoolean(3)))
                     End While
                 End Using
             End Using

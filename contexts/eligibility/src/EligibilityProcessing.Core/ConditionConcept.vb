@@ -46,6 +46,31 @@ Public NotInheritable Class ConditionResolution
 
 End Class
 
+''' <summary>
+''' One candidate concept for a condition string, with the one extra signal the
+''' tie-break needs: whether the concept can roll up. A concept with no
+''' umls.concept_ancestor entry is invisible to the hierarchy rollup, so
+''' resolving a condition to one silently removes it from the analytics it
+''' exists to serve.
+'''
+''' Deliberately NOT UmlsCandidate: that type is shared with the criteria
+''' pipeline (UmlsClient /search/current results) and has no home for this
+''' condition-only signal.
+''' </summary>
+Public NotInheritable Class ConditionCandidate
+    Public Sub New(cui As String, prefName As String, rootSource As String, hasHierarchy As Boolean)
+        Me.Cui = cui
+        Me.PrefName = prefName
+        Me.RootSource = rootSource
+        Me.HasHierarchy = hasHierarchy
+    End Sub
+
+    Public ReadOnly Property Cui As String
+    Public ReadOnly Property PrefName As String
+    Public ReadOnly Property RootSource As String
+    Public ReadOnly Property HasHierarchy As Boolean
+End Class
+
 ''' <summary>One row of public.condition_concept.</summary>
 Public NotInheritable Class ConditionConceptEntry
     Public Property ConditionNorm As String = ""
@@ -67,11 +92,12 @@ Public Interface IConditionConceptStore
 
     ''' <summary>
     ''' Distinct CUIs whose atoms exactly match <paramref name="conditionNorm"/>
-    ''' on umls.atom.str_norm, each carrying the concept's preferred name. Empty
-    ''' when there is no exact atom.
+    ''' on umls.atom.str_norm, each carrying the concept's preferred name and
+    ''' whether it has at least one umls.concept_ancestor entry. Empty when
+    ''' there is no exact atom.
     ''' </summary>
     Function LookupExactAsync(conditionNorm As String,
-                              cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of UmlsCandidate))
+                              cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConditionCandidate))
 
     ''' <summary>Insert or update one dictionary row, stamping resolved_at.</summary>
     Function UpsertAsync(entry As ConditionConceptEntry,
