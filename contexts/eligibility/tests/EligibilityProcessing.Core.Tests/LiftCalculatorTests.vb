@@ -78,10 +78,15 @@ Public Class LiftCalculatorTests
                 cohortSize:=100, corpusSize:=1000,
                 prefNames:=Names(("KEEP", "Keep"), ("DROP", "Drop")),
                 definingCodes:=New HashSet(Of String)(),
-                minimumSupport:=10)
+                minimumSupport:=LiftCalculator.DefaultMinimumSupport)
 
         Assert.Single(rows)
         Assert.Equal("KEEP", rows.Single().ConceptCode)
+    End Sub
+
+    <Fact>
+    Public Sub Default_minimum_support_constant_is_ten()
+        Assert.Equal(10, LiftCalculator.DefaultMinimumSupport)
     End Sub
 
     <Fact>
@@ -114,11 +119,37 @@ Public Class LiftCalculatorTests
     End Sub
 
     <Fact>
-    Public Sub Empty_cohort_returns_empty_rather_than_throwing()
+    Public Sub Empty_cohort_counts_return_empty()
         Dim rows = LiftCalculator.Build(
                 Counts(), Counts(("C1", 10)),
-                cohortSize:=0, corpusSize:=1000,
+                cohortSize:=100, corpusSize:=1000,
                 prefNames:=Names(),
+                definingCodes:=New HashSet(Of String)(),
+                minimumSupport:=1)
+
+        Assert.Empty(rows)
+    End Sub
+
+    <Fact>
+    Public Sub Zero_cohort_size_returns_empty_rather_than_dividing_by_zero()
+        Dim rows = LiftCalculator.Build(
+                Counts(("C1", 10)),
+                Counts(("C1", 100)),
+                cohortSize:=0, corpusSize:=1000,
+                prefNames:=Names(("C1", "Thing")),
+                definingCodes:=New HashSet(Of String)(),
+                minimumSupport:=1)
+
+        Assert.Empty(rows)
+    End Sub
+
+    <Fact>
+    Public Sub Zero_corpus_size_returns_empty_rather_than_dividing_by_zero()
+        Dim rows = LiftCalculator.Build(
+                Counts(("C1", 10)),
+                Counts(("C1", 100)),
+                cohortSize:=100, corpusSize:=0,
+                prefNames:=Names(("C1", "Thing")),
                 definingCodes:=New HashSet(Of String)(),
                 minimumSupport:=1)
 
