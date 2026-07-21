@@ -8,10 +8,10 @@ Imports NpgsqlTypes
 
 ''' <summary>
 ''' Read-only analytics queries over the processed corpus (V25 indexes). The
-''' six cohort/profile methods below are fully implemented here; GetTrendAsync,
-''' GetConceptSummaryAsync and SearchConceptsAsync carry minimal stub bodies -
-''' they are implemented in later tasks but must resolve cleanly today because
-''' this class is registered in DI and constructed at startup.
+''' six cohort/profile methods and GetTrendAsync are fully implemented here;
+''' GetConceptSummaryAsync and SearchConceptsAsync still carry minimal stub
+''' bodies - they are implemented in Task 8 but must resolve cleanly today
+''' because this class is registered in DI and constructed at startup.
 ''' </summary>
 Public NotInheritable Class AnalyticsGateway
     Implements IAnalyticsGateway
@@ -209,18 +209,60 @@ FROM public.eligibility WHERE concept_code <> '' GROUP BY concept_code"
         Return result
     End Function
 
-    ' --- Stubs below: declared on the interface now, implemented in Tasks 7/8.
+    ''' <summary>
+    ''' One point per year in which any processed study started, showing the
+    ''' concept's share of that year's studies. The LEFT JOIN from yr to hits is
+    ''' deliberate - a year in which the concept never appears must still
+    ''' produce a point (0 / that year's study count), not be skipped, or a line
+    ''' chart would draw a continuous line through the gap. All years are
+    ''' included; there is no cutoff, because the corpus's current skew toward
+    ''' 2019+ reflects processing progress, not a permanent property of the
+    ''' data. currentYear is supplied by the caller (never read from the clock
+    ''' here) purely so IsPartial can flag the one part-year deterministically.
+    ''' </summary>
+    Public Async Function GetTrendAsync(conceptCode As String,
+                                        currentYear As Integer,
+                                        cancellationToken As CancellationToken) _
+            As Task(Of IReadOnlyList(Of TrendPoint)) Implements IAnalyticsGateway.GetTrendAsync
+
+        Dim result As New List(Of TrendPoint)
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+WITH yr AS (
+  SELECT EXTRACT(year FROM d.start_date)::int AS y, count(*)::numeric AS studies
+  FROM public.eligibility_study_detail d
+  WHERE d.start_date IS NOT NULL
+  GROUP BY 1),
+hits AS (
+  SELECT EXTRACT(year FROM d.start_date)::int AS y, count(DISTINCT e.nct_id)::numeric AS trials
+  FROM public.eligibility e
+  JOIN public.eligibility_study_detail d ON d.nct_id = e.nct_id
+  WHERE e.concept_code = @cui AND d.start_date IS NOT NULL
+  GROUP BY 1)
+SELECT yr.y, yr.studies::int, COALESCE(hits.trials, 0)::int,
+       100.0 * COALESCE(hits.trials, 0) / yr.studies
+FROM yr LEFT JOIN hits USING (y)
+ORDER BY yr.y"
+                cmd.Parameters.Add(New NpgsqlParameter("cui", NpgsqlDbType.Text) With {.Value = If(conceptCode, "")})
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        Dim year = reader.GetInt32(0)
+                        Dim studiesThatYear = reader.GetInt32(1)
+                        Dim trialsWithConcept = reader.GetInt32(2)
+                        Dim pctOfYear = reader.GetDouble(3)
+                        result.Add(New TrendPoint(year, studiesThatYear, trialsWithConcept, pctOfYear, year = currentYear))
+                    End While
+                End Using
+            End Using
+        End Using
+        Return result
+    End Function
+
+    ' --- Stubs below: declared on the interface now, implemented in Task 8.
     ' Deliberately not NotImplementedException - this class is resolved from DI
     ' at startup, and a premature call (including from an unrelated test) must
     ' get a well-formed empty answer, not a crash.
-
-    Public Function GetTrendAsync(conceptCode As String,
-                                  currentYear As Integer,
-                                  cancellationToken As CancellationToken) _
-            As Task(Of IReadOnlyList(Of TrendPoint)) Implements IAnalyticsGateway.GetTrendAsync
-
-        Return Task.FromResult(Of IReadOnlyList(Of TrendPoint))(Array.Empty(Of TrendPoint)())
-    End Function
 
     Public Function GetConceptSummaryAsync(conceptCode As String,
                                            cancellationToken As CancellationToken) _

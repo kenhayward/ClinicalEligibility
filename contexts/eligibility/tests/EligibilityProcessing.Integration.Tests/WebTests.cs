@@ -274,6 +274,35 @@ public class WebTests : IClassFixture<WebTests.Factory>
     }
 
     [Fact]
+    public async Task Analytics_trend_returns_200_with_empty_form_chrome()
+    {
+        // No codes: AnalyticsController.Trend returns the empty form without
+        // touching IAnalyticsGateway, so this stays a clean 200 even with the
+        // factory's unreachable Postgres connection strings.
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Analytics/Trend");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Analytics - Trend", body);
+        Assert.Contains("Enter one or more concept codes", body);
+    }
+
+    [Fact]
+    public async Task Analytics_trend_renders_inline_error_when_gateway_unavailable()
+    {
+        // With codes supplied, the controller queries the gateway - it hits
+        // placeholder Postgres and throws; the controller must catch and
+        // surface inline rather than 500, same shape as Index above.
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Analytics/Trend?codes=C0011849");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Backend unavailable", body);
+    }
+
+    [Fact]
     public async Task Analysis_with_nctId_renders_inline_error_when_gateway_unavailable()
     {
         // With an nctId the controller queries the gateway — first the new

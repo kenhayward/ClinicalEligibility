@@ -40,16 +40,46 @@ public sealed class AnalyticsLiftViewModel
 }
 
 /// <summary>
+/// One concept's trend line: its preferred name plus the per-year points
+/// returned by <c>IAnalyticsGateway.GetTrendAsync</c>.
+/// </summary>
+public sealed class TrendSeries
+{
+    public string ConceptCode { get; init; } = "";
+
+    /// <summary>From umls.concept.pref_name; falls back to the code itself
+    /// when the concept is unknown, so the series still labels sensibly.</summary>
+    public string PrefName { get; init; } = "";
+
+    public IReadOnlyList<TrendPoint> Points { get; init; } = Array.Empty<TrendPoint>();
+}
+
+/// <summary>
 /// Backing model for the Analytics tab's trend view (<c>/Analytics/Trend</c>).
-/// Minimal placeholder only - the Trend action and its view are built in a
-/// later task; this shape exists so callers of AnalyticsViewModels.cs compile
-/// against a stable file today and Task 7 fleshes it out without moving types.
+/// Plots up to five concepts' prevalence over time, always as a percentage of
+/// that year's processed studies - never a raw count, since trial volume
+/// grows year on year independent of any one concept's popularity.
 /// </summary>
 public sealed class AnalyticsTrendViewModel
 {
+    /// <summary>The raw comma-separated codes as submitted. Empty on the
+    /// initial, not-yet-submitted form.</summary>
+    public string CodesInput { get; init; } = "";
+
+    public IReadOnlyList<TrendSeries> Series { get; init; } = Array.Empty<TrendSeries>();
+
+    /// <summary>The year flagged as partial on every series - passed in from
+    /// the controller so a test (and the view's own "(partial)" label) can
+    /// pin it rather than depending on the clock.</summary>
+    public int CurrentYear { get; init; }
+
     public string? ErrorMessage { get; init; }
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+
+    /// <summary>True once at least one concept code has been submitted -
+    /// distinguishes the empty form from "the query ran and found nothing".</summary>
+    public bool HasSearched => !string.IsNullOrWhiteSpace(CodesInput);
 }
 
 /// <summary>

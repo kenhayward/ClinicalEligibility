@@ -8,9 +8,9 @@ namespace EligibilityProcessing.Web.Controllers;
 /// <summary>
 /// The Analytics area (design spec "2026-07-21-analytics-tab"). Read-only
 /// queries over the processed corpus: what is distinctive about a cohort of
-/// trials (this file's Index/lift action), how a concept's prevalence moves
-/// over time, and a single-concept lookup. Trend and Concept land in later
-/// tasks; only Index (the lift view) is implemented here.
+/// trials (Index/lift action), how a concept's prevalence moves over time
+/// (this file's Trend action), and a single-concept lookup. Concept lands in
+/// a later task.
 /// </summary>
 [Authorize]
 public class AnalyticsController : Controller
@@ -114,6 +114,67 @@ public class AnalyticsController : Controller
     }
 
     /// <summary>
+    /// The trend view: how up to five concepts' prevalence has moved year on
+    /// year, each as a percentage of that year's processed studies. Renders
+    /// the empty form when no codes are supplied, mirroring Index above - a
+    /// query with nothing to plot is not a request to compute anything.
+    /// </summary>
+    public async Task<IActionResult> Trend(
+        CancellationToken cancellationToken,
+        string? codes = null)
+    {
+        // DateTime.Now is read here, at the controller boundary, and passed
+        // into the gateway as a plain int - GetTrendAsync itself never reads
+        // the clock, so a test can pin currentYear and assert IsPartial
+        // deterministically.
+        var currentYear = DateTime.Now.Year;
+        var codeList = ParseCodes(codes);
+
+        if (codeList.Count == 0)
+        {
+            return View(new AnalyticsTrendViewModel
+            {
+                CodesInput = codes ?? "",
+                CurrentYear = currentYear
+            });
+        }
+
+        try
+        {
+            var prefNames = await _analytics.GetPrefNamesAsync(codeList, cancellationToken);
+
+            var series = new List<TrendSeries>();
+            foreach (var code in codeList)
+            {
+                var points = await _analytics.GetTrendAsync(code, currentYear, cancellationToken);
+                series.Add(new TrendSeries
+                {
+                    ConceptCode = code,
+                    PrefName = prefNames.TryGetValue(code, out var name) && !string.IsNullOrEmpty(name) ? name : code,
+                    Points = points
+                });
+            }
+
+            return View(new AnalyticsTrendViewModel
+            {
+                CodesInput = codes ?? "",
+                CurrentYear = currentYear,
+                Series = series
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to compute analytics trend for {Codes}", codes);
+            return View(new AnalyticsTrendViewModel
+            {
+                CodesInput = codes ?? "",
+                CurrentYear = currentYear,
+                ErrorMessage = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
     /// Parses the cohort-kind query parameter defensively: a missing or
     /// unrecognised value defaults to <see cref="AnalyticsCohortKind.Concept"/>
     /// rather than throwing - the form's own dropdown only ever posts a valid
@@ -123,4 +184,16 @@ public class AnalyticsController : Controller
         Enum.TryParse<AnalyticsCohortKind>(kind, ignoreCase: true, out var parsed)
             ? parsed
             : AnalyticsCohortKind.Concept;
+
+    /// <summary>
+    /// Splits, trims, de-duplicates and caps the comma-separated codes input
+    /// at five - a readability limit on the line chart, not a technical one.
+    /// </summary>
+    private static IReadOnlyList<string> ParseCodes(string? codes) =>
+        (codes ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .Take(5)
+            .ToList();
 }

@@ -1,0 +1,158 @@
+@model EligibilityProcessing.Web.Models.AnalyticsTrendViewModel
+@{
+    ViewData["Title"] = "Analytics - Trend";
+
+    // Fixed 5-color palette, one per plotted series - matches the view's own
+    // readability cap of five concepts.
+    var palette = new[] { "#0d6efd", "#dc3545", "#198754", "#fd7e14", "#6f42c1" };
+}
+
+<h1 class="h3 mb-1">Analytics - Trend</h1>
+<p class="text-muted mb-3">
+    How a concept's prevalence has moved year on year, as a percentage of that
+    year's processed studies - never a raw count, since trial volume grows
+    year on year regardless of any one concept's popularity.
+</p>
+<p><a asp-action="Index">Back to distinctiveness</a></p>
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+else
+{
+    <form method="get" asp-action="Trend" class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-8">
+                    <label for="f-codes" class="form-label small text-muted mb-1">Concept codes (comma-separated, up to 5)</label>
+                    <input id="f-codes" name="codes" value="@Model.CodesInput" type="text"
+                           class="form-control form-control-sm"
+                           placeholder="e.g. C0011849, C0018802" />
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                <a asp-action="Trend" class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </div>
+    </form>
+
+    @if (!Model.HasSearched)
+    {
+        <p class="text-muted">Enter one or more concept codes above to see how their prevalence has moved over time.</p>
+    }
+    else if (Model.Series.Count == 0 || !Model.Series.Any(s => s.Points.Count > 0))
+    {
+        <p class="text-muted">No processed studies with a start date were found for these concepts.</p>
+    }
+    else
+    {
+        var allPoints = Model.Series.SelectMany(s => s.Points).ToList();
+        var minYear = allPoints.Min(p => p.Year);
+        var maxYear = allPoints.Max(p => p.Year);
+        var maxPct = allPoints.Select(p => p.PctOfYear).DefaultIfEmpty(0).Max();
+        var yCeiling = Math.Max(5.0, Math.Ceiling(maxPct / 5.0) * 5.0);
+
+        const int chartWidth = 640;
+        const int chartHeight = 220;
+        const int marginLeft = 40;
+        const int marginBottom = 24;
+        const int marginTop = 12;
+        const int marginRight = 10;
+        var plotWidth = chartWidth - marginLeft - marginRight;
+        var plotHeight = chartHeight - marginTop - marginBottom;
+
+        double XScale(int year) => maxYear == minYear
+            ? marginLeft + plotWidth / 2.0
+            : marginLeft + plotWidth * (year - minYear) / (double)(maxYear - minYear);
+        double YScale(double pct) => (chartHeight - marginBottom) - plotHeight * (pct / yCeiling);
+
+        <div class="mb-3" style="max-width: 720px;">
+            <svg viewBox="0 0 @chartWidth @chartHeight" role="img"
+                 aria-label="Line chart of concept prevalence by year, as a percentage of that year's processed studies"
+                 style="width:100%; height:auto;">
+                <line x1="@marginLeft" y1="@(chartHeight - marginBottom)" x2="@(chartWidth - marginRight)" y2="@(chartHeight - marginBottom)"
+                      stroke="currentColor" stroke-opacity="0.35" />
+                <line x1="@marginLeft" y1="@marginTop" x2="@marginLeft" y2="@(chartHeight - marginBottom)"
+                      stroke="currentColor" stroke-opacity="0.35" />
+                <text x="2" y="@(marginTop + 8)" font-size="10" fill="currentColor">@yCeiling.ToString("F0")%</text>
+                <text x="10" y="@(chartHeight - marginBottom + 4)" font-size="10" fill="currentColor">0%</text>
+                <text x="@marginLeft" y="@(chartHeight - 6)" font-size="10" fill="currentColor">@minYear</text>
+                <text x="@(chartWidth - marginRight - 24)" y="@(chartHeight - 6)" font-size="10" fill="currentColor">@maxYear</text>
+
+                @for (var i = 0; i < Model.Series.Count; i++)
+                {
+                    var series = Model.Series[i];
+                    var color = palette[i % palette.Length];
+                    var ordered = series.Points.OrderBy(p => p.Year).ToList();
+                    var polylinePoints = string.Join(" ",
+                            ordered.Select(p => XScale(p.Year).ToString("F1") + "," + YScale(p.PctOfYear).ToString("F1")));
+
+                    <polyline points="@polylinePoints" fill="none" stroke="@color" stroke-width="2" />
+                    @foreach (var p in ordered)
+                    {
+                        <circle cx="@XScale(p.Year).ToString("F1")" cy="@YScale(p.PctOfYear).ToString("F1")"
+                                r="@(p.IsPartial ? 5 : 3)" fill="@color">
+                            <title>@series.PrefName, @p.Year@(p.IsPartial ? " (partial)" : ""): @p.PctOfYear.ToString("F1")% (@p.TrialsWithConcept of @p.StudiesThatYear)</title>
+                        </circle>
+                    }
+                }
+            </svg>
+        </div>
+
+        <div class="d-flex flex-wrap gap-3 mb-3">
+            @for (var i = 0; i < Model.Series.Count; i++)
+            {
+                var series = Model.Series[i];
+                var color = palette[i % palette.Length];
+                <span class="small">
+                    <span style="display:inline-block;width:10px;height:10px;background-color:@color;border-radius:2px;margin-right:4px;"></span>@series.PrefName (@series.ConceptCode)
+                </span>
+            }
+        </div>
+
+        @foreach (var series in Model.Series)
+        {
+            <h2 class="h6">@series.PrefName (@series.ConceptCode)</h2>
+            @if (series.Points.Count == 0)
+            {
+                <p class="text-muted small">No processed studies with a start date were found.</p>
+            }
+            else
+            {
+                <div class="table-responsive mb-4">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Year</th>
+                                <th class="text-end">Studies that year</th>
+                                <th class="text-end">Trials with concept</th>
+                                <th class="text-end">% of year</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in series.Points.OrderBy(p => p.Year))
+                            {
+                                <tr>
+                                    <td>
+                                        @p.Year
+                                        @if (p.IsPartial)
+                                        {
+                                            <span class="badge bg-secondary ms-1">partial year</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">@p.StudiesThatYear</td>
+                                    <td class="text-end">@p.TrialsWithConcept</td>
+                                    <td class="text-end">@p.PctOfYear.ToString("F1")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    }
+}
