@@ -27,11 +27,8 @@ public class AnalyticsControllerTests
     {
         public ConceptSummary? SummaryToReturn { get; set; }
 
-        public Task<int> GetCohortSizeAsync(AnalyticsCohort cohort, CancellationToken cancellationToken) =>
-            Task.FromResult(0);
-
-        public Task<IReadOnlyList<ConceptCount>> GetCohortProfileAsync(AnalyticsCohort cohort, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<ConceptCount>>(Array.Empty<ConceptCount>());
+        public Task<CohortProfile> GetCohortProfileAsync(AnalyticsCohort cohort, CancellationToken cancellationToken) =>
+            Task.FromResult(new CohortProfile(0, Array.Empty<ConceptCount>()));
 
         public Task<IReadOnlyList<ConceptCount>> GetCorpusProfileAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<ConceptCount>>(Array.Empty<ConceptCount>());

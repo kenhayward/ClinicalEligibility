@@ -715,16 +715,10 @@ Friend NotInheritable Class FakeAnalyticsGateway
         End Get
     End Property
 
-    Public Function GetCohortSizeAsync(cohort As AnalyticsCohort,
-                                       cancellationToken As CancellationToken) As Task(Of Integer) _
-            Implements IAnalyticsGateway.GetCohortSizeAsync
-        Return Task.FromResult(0)
-    End Function
-
     Public Function GetCohortProfileAsync(cohort As AnalyticsCohort,
-                                          cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConceptCount)) _
+                                          cancellationToken As CancellationToken) As Task(Of CohortProfile) _
             Implements IAnalyticsGateway.GetCohortProfileAsync
-        Return Task.FromResult(CType(Array.Empty(Of ConceptCount)(), IReadOnlyList(Of ConceptCount)))
+        Return Task.FromResult(New CohortProfile(0, Array.Empty(Of ConceptCount)()))
     End Function
 
     Public Function GetCorpusProfileAsync(

@@ -188,3 +188,26 @@ Public NotInheritable Class CorpusConceptProfile
     Public ReadOnly Property TrialCount As Integer
 
 End Class
+
+''' <summary>
+''' A cohort's size and per-concept profile, computed together. Replaces what
+''' used to be two separate gateway calls (GetCohortSizeAsync then
+''' GetCohortProfileAsync) that both re-ran the same cohort-defining SQL -
+''' measured at ~1,225ms each in production, so the pair cost ~2.4s against a
+''' 2s warm budget. GetCohortProfileAsync now runs the cohort query once
+''' (materialised) and returns both figures from that single round trip.
+''' </summary>
+Public NotInheritable Class CohortProfile
+
+    Public Sub New(size As Integer, concepts As IReadOnlyList(Of ConceptCount))
+        Me.Size = size
+        Me.Concepts = If(concepts, CType(Array.Empty(Of ConceptCount)(), IReadOnlyList(Of ConceptCount)))
+    End Sub
+
+    ''' <summary>Distinct trials matching the cohort - the same figure the old GetCohortSizeAsync returned.</summary>
+    Public ReadOnly Property Size As Integer
+
+    ''' <summary>Per-concept distinct-trial counts within the cohort.</summary>
+    Public ReadOnly Property Concepts As IReadOnlyList(Of ConceptCount)
+
+End Class

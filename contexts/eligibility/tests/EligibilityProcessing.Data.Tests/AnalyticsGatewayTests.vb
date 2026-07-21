@@ -189,8 +189,8 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
-        Dim size = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_BREAST", False), CancellationToken.None)
+        Dim size = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_BREAST", False), CancellationToken.None)).Size
 
         ' A wrong LATERAL alias or a join key that isn't the normalized string
         ' (e.g. cc.raw_form instead of cc.condition_norm) would compile, run,
@@ -209,8 +209,8 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
-        Dim size = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_BREAST", False), CancellationToken.None)
+        Dim size = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_BREAST", False), CancellationToken.None)).Size
 
         Assert.Equal(1, size)
     End Function
@@ -228,8 +228,8 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await SeedRowAsync("NCT001", "Inclusion", "C_ANY", "any")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
-        Dim size = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_BREAST", False), CancellationToken.None)
+        Dim size = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_BREAST", False), CancellationToken.None)).Size
 
         Assert.Equal(1, size)
     End Function
@@ -248,12 +248,12 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
 
-        Dim withKids = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_PARENT", True), CancellationToken.None)
+        Dim withKids = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_PARENT", True), CancellationToken.None)).Size
         Assert.Equal(1, withKids)
 
-        Dim withoutKids = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_PARENT", False), CancellationToken.None)
+        Dim withoutKids = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_PARENT", False), CancellationToken.None)).Size
         Assert.Equal(0, withoutKids)
     End Function
 
@@ -283,8 +283,8 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Await SeedStudyDetailPhaseAsync("NCT_NO_ELIG", "PHASE3")
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
-        Dim size = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Phase, "PHASE3", False), CancellationToken.None)
+        Dim size = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Phase, "PHASE3", False), CancellationToken.None)).Size
 
         Assert.Equal(0, size)
     End Function
@@ -317,12 +317,12 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
 
         Dim g As New AnalyticsGateway(_fixture.DataSource)
 
-        Dim withKids = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_PARENT", True), CancellationToken.None)
+        Dim withKids = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_PARENT", True), CancellationToken.None)).Size
         Assert.Equal(2, withKids)
 
-        Dim withoutKids = Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_PARENT", False), CancellationToken.None)
+        Dim withoutKids = (Await g.GetCohortProfileAsync(
+                New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_PARENT", False), CancellationToken.None)).Size
         Assert.Equal(1, withoutKids)
     End Function
 
@@ -339,7 +339,7 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Dim prof = Await g.GetCohortProfileAsync(
                 New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_A", False), CancellationToken.None)
 
-        Assert.Equal(1, prof.Single(Function(p) p.ConceptCode = "C_A").Trials)
+        Assert.Equal(1, prof.Concepts.Single(Function(p) p.ConceptCode = "C_A").Trials)
     End Function
 
     <SkippableFact>
@@ -361,12 +361,24 @@ INSERT INTO public.eligibility_study_detail (nct_id, conditions) VALUES (@n, @c)
         Assert.Empty(none)
     End Function
 
+    ''' <summary>
+    ''' Fix 10 (2026-07 whole-branch review): the previous version of this test
+    ''' omitted AnalyticsCohortKind.Condition entirely and asserted only
+    ''' `size >= 0` (always true for a count) and `NotNull(prof)` - it passed
+    ''' trivially and would keep passing even if every cohort kind returned an
+    ''' empty profile. This version includes all four kinds and asserts the
+    ''' seeded trial is actually FOUND by each one: a real cohort size of 1
+    ''' and a real C_A concept row in the profile, not a tautology.
+    ''' </summary>
     <SkippableFact>
-    Public Async Function All_four_cohort_kinds_return_the_same_shape() As Task
+    Public Async Function All_four_cohort_kinds_find_the_seeded_trial_with_a_real_profile() As Task
         Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
         Await _fixture.ResetAsync()
         Await SeedConceptAsync("C_A", "A")
         Await SeedRowAsync("NCT001", "Inclusion", "C_A", "a")
+        ' "Thing" maps to C_A in the condition dictionary so the Condition
+        ' cohort resolves the same trial as the other three kinds.
+        Await SeedConditionConceptAsync("thing", "C_A")
         Using conn = Await _fixture.DataSource.OpenConnectionAsync()
             Using cmd = conn.CreateCommand()
                 cmd.CommandText = "
@@ -379,17 +391,19 @@ VALUES ('NCT001', 'PHASE3', DATE '2023-05-01', ARRAY['Thing'])"
         Dim g As New AnalyticsGateway(_fixture.DataSource)
         Dim kinds = {
             New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_A", False),
+            New AnalyticsCohort(AnalyticsCohortKind.Condition, "C_A", False),
             New AnalyticsCohort(AnalyticsCohortKind.Phase, "PHASE3", False),
             New AnalyticsCohort(AnalyticsCohortKind.Year, "2023", False)
         }
 
-        ' The view renders all four uniformly, so every kind must return a
-        ' well-formed profile - never Nothing, never a throw.
+        ' The view renders all four uniformly, so every kind must genuinely
+        ' find NCT001 - a real count and a real concept in the profile.
         For Each k In kinds
-            Dim size = Await g.GetCohortSizeAsync(k, CancellationToken.None)
-            Dim prof = Await g.GetCohortProfileAsync(k, CancellationToken.None)
-            Assert.True(size >= 0)
-            Assert.NotNull(prof)
+            Dim profile = Await g.GetCohortProfileAsync(k, CancellationToken.None)
+            Assert.Equal(1, profile.Size)
+            Dim concept = Assert.Single(profile.Concepts)
+            Assert.Equal("C_A", concept.ConceptCode)
+            Assert.Equal(1, concept.Trials)
         Next
     End Function
 
@@ -402,9 +416,8 @@ VALUES ('NCT001', 'PHASE3', DATE '2023-05-01', ARRAY['Thing'])"
         Dim prof = Await g.GetCohortProfileAsync(
                 New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_NOPE", False), CancellationToken.None)
 
-        Assert.Empty(prof)
-        Assert.Equal(0, Await g.GetCohortSizeAsync(
-                New AnalyticsCohort(AnalyticsCohortKind.Concept, "C_NOPE", False), CancellationToken.None))
+        Assert.Empty(prof.Concepts)
+        Assert.Equal(0, prof.Size)
     End Function
 
     ' --- GetTrendAsync (Task 7) ---

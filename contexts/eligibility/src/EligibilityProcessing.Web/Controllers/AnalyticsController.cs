@@ -141,7 +141,11 @@ public class AnalyticsController : Controller
     {
         var cohort = new AnalyticsCohort(cohortKind, trimmedValue, includeDescendants);
 
-        var cohortSize = await _analytics.GetCohortSizeAsync(cohort, cancellationToken);
+        // A single call now returns both the cohort size and its per-concept
+        // profile - the two used to be separate gateway calls that each
+        // re-ran the full cohort-defining SQL (measured ~1,225ms apiece, so
+        // ~2.4s combined against a 2s warm budget). See
+        // AnalyticsGateway.GetCohortProfileAsync.
         var cohortProfile = await _analytics.GetCohortProfileAsync(cohort, cancellationToken);
         var definingCodes = await _analytics.GetCohortDefiningCodesAsync(cohort, cancellationToken);
 
@@ -150,25 +154,30 @@ public class AnalyticsController : Controller
         // so ICorpusReadCache is the whole point of memoising it (~2s query).
         var corpusProfile = await _corpusReads.GetCorpusConceptProfileAsync(cancellationToken);
 
-        // LiftCalculator.Build only ever looks up a name for a code that
-        // appears in cohortCounts, so only those codes need resolving.
-        var cohortCodes = cohortProfile
+        // LiftCalculator.Build drops everything below minimumSupport anyway,
+        // so resolving preferred names for codes that will never survive the
+        // floor is wasted work - a large cohort can carry tens of thousands
+        // of below-floor concepts. Filter here, before the name lookup;
+        // LiftCalculator itself keeps applying the floor unconditionally so
+        // it stays correct when called directly (e.g. from a test) with an
+        // unfiltered code list.
+        var cohortCodesAboveSupport = cohortProfile.Concepts
+            .Where(c => c.Trials >= minimumSupport && !string.IsNullOrEmpty(c.ConceptCode))
             .Select(c => c.ConceptCode)
-            .Where(c => !string.IsNullOrEmpty(c))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        var prefNames = await _analytics.GetPrefNamesAsync(cohortCodes, cancellationToken);
+        var prefNames = await _analytics.GetPrefNamesAsync(cohortCodesAboveSupport, cancellationToken);
 
         var rows = LiftCalculator.Build(
-            cohortCounts: cohortProfile,
+            cohortCounts: cohortProfile.Concepts,
             corpusCounts: corpusProfile.Counts,
-            cohortSize: cohortSize,
+            cohortSize: cohortProfile.Size,
             corpusSize: corpusProfile.TrialCount,
             prefNames: prefNames,
             definingCodes: new HashSet<string>(definingCodes, StringComparer.Ordinal),
             minimumSupport: minimumSupport);
 
-        return (rows, cohortSize, corpusProfile.TrialCount);
+        return (rows, cohortProfile.Size, corpusProfile.TrialCount);
     }
 
     // Filename-safe slug for the export download name: the cohort kind plus a

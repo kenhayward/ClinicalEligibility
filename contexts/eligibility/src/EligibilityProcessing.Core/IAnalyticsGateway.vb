@@ -9,13 +9,16 @@ Imports System.Threading.Tasks
 ''' </summary>
 Public Interface IAnalyticsGateway
 
-    ''' <summary>Distinct trials matching the cohort.</summary>
-    Function GetCohortSizeAsync(cohort As AnalyticsCohort,
-                                cancellationToken As CancellationToken) As Task(Of Integer)
-
-    ''' <summary>Per-concept distinct-trial counts within the cohort.</summary>
+    ''' <summary>
+    ''' The cohort's size and per-concept profile, computed in a single query -
+    ''' see CohortProfile. Replaces what used to be two separate methods
+    ''' (GetCohortSizeAsync then GetCohortProfileAsync) that each re-ran the
+    ''' full cohort-defining SQL; nothing in this codebase needs the size
+    ''' without the profile or vice versa, so there is no longer a
+    ''' size-only method to keep in sync.
+    ''' </summary>
     Function GetCohortProfileAsync(cohort As AnalyticsCohort,
-                                   cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConceptCount))
+                                   cancellationToken As CancellationToken) As Task(Of CohortProfile)
 
     ''' <summary>
     ''' Per-concept distinct-trial counts across the whole corpus - the lift
