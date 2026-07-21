@@ -12,11 +12,19 @@ Imports Xunit
 Public Class CorpusReadCacheTests
 
     Private Shared Function NewCache(gateway As FakeGateway, ttl As TimeSpan) As CorpusReadCache
-        Return New CorpusReadCache(gateway, New MemoryCache(New MemoryCacheOptions()), ttl)
+        Return NewCache(gateway, New FakeAnalyticsGateway(), ttl)
     End Function
 
     Private Shared Function NewCache(gateway As FakeGateway) As CorpusReadCache
         Return NewCache(gateway, TimeSpan.FromMinutes(5))
+    End Function
+
+    Private Shared Function NewCache(gateway As FakeGateway, analytics As FakeAnalyticsGateway, ttl As TimeSpan) As CorpusReadCache
+        Return New CorpusReadCache(gateway, analytics, New MemoryCache(New MemoryCacheOptions()), ttl)
+    End Function
+
+    Private Shared Function NewCache(gateway As FakeGateway, analytics As FakeAnalyticsGateway) As CorpusReadCache
+        Return NewCache(gateway, analytics, TimeSpan.FromMinutes(5))
     End Function
 
     <Fact>
@@ -224,10 +232,13 @@ Public Class CorpusReadCacheTests
     <Fact>
     Public Sub NullDependencies_Throw()
         Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
         Assert.Throws(Of ArgumentNullException)(
-                Function() New CorpusReadCache(Nothing, New MemoryCache(New MemoryCacheOptions()), TimeSpan.FromMinutes(1)))
+                Function() New CorpusReadCache(Nothing, analytics, New MemoryCache(New MemoryCacheOptions()), TimeSpan.FromMinutes(1)))
         Assert.Throws(Of ArgumentNullException)(
-                Function() New CorpusReadCache(gateway, Nothing, TimeSpan.FromMinutes(1)))
+                Function() New CorpusReadCache(gateway, Nothing, New MemoryCache(New MemoryCacheOptions()), TimeSpan.FromMinutes(1)))
+        Assert.Throws(Of ArgumentNullException)(
+                Function() New CorpusReadCache(gateway, analytics, Nothing, TimeSpan.FromMinutes(1)))
     End Sub
 
     <Fact>
@@ -239,6 +250,130 @@ Public Class CorpusReadCacheTests
             Await Assert.ThrowsAnyAsync(Of OperationCanceledException)(
                     Function() cache.GetDashboardMetricsAsync(cts.Token))
         End Using
+    End Function
+
+    ' ===== corpus concept profile (Analytics tab lift baseline) =====
+    ' Measured at 2.0s and identical for every request - same shape as the
+    ' dashboard-metrics tests above, but observed through FakeAnalyticsGateway
+    ' rather than FakeGateway.
+
+    <Fact>
+    Public Async Function CorpusConceptProfile_SecondCallWithinTtl_DoesNotHitGateway() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        Dim cache = NewCache(gateway, analytics)
+
+        Dim first = Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+        Dim second = Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.Equal(1, analytics.ProfileCalls)
+        Assert.Equal(1, analytics.TrialCountCalls)
+        Assert.Same(first, second)
+    End Function
+
+    <Fact>
+    Public Async Function CorpusConceptProfile_ZeroTtl_BypassesTheCache() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        Dim cache = NewCache(gateway, analytics, TimeSpan.Zero)
+
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.Equal(2, analytics.ProfileCalls)
+        Assert.Equal(2, analytics.TrialCountCalls)
+    End Function
+
+    <Fact>
+    Public Async Function CorpusConceptProfile_NegativeTtl_BypassesTheCache() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        Dim cache = NewCache(gateway, analytics, TimeSpan.FromSeconds(-1))
+
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.Equal(2, analytics.ProfileCalls)
+    End Function
+
+    <Fact>
+    Public Async Function CorpusConceptProfile_CarriesBothCountsAndTrialCount() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway With {
+            .ProfileToReturn = {New ConceptCount("C0018681", 42), New ConceptCount("C0011849", 17)},
+            .TrialCountToReturn = 290000
+        }
+        Dim cache = NewCache(gateway, analytics)
+
+        Dim profile = Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.Equal(2, profile.Counts.Count)
+        Assert.Equal(290000, profile.TrialCount)
+    End Function
+
+    ' A cached failure would pin a transient Postgres error on the Analytics
+    ' tab for the whole TTL, same reasoning as the dashboard/filter-options
+    ' failure tests above.
+    <Fact>
+    Public Async Function CorpusConceptProfile_GatewayFailure_IsNotCached() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        analytics.CorpusReadError = New InvalidOperationException("postgres down")
+        Dim cache = NewCache(gateway, analytics)
+
+        Await Assert.ThrowsAsync(Of InvalidOperationException)(
+                Function() cache.GetCorpusConceptProfileAsync(CancellationToken.None))
+
+        analytics.CorpusReadError = Nothing
+        Dim recovered = Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.NotNull(recovered)
+        Assert.Equal(2, analytics.ProfileCalls)
+    End Function
+
+    <Fact>
+    Public Async Function CorpusConceptProfile_EntryExpires_AfterTtl_RefetchesFromGateway() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        Dim cache = NewCache(gateway, analytics, TimeSpan.FromMilliseconds(30))
+
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+        Await Task.Delay(120)
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.Equal(2, analytics.ProfileCalls)
+    End Function
+
+    <Fact>
+    Public Async Function CorpusConceptProfile_CancellationToken_IsHonoured() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        Dim cache = NewCache(gateway, analytics)
+        Using cts As New CancellationTokenSource()
+            cts.Cancel()
+            Await Assert.ThrowsAnyAsync(Of OperationCanceledException)(
+                    Function() cache.GetCorpusConceptProfileAsync(cts.Token))
+        End Using
+    End Function
+
+    ' Caching the profile must not disturb the two pre-existing entries - each
+    ' lives under its own key.
+    <Fact>
+    Public Async Function CorpusConceptProfile_IsCachedIndependently_OfDashboardMetricsAndFilterOptions() As Task
+        Dim gateway As New FakeGateway()
+        Dim analytics As New FakeAnalyticsGateway()
+        Dim cache = NewCache(gateway, analytics)
+
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        Await cache.GetEligibilityFilterOptionsAsync(100, CancellationToken.None)
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+        Await cache.GetDashboardMetricsAsync(CancellationToken.None)
+        Await cache.GetEligibilityFilterOptionsAsync(100, CancellationToken.None)
+        Await cache.GetCorpusConceptProfileAsync(CancellationToken.None)
+
+        Assert.Equal(1, gateway.GetDashboardMetricsCalls)
+        Assert.Equal(1, gateway.GetFilterOptionsCalls)
+        Assert.Equal(1, analytics.ProfileCalls)
     End Function
 
 End Class

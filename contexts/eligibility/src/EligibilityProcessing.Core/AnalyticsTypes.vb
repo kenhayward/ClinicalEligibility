@@ -172,3 +172,19 @@ Public NotInheritable Class ConceptSummary
     Public ReadOnly Property ExampleCriteria As IReadOnlyList(Of String)
 
 End Class
+
+''' <summary>
+''' The corpus-wide lift baseline: per-concept trial counts plus the denominator.
+''' Cached, because it is identical for every lift request and measured at 2.0s.
+''' </summary>
+Public NotInheritable Class CorpusConceptProfile
+
+    Public Sub New(counts As IReadOnlyList(Of ConceptCount), trialCount As Integer)
+        Me.Counts = If(counts, CType(Array.Empty(Of ConceptCount)(), IReadOnlyList(Of ConceptCount)))
+        Me.TrialCount = trialCount
+    End Sub
+
+    Public ReadOnly Property Counts As IReadOnlyList(Of ConceptCount)
+    Public ReadOnly Property TrialCount As Integer
+
+End Class

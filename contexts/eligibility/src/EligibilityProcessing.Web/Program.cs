@@ -47,6 +47,7 @@ builder.Services.AddSingleton<ICorpusReadCache>(sp =>
         .GetValue<int?>("Web:CorpusCacheTtlSeconds") ?? CorpusReadCache.DefaultTtlSeconds;
     return new CorpusReadCache(
         sp.GetRequiredService<IPostgresGateway>(),
+        sp.GetRequiredService<IAnalyticsGateway>(),
         sp.GetRequiredService<IMemoryCache>(),
         TimeSpan.FromSeconds(ttlSeconds));
 });
