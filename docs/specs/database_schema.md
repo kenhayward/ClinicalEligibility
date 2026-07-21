@@ -275,8 +275,8 @@ pipeline run reuse every earlier resolution. *(V24.)*
 | `created_at` | `timestamptz` | no | `now()` | |
 
 **Indexes:**
-- `ix_condition_concept_code` — on `(concept_code)` where `concept_code IS NOT NULL`; serves the analytics join `condition_concept -> concept_code -> eligibility`.
-- `ix_condition_concept_pending` — on `(study_count DESC)` where `resolved_at IS NULL`; serves the backfill's highest-value-unresolved-first ordering.
+- `ix_condition_concept_code` - on `(concept_code)` where `concept_code IS NOT NULL`; serves the analytics join `condition_concept -> concept_code -> eligibility`.
+- `ix_condition_concept_pending` - on `(study_count DESC)` where `resolved_at IS NULL`; serves the backfill's highest-value-unresolved-first ordering.
 
 ---
 
