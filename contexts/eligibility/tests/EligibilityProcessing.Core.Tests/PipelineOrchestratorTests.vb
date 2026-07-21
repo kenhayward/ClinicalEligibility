@@ -851,6 +851,37 @@ Public Class PipelineOrchestratorTests
         Assert.Single(gateway.PersistTrialCalls)
     End Function
 
+    ' ============ Condition normalizer hook (best-effort) ============
+
+    <Fact>
+    Public Async Function Trial_still_persists_when_condition_normalization_throws() As Task
+        ' The condition normalizer is best-effort, sharing the same Try as
+        ' snapshot capture (TryCaptureStudySnapshotAsync). A failure inside it
+        ' must be logged and swallowed, exactly like a snapshot-capture
+        ' failure - never allowed to fail the trial or lose its criteria. If
+        ' the normalizer call were ever moved outside that Try, this throw
+        ' would propagate out of ProcessTrialAsync before persistence and
+        ' both assertions below would fail.
+        Dim gateway = NewGateway()
+        gateway.TrialsToReturn = New Trial() {New Trial("NCT00000007", "Inclusion: diabetes")}
+
+        Dim llm = New FakeLlmClient()
+        llm.Responses("NCT00000007") = LlmResponse.Success(
+                "NCT00000007",
+                CriterionJson("NCT00000007", "Inclusion", "Disease", "Diabetes", "Has diabetes"))
+
+        Dim throwingStore As New ThrowingConditionConceptStore()
+        Dim conditionNormalizer = New ConditionNormalizer(throwingStore, New FakeUmlsClient(), New UmlsMatchScorer())
+        Dim orch = NewOrchestrator(gateway, llm:=llm, conditionNormalizer:=conditionNormalizer)
+
+        Dim result = Await orch.ExecuteAsync(MakeConfig(studyCount:=1), CancellationToken.None)
+
+        ' The trial's eligibility rows were still written despite the throw.
+        Assert.Equal("success", result.Metrics.Status)
+        Assert.Single(gateway.PersistTrialCalls)
+        Assert.True(throwingStore.WasCalled)
+    End Function
+
     ' ============ Direction + exclusion-set wiring ============
 
     <Fact>
@@ -1055,6 +1086,7 @@ Public Class PipelineOrchestratorTests
             Optional sink As INotificationSink = Nothing,
             Optional hooks As IPipelineHooks = Nothing,
             Optional embeddingClient As IEmbeddingClient = Nothing,
+            Optional conditionNormalizer As ConditionNormalizer = Nothing,
             Optional options As OrchestratorOptions = Nothing) As PipelineOrchestrator
         Return New PipelineOrchestrator(
                 gateway:=gateway,
@@ -1063,6 +1095,7 @@ Public Class PipelineOrchestratorTests
                 notificationSink:=sink,
                 hooks:=hooks,
                 embeddingClient:=embeddingClient,
+                conditionNormalizer:=conditionNormalizer,
                 options:=If(options, New OrchestratorOptions With {.LlmConcurrencyCap = 4}))
     End Function
 
@@ -1547,6 +1580,54 @@ Friend NotInheritable Class ThrowingGateway
 
     Public Function GetAuditLogForExportAsync(filter As AuditLogFilter, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of AuditEntry)) _
             Implements IPostgresGateway.GetAuditLogForExportAsync
+        Throw New NotImplementedException()
+    End Function
+
+End Class
+
+' Condition-concept store stand-in that throws on the one call
+' ConditionNormalizer.EnsureForStudyAsync actually makes (GetUnseenConditionsForStudyAsync),
+' so orchestrator tests can drive the best-effort swallow path for the condition
+' normalizer hook without a real Postgres-backed store. Other members are never
+' reached from that path and throw NotImplementedException if they ever are.
+Friend NotInheritable Class ThrowingConditionConceptStore
+    Implements IConditionConceptStore
+
+    Public Property WasCalled As Boolean = False
+
+    Public Function GetUnseenConditionsForStudyAsync(
+            nctId As String, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
+            Implements IConditionConceptStore.GetUnseenConditionsForStudyAsync
+        WasCalled = True
+        Throw New InvalidOperationException("condition-concept store deliberately failed")
+    End Function
+
+    Public Function LookupExactAsync(
+            conditionNorm As String, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of UmlsCandidate)) _
+            Implements IConditionConceptStore.LookupExactAsync
+        Throw New NotImplementedException()
+    End Function
+
+    Public Function UpsertAsync(
+            entry As ConditionConceptEntry, cancellationToken As CancellationToken) As Task _
+            Implements IConditionConceptStore.UpsertAsync
+        Throw New NotImplementedException()
+    End Function
+
+    Public Function SeedFromCorpusAsync(cancellationToken As CancellationToken) As Task(Of Integer) _
+            Implements IConditionConceptStore.SeedFromCorpusAsync
+        Throw New NotImplementedException()
+    End Function
+
+    Public Function GetPendingAsync(
+            limit As Integer, force As Boolean, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConditionConceptEntry)) _
+            Implements IConditionConceptStore.GetPendingAsync
+        Throw New NotImplementedException()
+    End Function
+
+    Public Function CountPendingAsync(
+            force As Boolean, cancellationToken As CancellationToken) As Task(Of Integer) _
+            Implements IConditionConceptStore.CountPendingAsync
         Throw New NotImplementedException()
     End Function
 

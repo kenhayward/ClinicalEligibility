@@ -373,6 +373,7 @@ Public Module CompositionRoot
                             notificationSink:=sp.GetRequiredService(Of INotificationSink)(),
                             hooks:=sp.GetRequiredService(Of IPipelineHooks)(),
                             embeddingClient:=sp.GetRequiredService(Of IEmbeddingClient)(),
+                            conditionNormalizer:=sp.GetRequiredService(Of ConditionNormalizer)(),
                             options:=sp.GetRequiredService(Of IOptions(Of OrchestratorOptions)).Value,
                             logger:=sp.GetRequiredService(Of ILogger(Of PipelineOrchestrator))())
                 End Function)
