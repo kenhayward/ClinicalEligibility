@@ -395,6 +395,28 @@ Public Module CompositionRoot
                             embeddingClient:=sp.GetRequiredService(Of IEmbeddingClient)())
                 End Function)
 
+        ' The condition dictionary store is stateless over one data source, like
+        ' UmlsMetathesaurusStore, so a singleton is right; the normalizer and job
+        ' are scoped to match the other tool jobs (they ride the scoped UMLS cache).
+        services.AddSingleton(Of IConditionConceptStore)(
+                Function(sp As IServiceProvider) As IConditionConceptStore
+                    Dim outputDs = sp.GetRequiredKeyedService(Of NpgsqlDataSource)(OutputDataSourceKey)
+                    Return New ConditionConceptStore(outputDs)
+                End Function)
+        services.AddScoped(Of ConditionNormalizer)(
+                Function(sp As IServiceProvider) As ConditionNormalizer
+                    Return New ConditionNormalizer(
+                            store:=sp.GetRequiredService(Of IConditionConceptStore)(),
+                            umlsClient:=sp.GetRequiredService(Of IUmlsClient)(),
+                            scorer:=sp.GetRequiredService(Of UmlsMatchScorer)())
+                End Function)
+        services.AddScoped(Of IConditionNormalizeJob)(
+                Function(sp As IServiceProvider) As IConditionNormalizeJob
+                    Return New ConditionNormalizeJob(
+                            store:=sp.GetRequiredService(Of IConditionConceptStore)(),
+                            normalizer:=sp.GetRequiredService(Of ConditionNormalizer)())
+                End Function)
+
         ' The framework's per-request HttpClient logging (the
         ' "Start/Send/Received/End processing HTTP request" lines AddHttpClient wires at
         ' Information on every LLM / UMLS / embedding call) is now suppressed by LOG

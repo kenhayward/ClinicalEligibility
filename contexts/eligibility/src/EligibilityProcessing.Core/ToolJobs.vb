@@ -15,6 +15,7 @@ Imports System.Threading.Tasks
 Public Enum ToolJobKind
     NormalizeUmls
     EmbedStudies
+    NormalizeConditions
 End Enum
 
 ''' <summary>
@@ -36,6 +37,17 @@ End Class
 Public NotInheritable Class EmbedStudiesOptions
     Public Property Concurrency As Integer = 1
     Public Property Model As String = ""
+End Class
+
+''' <summary>
+''' Options for the condition-normalization job (mirrors the CLI
+''' <c>normalize-conditions</c> switches). <see cref="Count"/> of 0 means "every
+''' pending row".
+''' </summary>
+Public NotInheritable Class NormalizeConditionsOptions
+    Public Property Count As Integer = 0
+    Public Property DryRun As Boolean
+    Public Property Force As Boolean
 End Class
 
 ''' <summary>One named metric value - a stat tile in the web UI, and a fragment of
@@ -101,6 +113,13 @@ Public NotInheritable Class EmbedCounters
     Public Failed As Integer
 End Class
 
+''' <summary>Counters for the condition-normalization job.</summary>
+Public NotInheritable Class ConditionCounters
+    Public Done As Integer
+    Public Resolved As Integer
+    Public Unresolved As Integer
+End Class
+
 ''' <summary>The UMLS concept-normalization maintenance job.</summary>
 Public Interface IUmlsNormalizeJob
     ''' <summary>Distinct unresolved residue concepts still eligible for
@@ -123,6 +142,17 @@ Public Interface IStudyEmbeddingJob
     ''' periodic snapshots through <paramref name="progress"/> (may be Nothing).
     ''' Returns the final counters.</summary>
     Function RunAsync(options As EmbedStudiesOptions, progress As IProgress(Of ToolJobSnapshot), cancellationToken As CancellationToken) As Task(Of EmbedCounters)
+End Interface
+
+''' <summary>The condition-normalization maintenance job.</summary>
+Public Interface IConditionNormalizeJob
+    ''' <summary>Dictionary rows still needing resolution (the Tools tab count).</summary>
+    Function CountRemainingAsync(force As Boolean, cancellationToken As CancellationToken) As Task(Of Integer)
+
+    ''' <summary>Seed the dictionary from the corpus, then resolve pending rows
+    ''' highest study_count first, reporting snapshots through
+    ''' <paramref name="progress"/> (may be Nothing).</summary>
+    Function RunAsync(options As NormalizeConditionsOptions, progress As IProgress(Of ToolJobSnapshot), cancellationToken As CancellationToken) As Task(Of ConditionCounters)
 End Interface
 
 ''' <summary>Shared background progress pump: periodically rebuilds a snapshot from
