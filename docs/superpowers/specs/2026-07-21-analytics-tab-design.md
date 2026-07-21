@@ -326,12 +326,27 @@ Per the project rule, every new function ships with tests and verification is
 2. A cohort profile for a large cohort (diabetes, 32,162 trials) renders in
    under 2s warm.
 3. The lift view for a diabetes cohort (C0011849, hierarchy included, minimum
-   support 10) ranks **hypertension, BMI, cardiovascular disease, smoking and
-   HbA1c above Adult and informed consent**, and Adult's lift column reads
-   approximately 1.1. This is the end-to-end check that the tab does the job it
-   exists for, and it fails if the sort key is reverted to lift - measured, the
-   lift ordering puts "insulin pen injector" and "recurrent severe manic
-   episodes" in the top ten.
+   support 10) satisfies all three of:
+   - **hypertension ranks above Adult** (measured +14.2pp against +7.4pp);
+   - **Adult's lift column reads approximately 1.1**, marking it as boilerplate
+     even though its excess sits mid-table;
+   - **no saturating-noise concept** - "insulin pen injector", "recurrent severe
+     manic episodes" and their kind - appears in the top ten. This clause is what
+     fails if the sort key is ever reverted to lift.
+
+   **Correction, recorded rather than quietly amended.** An earlier draft of this
+   criterion also claimed BMI, cardiovascular disease, smoking and HbA1c would
+   rank above Adult. That contradicted this spec's own measurements in section
+   4.2: Adult scores +7.4pp, above BMI (+7.1), cardiovascular disease (+6.2),
+   smoking (+6.1) and HbA1c (+5.3).
+
+   The draft criterion confused two different claims. Adult genuinely IS more
+   over-represented in diabetes trials than those concepts are - it is simply not
+   more *interesting*, which is what its lift of 1.1 conveys and what the excess
+   column alone cannot. Ranking by excess does not remove boilerplate from the
+   table; it stops boilerplate monopolising the top (lift put eleven saturated
+   ties there) and pairs every row with the second number needed to judge it. The
+   criterion now tests what the design actually delivers.
 4. No view displays a label sourced from `eligibility.concept`.
 5. `database_schema.md` updated in the same commit as the migration.
 6. `version.json` bumped to **0.5.0** - a migration requires at least a MINOR
