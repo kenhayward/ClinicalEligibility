@@ -98,6 +98,16 @@ else
             Cohort: @Model.CohortSize trial@(Model.CohortSize == 1 ? "" : "s")
             of @Model.CorpusSize corpus trial@(Model.CorpusSize == 1 ? "" : "s").
         </p>
+        <p>
+            <a asp-action="ExportLift"
+               asp-route-kind="@Model.Kind"
+               asp-route-value="@Model.Value"
+               asp-route-includeDescendants="@Model.IncludeDescendants"
+               asp-route-minSupport="@Model.MinimumSupport"
+               class="btn btn-outline-secondary btn-sm">
+                Export CSV
+            </a>
+        </p>
         <div class="table-responsive">
             <table class="table table-sm table-striped table-hover">
                 <thead>

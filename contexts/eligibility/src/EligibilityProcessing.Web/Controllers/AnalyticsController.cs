@@ -1,4 +1,5 @@
 using EligibilityProcessing.Core;
+using EligibilityProcessing.Web.Export;
 using EligibilityProcessing.Web.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -59,34 +60,7 @@ public class AnalyticsController : Controller
 
         try
         {
-            var cohort = new AnalyticsCohort(cohortKind, trimmedValue, includeDescendants);
-
-            var cohortSize = await _analytics.GetCohortSizeAsync(cohort, cancellationToken);
-            var cohortProfile = await _analytics.GetCohortProfileAsync(cohort, cancellationToken);
-            var definingCodes = await _analytics.GetCohortDefiningCodesAsync(cohort, cancellationToken);
-
-            // The corpus baseline MUST come from the cache, never a direct
-            // gateway call - it is corpus-wide and identical for every request,
-            // so ICorpusReadCache is the whole point of memoising it (~2s query).
-            var corpusProfile = await _corpusReads.GetCorpusConceptProfileAsync(cancellationToken);
-
-            // LiftCalculator.Build only ever looks up a name for a code that
-            // appears in cohortCounts, so only those codes need resolving.
-            var cohortCodes = cohortProfile
-                .Select(c => c.ConceptCode)
-                .Where(c => !string.IsNullOrEmpty(c))
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-            var prefNames = await _analytics.GetPrefNamesAsync(cohortCodes, cancellationToken);
-
-            var rows = LiftCalculator.Build(
-                cohortCounts: cohortProfile,
-                corpusCounts: corpusProfile.Counts,
-                cohortSize: cohortSize,
-                corpusSize: corpusProfile.TrialCount,
-                prefNames: prefNames,
-                definingCodes: new HashSet<string>(definingCodes, StringComparer.Ordinal),
-                minimumSupport: minimumSupport);
+            var result = await ComputeLiftAsync(cohortKind, trimmedValue, includeDescendants, minimumSupport, cancellationToken);
 
             return View(new AnalyticsLiftViewModel
             {
@@ -94,9 +68,9 @@ public class AnalyticsController : Controller
                 Value = trimmedValue,
                 IncludeDescendants = includeDescendants,
                 MinimumSupport = minimumSupport,
-                Rows = rows,
-                CohortSize = cohortSize,
-                CorpusSize = corpusProfile.TrialCount
+                Rows = result.Rows,
+                CohortSize = result.CohortSize,
+                CorpusSize = result.CorpusSize
             });
         }
         catch (Exception ex)
@@ -111,6 +85,98 @@ public class AnalyticsController : Controller
                 ErrorMessage = ex.Message
             });
         }
+    }
+
+    /// <summary>
+    /// Exports the current lift view as CSV - the same cohort/profile/lift
+    /// computation as <see cref="Index"/> (via <see cref="ComputeLiftAsync"/>),
+    /// so the file always matches what was on screen. Unlike the view action,
+    /// a missing value or a failure returns an HTTP error rather than an
+    /// inline-error view - there is no page for a file download to render
+    /// into (same convention as <c>AuthoringController.ExportCriteria</c>).
+    /// </summary>
+    public async Task<IActionResult> ExportLift(
+        CancellationToken cancellationToken,
+        string? kind = null,
+        string? value = null,
+        bool includeDescendants = false,
+        int? minSupport = null)
+    {
+        var cohortKind = ParseCohortKind(kind);
+        var trimmedValue = value?.Trim() ?? "";
+        var minimumSupport = minSupport.GetValueOrDefault(LiftCalculator.DefaultMinimumSupport);
+
+        if (trimmedValue.Length == 0)
+        {
+            return BadRequest(new { error = "A cohort value is required to export." });
+        }
+
+        try
+        {
+            var result = await ComputeLiftAsync(cohortKind, trimmedValue, includeDescendants, minimumSupport, cancellationToken);
+
+            var csv = AnalyticsLiftCsv.Build(result.Rows);
+            var name = $"Analytics_Lift_{LiftFileNamePart(cohortKind, trimmedValue)}.csv";
+            return ExportResults.CsvFile(csv, name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to export analytics lift for {Kind}={Value}", cohortKind, trimmedValue);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// The cohort/profile/lift computation shared by <see cref="Index"/> and
+    /// <see cref="ExportLift"/> - extracted so the export always runs the
+    /// same query path as the view rather than a second hand-maintained copy.
+    /// </summary>
+    private async Task<(IReadOnlyList<ConceptLiftRow> Rows, int CohortSize, int CorpusSize)> ComputeLiftAsync(
+        AnalyticsCohortKind cohortKind,
+        string trimmedValue,
+        bool includeDescendants,
+        int minimumSupport,
+        CancellationToken cancellationToken)
+    {
+        var cohort = new AnalyticsCohort(cohortKind, trimmedValue, includeDescendants);
+
+        var cohortSize = await _analytics.GetCohortSizeAsync(cohort, cancellationToken);
+        var cohortProfile = await _analytics.GetCohortProfileAsync(cohort, cancellationToken);
+        var definingCodes = await _analytics.GetCohortDefiningCodesAsync(cohort, cancellationToken);
+
+        // The corpus baseline MUST come from the cache, never a direct
+        // gateway call - it is corpus-wide and identical for every request,
+        // so ICorpusReadCache is the whole point of memoising it (~2s query).
+        var corpusProfile = await _corpusReads.GetCorpusConceptProfileAsync(cancellationToken);
+
+        // LiftCalculator.Build only ever looks up a name for a code that
+        // appears in cohortCounts, so only those codes need resolving.
+        var cohortCodes = cohortProfile
+            .Select(c => c.ConceptCode)
+            .Where(c => !string.IsNullOrEmpty(c))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var prefNames = await _analytics.GetPrefNamesAsync(cohortCodes, cancellationToken);
+
+        var rows = LiftCalculator.Build(
+            cohortCounts: cohortProfile,
+            corpusCounts: corpusProfile.Counts,
+            cohortSize: cohortSize,
+            corpusSize: corpusProfile.TrialCount,
+            prefNames: prefNames,
+            definingCodes: new HashSet<string>(definingCodes, StringComparer.Ordinal),
+            minimumSupport: minimumSupport);
+
+        return (rows, cohortSize, corpusProfile.TrialCount);
+    }
+
+    // Filename-safe slug for the export download name: the cohort kind plus a
+    // sanitised value (concept code, phase, or year). Falls back to just the
+    // kind when the value has no letters or digits at all.
+    private static string LiftFileNamePart(AnalyticsCohortKind kind, string value)
+    {
+        var slug = new string((value ?? "").Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray()).Trim('_');
+        return string.IsNullOrEmpty(slug) ? kind.ToString() : $"{kind}_{slug}";
     }
 
     /// <summary>
