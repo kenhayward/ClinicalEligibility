@@ -1,7 +1,17 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 3, "build": 1, "releaseDate": "2026-07-21" },
+  "current": { "major": 0, "minor": 4, "build": 0, "releaseDate": "2026-07-21" },
   "releases": [
+    {
+      "version": "0.4.0",
+      "releaseDate": "2026-07-21",
+      "enhancements": [
+        "AACT condition strings are now mapped to UMLS concepts in a new dictionary table, so corpus analytics can slice by condition. Previously the raw field held 91,600 distinct strings with COVID-19 and Covid19 counted separately.",
+        "New Tools card and CLI verb normalize-conditions backfill the dictionary, highest-volume strings first, so a cancelled run still leaves the corpus better off.",
+        "The pipeline fills the dictionary as it processes trials, so new condition strings resolve without a manual step."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.3.1",
       "releaseDate": "2026-07-21",
