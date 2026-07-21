@@ -1,3 +1,4 @@
+Imports System.Collections.Concurrent
 Imports System.Collections.Generic
 Imports System.Linq
 Imports System.Threading
@@ -7,12 +8,15 @@ Imports Xunit
 
 Public Class ConditionNormalizeJobTests
 
-    ' Minimal store that serves a fixed pending list and records upserts.
+    ' Minimal store that serves a fixed pending list and records upserts. Upserted
+    ' is a ConcurrentBag (not a List) because RunAsync now dispatches entries
+    ' through Parallel.ForEachAsync - a plain List would race under concurrency
+    ' and make the test itself the source of flakiness, not the code under test.
     Private NotInheritable Class JobStore
         Implements IConditionConceptStore
 
         Public Property Pending As New List(Of ConditionConceptEntry)
-        Public Property Upserted As New List(Of ConditionConceptEntry)
+        Public ReadOnly Property Upserted As New ConcurrentBag(Of ConditionConceptEntry)
         Public Property SeedCalls As Integer
         Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of ConditionCandidate))
         Public Property LastForce As Boolean?
@@ -118,6 +122,69 @@ Public Class ConditionNormalizeJobTests
         Await NewJob(store).RunAsync(New NormalizeConditionsOptions(), Nothing, CancellationToken.None)
 
         Assert.Equal(42, store.Upserted.Single().StudyCount)
+    End Function
+
+    ' The test most likely to catch a missing Interlocked: 50 pending entries (a
+    ' mix that resolves and does not) run at Concurrency=4. If any of
+    ' counters.Done/.Resolved/.Unresolved were plain "+= 1" instead of
+    ' Interlocked.Increment, concurrent writers would lose updates and the sums
+    ' below would come up short (flakily, not deterministically) under load.
+    <Fact>
+    Public Async Function Run_counters_are_correct_under_concurrency() As Task
+        Dim store As New JobStore()
+        Const total As Integer = 50
+        For i = 1 To total
+            Dim norm = $"condition{i}"
+            store.Pending.Add(New ConditionConceptEntry With {
+                    .ConditionNorm = norm, .RawForm = norm, .StudyCount = total - i})
+            ' Every third entry resolves via an exact tier-1a match; the rest miss
+            ' the store's ExactByNorm dictionary and fall through to tier 2, where
+            ' NullUmlsClient always returns no candidates - i.e. unresolved.
+            If i Mod 3 = 0 Then
+                store.ExactByNorm(norm) = {New ConditionCandidate($"C{i}", norm, "SNOMEDCT_US", hasHierarchy:=False)}
+            End If
+        Next
+
+        Dim counters = Await NewJob(store).RunAsync(
+                New NormalizeConditionsOptions With {.Concurrency = 4}, Nothing, CancellationToken.None)
+
+        Assert.Equal(total, counters.Done)
+        Assert.Equal(counters.Done, counters.Resolved + counters.Unresolved)
+        Dim expectedResolved = Enumerable.Range(1, total).Count(Function(i) i Mod 3 = 0)
+        Assert.Equal(expectedResolved, counters.Resolved)
+        Assert.Equal(total - expectedResolved, counters.Unresolved)
+        Assert.Equal(total, store.Upserted.Count)
+    End Function
+
+    <Fact>
+    Public Async Function DryRun_writes_nothing_when_concurrency_greater_than_one() As Task
+        Dim store As New JobStore()
+        For i = 1 To 10
+            Dim norm = $"cond{i}"
+            store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = norm, .RawForm = norm, .StudyCount = i})
+        Next
+        store.ExactByNorm("cond1") = {New ConditionCandidate("C1", "cond1", "SNOMEDCT_US", hasHierarchy:=False)}
+
+        Dim counters = Await NewJob(store).RunAsync(
+                New NormalizeConditionsOptions With {.Concurrency = 8, .DryRun = True}, Nothing, CancellationToken.None)
+
+        Assert.Equal(10, counters.Done)
+        Assert.Empty(store.Upserted)
+        Assert.Equal(0, store.SeedCalls)
+    End Function
+
+    <Fact>
+    Public Async Function SeedFromCorpus_runs_exactly_once_regardless_of_concurrency() As Task
+        Dim store As New JobStore()
+        For i = 1 To 20
+            Dim norm = $"seedcond{i}"
+            store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = norm, .RawForm = norm, .StudyCount = i})
+        Next
+
+        Await NewJob(store).RunAsync(
+                New NormalizeConditionsOptions With {.Concurrency = 8}, Nothing, CancellationToken.None)
+
+        Assert.Equal(1, store.SeedCalls)
     End Function
 
     <Fact>

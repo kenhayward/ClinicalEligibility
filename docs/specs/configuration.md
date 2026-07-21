@@ -24,7 +24,7 @@ higher:
 
 | # | Source | Holds | Committed? |
 |---|--------|-------|------------|
-| 1 | `contexts/eligibility/src/Shared/appsettings.Shared.json` | Cross-host non-secret defaults: `Llm`, `LlmNormalize`, `Embedding`, `Umls`, `Pipeline`, `Notifications:Smtp` (structure only) | ✅ yes |
+| 1 | `contexts/eligibility/src/Shared/appsettings.Shared.json` | Cross-host non-secret defaults: `Llm`, `LlmNormalize`, `Embedding`, `Umls`, `Pipeline`, `Postgres` (MaxPoolSize only), `Notifications:Smtp` (structure only) | ✅ yes |
 | 2 | per-host `appsettings.json` | Host-specific keys: `Webhook`, `Web`, `AllowedHosts`, `Logging` | ✅ yes |
 | 3 | `appsettings.{Environment}.json` | Local-dev / per-environment non-secret overrides | ✅ yes |
 | 4 | User secrets (`dotnet user-secrets`) | Secrets, dev only | ❌ no (outside repo) |
@@ -357,12 +357,12 @@ leaving on.
 
 ---
 
-### `Postgres` — data-source tuning (non-secret) · (section absent from JSON → all code defaults)
+### `Postgres` — data-source tuning (non-secret) · (only `MaxPoolSize` is in JSON; the rest are code defaults)
 
-The connection strings themselves are secrets (see below); these two tunables
-shape how the source (AACT) connection behaves during trial selection. Both have
-code defaults in `PostgresOptions`; add a `Postgres` section to a host's
-`appsettings.json` only to override.
+The connection strings themselves are secrets (see below); these tunables
+shape how the source (AACT) and output connections behave. All have code
+defaults in `PostgresOptions`; `appsettings.Shared.json` sets `MaxPoolSize`
+explicitly (see below) - add the rest to a host's `appsettings.json` only to override.
 
 | Key | Default | Notes |
 |-----|---------|-------|
@@ -371,6 +371,7 @@ code defaults in `PostgresOptions`; add a `Postgres` section to a host's
 | `OutputCommandTimeoutSeconds` | `600` | Command timeout applied to the **output** data source. Same failure mode as the source ceiling above, and demonstrated by `load-umls`: loading all of MRSTY inserts ~3.9M rows in one statement and takes ~60s, so Npgsql's 30s default killed it with `Exception while reading from stream`. Normal pipeline writes are per-trial and nowhere near this - the ceiling only matters for bulk maintenance paths. `0` means no timeout. |
 | `SlowCommandLogThresholdMs` | `0` | Only log SQL commands taking at least this many ms; `0` logs every command. Only relevant once SQL logging is on. Without it, SQL logging is unusable: one entry per command, thousands per batch. Applies only to commands Npgsql has **timed** - the Debug "Executing command" event has no duration yet and always passes through, because it is the only trace a **hung** query leaves. |
 | `InterruptedStudyThresholdHours` | `6` | Age beyond which an `eligibility_study` row still at `status='running'` is assumed orphaned by a killed host and reconciled to `interrupted` at **web-host startup**. `0` or less disables the sweep. **Do not lower this below ~3h without also lowering `Llm:TimeoutSeconds`/`Llm:RetryCount`:** one trial's worst case is ~2h (3 LLM attempts x 1200s, per-attempt, doubled by reasoning escalation), and the CLI can process trials against the same database concurrently with no cross-process lock - the age gate is the only thing keeping the sweep off live rows. A trial wrongly swept self-corrects when it finishes. |
+| `MaxPoolSize` | `20` (also set explicitly in `appsettings.Shared.json`) | Upper bound on Npgsql's connection pool, applied to BOTH the source and output data sources via `NpgsqlConnectionStringBuilder.MaxPoolSize` (same mechanism as the two `CommandTimeout` settings above). Npgsql's own default is 100; left uncapped, a concurrent maintenance job (e.g. `normalize-conditions --concurrency`) could open enough connections to exceed the Postgres server's own `max_connections`, breaking every OTHER client on that instance, not just this job. Capping here means a job with more concurrency than pooled connections queues for a free connection instead of erroring if `max_connections` is ever lowered again. |
 
 > Fast selection also relies on a partial index, `ix_eligibilities_selectable_nct_id`,
 > that the app creates on startup when the source and output databases are

@@ -192,6 +192,7 @@ internal sealed class ToolJobRunner : BackgroundService
                      + (n.Force ? ", force" : "");
             case ToolJobKind.NormalizeConditions when r.Conditions is { } c:
                 return (c.Count > 0 ? $"count {c.Count}" : "all pending")
+                     + $", concurrency {c.Concurrency}"
                      + (c.DryRun ? ", dry-run" : "")
                      + (c.Force ? ", force" : "");
             case ToolJobKind.EmbedStudies when r.Embed is { } e:

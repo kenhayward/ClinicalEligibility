@@ -174,7 +174,8 @@ Public Module CompositionRoot
                     ' Npgsql's 30s default, and the default surfaces as a fatal
                     ' "Exception while reading from stream". 0 => no timeout.
                     Dim sourceConn As New NpgsqlConnectionStringBuilder(opts.ConnectionStringSource) With {
-                            .CommandTimeout = Math.Max(0, opts.SourceCommandTimeoutSeconds)}
+                            .CommandTimeout = Math.Max(0, opts.SourceCommandTimeoutSeconds),
+                            .MaxPoolSize = Math.Max(1, opts.MaxPoolSize)}
                     Return BuildDataSource(sourceConn.ConnectionString, sp, opts.SlowCommandLogThresholdMs)
                 End Function)
         services.AddKeyedSingleton(Of NpgsqlDataSource)(OutputDataSourceKey,
@@ -187,7 +188,8 @@ Public Module CompositionRoot
                     ' stream". Pipeline writes are per-trial and unaffected; this
                     ' only matters for the bulk maintenance paths.
                     Dim outputConn As New NpgsqlConnectionStringBuilder(opts.ConnectionStringOutput) With {
-                            .CommandTimeout = Math.Max(0, opts.OutputCommandTimeoutSeconds)}
+                            .CommandTimeout = Math.Max(0, opts.OutputCommandTimeoutSeconds),
+                            .MaxPoolSize = Math.Max(1, opts.MaxPoolSize)}
                     Return BuildDataSource(outputConn.ConnectionString, sp, opts.SlowCommandLogThresholdMs)
                 End Function)
 
