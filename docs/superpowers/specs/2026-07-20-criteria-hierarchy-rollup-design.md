@@ -133,17 +133,57 @@ No migration. Version bump: **build only**.
 **Level 0 is exactly today's behaviour.** The feature is opt-in and the default
 path is unchanged, so there is no regression surface for existing users.
 
-At level > 0 the group key becomes the **furthest ancestor within that level** -
-that is, the ancestor with the greatest `min_distance` where
-`min_distance <= rollupLevel`. When the concept has no ancestors at all, the key
-falls back to the concept's own CUI.
+### The rollup rule (CORRECTED 2026-07-21 - the original was wrong)
 
-**"At most N levels up", not "exactly N levels up".** The distinction matters:
-SNOMED chains are uneven, so at level 2 one concept may have ancestors at
-distances 1 and 2 while a sibling has only distance 1. Requiring an exact match
-would leave the shallower concept unrolled and prevent the merge that the user
-asked for. Taking the furthest ancestor within the bound merges both, and is
-still bounded and predictable.
+**Superseded rule, recorded so it is not reintroduced.** This spec originally
+said the group key should be the *furthest ancestor within the level* - the
+greatest `min_distance <= rollupLevel`. **Measurement against the loaded
+hierarchy disproved it.**
+
+SNOMED is multi-parent, so a concept typically has *many* ancestors at a given
+distance, not one. Measured for the two diabetes types at `min_distance <= 2`:
+
+| Concept | Ancestors at distance 1 | Ancestors at distance 2 |
+|---|---|---|
+| Type 1 DM (`C0011854`) | 3 (incl. Diabetes mellitus) | 8 |
+| Type 2 DM (`C0011860`) | 1 (Diabetes mellitus) | 5 |
+
+"Furthest within N" resolves to `ORDER BY min_distance DESC LIMIT 1`, which
+picks **arbitrarily among ties**. In practice Type 1 selected *Digestive system
+disease* and Type 2 selected *Endocrinopathy*, so the two **failed to merge at
+level 2 despite merging perfectly at level 1**. The rule made rollup worse as
+the level rose, which is backwards.
+
+### The rule that ships
+
+**The group key is the ancestor shared by the most of the concepts actually
+being clustered.** The choice is made once across the result set, not
+independently per concept - which is precisely why siblings cannot diverge.
+
+For the concepts in one clustering run:
+
+1. **Candidates**: every ancestor reachable at `min_distance <= rollupLevel`
+   from any of those concepts.
+2. **Rank by coverage**: the number of distinct clustered concepts that ancestor
+   covers, descending.
+3. **Tiebreak on specificity**: fewer global descendants in
+   `umls.concept_ancestor` wins - the tightest grouping that still covers the
+   same set.
+4. **Final tiebreak on CUI**, so the result is deterministic.
+
+A concept that no chosen ancestor covers keeps its own CUI as the key, so it
+still appears as its own cluster rather than vanishing.
+
+Validated against the loaded hierarchy. For Type 1 DM, Type 2 DM and Impaired
+glucose tolerance at level 2, four ancestors tie at 3 concepts covered, and
+specificity separates them correctly:
+
+| Ancestor | Global descendants | Rank |
+|---|---|---|
+| Hyperglycaemia | 119 | **chosen** |
+| Disorder of glucose metabolism | 136 | |
+| Disorder of glucose regulation | 186 | |
+| Endocrinopathy | 1,211 | last - correctly rejected as too broad |
 
 Unresolved criteria are untouched - no CUI, no hierarchy, so they keep the
 lowercased-text fallback they have today.
@@ -207,9 +247,13 @@ The source note records the rollup explicitly, e.g.
 
 - Level 0 output is byte-identical to today's.
 - Two criteria whose CUIs share a parent merge at level 1 and not at level 0.
-- **Uneven chains merge**: a concept with ancestors at distances 1 and 2 and a
-  sibling with only distance 1 land in the same cluster at level 2. This is the
-  "at most N levels" rule, and an exact-distance implementation would fail it.
+- **Multi-parent concepts still merge**: two concepts that share one ancestor but
+  differ in their other ancestors land in the same cluster. This is the case the
+  superseded "furthest ancestor" rule failed, and the regression test for it -
+  Type 1 and Type 2 diabetes must cluster together at level 2, not split.
+- **The chosen ancestor is the most specific among equally-covering
+  candidates**, so a cluster is not labelled with an over-broad concept.
+- The choice is deterministic: the same input yields the same ancestor every run.
 - A CUI with no SNOMED edges does not roll up at any level, and its cluster is
   still returned.
 - `GetClusterRecordsAsync` returns the union of member rows for a rolled-up
@@ -230,10 +274,15 @@ between that and a shipped feature.
 concepts cannot roll up. The UI column showing which rows rolled up is what turns
 that from "inconsistent" into "incomplete, and here is where".
 
-**Rollup can over-merge.** At level 3 the ancestor may be so broad that the
-cluster stops being a useful criterion ("Disease"). This is why the level is
-user-controlled and defaults to 0 - the user sees the effect and chooses. No
-attempt is made to pick a level automatically.
+**Rollup can over-merge.** A broad ancestor can make a cluster useless
+("Endocrinopathy" spans 1,211 concepts). Two things bound this: the level is
+user-controlled and defaults to 0, and the specificity tiebreak prefers the
+tightest ancestor that covers the same concepts. No attempt is made to pick a
+level automatically.
+
+**Only levels 1 and 2 exist.** Part 1 loaded the hierarchy at depth 2, chosen by
+measurement - depth 3 ran at 97% of the command timeout. The UI must not offer
+a level the data cannot serve.
 
 ## Out of scope
 
