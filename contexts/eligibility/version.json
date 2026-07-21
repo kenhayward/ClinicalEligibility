@@ -1,7 +1,16 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 2, "build": 1, "releaseDate": "2026-07-20" },
+  "current": { "major": 0, "minor": 3, "build": 0, "releaseDate": "2026-07-20" },
   "releases": [
+    {
+      "version": "0.3.0",
+      "releaseDate": "2026-07-20",
+      "enhancements": [
+        "A SNOMED-derived concept hierarchy is now loaded (umls.concept_ancestor), so a later change can roll related eligibility criteria up to a broader shared concept when clustering. Nothing uses it yet - this release only builds the data.",
+        "load-umls gained --hierarchy-only, which rebuilds the hierarchy alone from MRREL.RRF without touching atoms, concepts or semantic types."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.2.1",
       "releaseDate": "2026-07-20",

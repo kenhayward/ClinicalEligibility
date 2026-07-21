@@ -163,6 +163,29 @@ Public Class CliCompositionTests
         Assert.False(Program.IsSemanticTypesOnly({"load-umls", "--semantic-types-only-please"}))
     End Sub
 
+    ' ============ load-umls --hierarchy-only ============
+
+    <Fact>
+    Public Sub HierarchyOnly_flag_is_detected()
+        Assert.True(Program.IsHierarchyOnly({"load-umls", "--rrf-dir", "D:\umls", "--hierarchy-only"}))
+    End Sub
+
+    <Fact>
+    Public Sub HierarchyOnly_flag_is_case_insensitive()
+        Assert.True(Program.IsHierarchyOnly({"load-umls", "--HIERARCHY-ONLY"}))
+    End Sub
+
+    <Fact>
+    Public Sub HierarchyOnly_is_false_when_absent()
+        Assert.False(Program.IsHierarchyOnly({"load-umls", "--rrf-dir", "D:\umls"}))
+    End Sub
+
+    ' Guards against a prefix match treating an unrelated flag as the real one.
+    <Fact>
+    Public Sub HierarchyOnly_does_not_match_a_different_flag()
+        Assert.False(Program.IsHierarchyOnly({"load-umls", "--hierarchy-only-please"}))
+    End Sub
+
     ' ============ helpers ============
 
     Private Shared Function BuildServices() As IServiceCollection

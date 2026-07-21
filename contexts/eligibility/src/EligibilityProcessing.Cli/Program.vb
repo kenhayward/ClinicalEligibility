@@ -506,6 +506,10 @@ Module Program
             cancellationToken As CancellationToken) As Task(Of Integer)
 
         Dim semanticTypesOnly = IsSemanticTypesOnly(args)
+        Dim hierarchyOnly = IsHierarchyOnly(args)
+        ' Default 2, chosen by measurement: depth 3 runs at 97% of the 600s
+        ' output command timeout, and rollups above level 2 tend toward "Disease".
+        Dim maxDepth = ParseOptionInt(args, "--max-depth", 2)
 
         Dim rrfDir = GetOptionValue(args, "--rrf-dir")
         If String.IsNullOrWhiteSpace(rrfDir) Then
@@ -514,12 +518,18 @@ Module Program
         End If
         Dim mrconso = Path.Combine(rrfDir, "MRCONSO.RRF")
         Dim mrsty = Path.Combine(rrfDir, "MRSTY.RRF")
-        ' --semantic-types-only never reads MRCONSO, so do not demand it: the
-        ' repair must work from an MRSTY-only directory.
-        If Not semanticTypesOnly AndAlso Not File.Exists(mrconso) Then
+        Dim mrrel = Path.Combine(rrfDir, "MRREL.RRF")
+        ' Each restricted path demands only the file it actually reads, so a
+        ' repair or rebuild can run from a partial release directory.
+        If Not semanticTypesOnly AndAlso Not hierarchyOnly AndAlso Not File.Exists(mrconso) Then
             System.Console.Error.WriteLine($"Not found: {mrconso}") : Return 1
         End If
-        If Not File.Exists(mrsty) Then System.Console.Error.WriteLine($"Not found: {mrsty}") : Return 1
+        If Not hierarchyOnly AndAlso Not File.Exists(mrsty) Then
+            System.Console.Error.WriteLine($"Not found: {mrsty}") : Return 1
+        End If
+        If hierarchyOnly AndAlso Not File.Exists(mrrel) Then
+            System.Console.Error.WriteLine($"Not found: {mrrel}") : Return 1
+        End If
 
         Dim store = appHost.Services.GetRequiredService(Of UmlsMetathesaurusStore)()
         Dim opts = appHost.Services.GetRequiredService(Of IOptions(Of UmlsOptions))().Value
@@ -529,6 +539,39 @@ Module Program
         Dim concepts As Long = 0
 
         System.Console.WriteLine($"Loading UMLS from {rrfDir}")
+
+        If hierarchyOnly Then
+            ' Rebuild path: leave atoms, concepts and semantic types untouched.
+            ' Only umls.concept_ancestor is replaced, so this is safe against a
+            ' live system - nothing reads the hierarchy until the clustering
+            ' rollup ships.
+            System.Console.WriteLine("  --hierarchy-only: rebuilding umls.concept_ancestor from MRREL.RRF")
+            System.Console.WriteLine($"    streaming {mrrel} (~6 GB; the whole file is read to filter it)")
+            System.Console.WriteLine($"    SNOMEDCT_US is-a edges, transitive closure to {maxDepth} level(s)")
+            Dim closureRows = Await store.LoadConceptHierarchyAsync(
+                    UmlsRrfReader.ReadRelations(mrrel), maxDepth, cancellationToken).ConfigureAwait(False)
+            System.Console.WriteLine($"    {closureRows:N0} closure rows")
+
+            Dim hstats = Await store.GetHierarchyStatsAsync(cancellationToken).ConfigureAwait(False)
+            System.Console.WriteLine("  " & hstats.Describe())
+
+            ' A vocabulary this size cannot legitimately yield a handful of rows.
+            ' The semantic-type incident - a partial load that went unnoticed for
+            ' two months - is why this is a hard failure and not a log line.
+            ' Exit 4 matches LOAD INCOMPLETE: DispatchAsync already uses
+            ' 1 = usage, 2 = unhandled exception, 3 = cancelled.
+            If hstats.ClosureRows < 1000 Then
+                System.Console.Error.WriteLine("HIERARCHY LOAD INCOMPLETE - " & hstats.Describe())
+                System.Console.Error.WriteLine(
+                    "SNOMED's is-a graph yields millions of closure rows. A result this small means " &
+                    "MRREL was not read, the SAB filter matched nothing, or the file is truncated.")
+                Return 4
+            End If
+
+            System.Console.WriteLine("Done.")
+            Return 0
+        End If
+
         If semanticTypesOnly Then
             ' Repair path: leave umls.atom and umls.concept untouched. Safe to run
             ' against a live system - LoadSemanticTypesAsync stages into a temp
@@ -990,6 +1033,14 @@ Module Program
         Return args.Any(Function(a) String.Equals(a, "--semantic-types-only", StringComparison.OrdinalIgnoreCase))
     End Function
 
+    ''' <summary>
+    ''' True when --hierarchy-only is present. Exact match (not a prefix), so an
+    ''' unrelated flag beginning with the same text does not trigger it.
+    ''' </summary>
+    Friend Function IsHierarchyOnly(args As String()) As Boolean
+        Return args.Any(Function(a) String.Equals(a, "--hierarchy-only", StringComparison.OrdinalIgnoreCase))
+    End Function
+
     Friend Function ParseStudyCount(args As String()) As Integer
         ' Look for --count N or --count=N. Default 10 per spec section 2.1.
         For i = 1 To args.Length - 1
@@ -1032,6 +1083,7 @@ Module Program
         System.Console.WriteLine("      at --concurrency (default Pipeline:LlmConcurrencyCap).")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli load-umls --rrf-dir <path> [--semantic-types-only]")
+        System.Console.WriteLine("                                       [--hierarchy-only] [--max-depth N]")
         System.Console.WriteLine("      Load a curated UMLS subset into the umls.* schema from an unpacked")
         System.Console.WriteLine("      release (MRCONSO.RRF + MRSTY.RRF). Full rebuild per release. Backs the")
         System.Console.WriteLine("      Umls:Backend=postgres resolver. Run on a build box, then pg_dump/restore.")
@@ -1039,6 +1091,10 @@ Module Program
         System.Console.WriteLine("      leaving atoms and concepts untouched. Use to repair a partial load")
         System.Console.WriteLine("      without rebuilding healthy tables; safe against a running system.")
         System.Console.WriteLine("      Exits 4 if semantic types do not cover every loaded concept.")
+        System.Console.WriteLine("      --hierarchy-only rebuilds umls.concept_ancestor alone from MRREL.RRF")
+        System.Console.WriteLine("      (SNOMED is-a edges, transitive closure to --max-depth levels, default 2).")
+        System.Console.WriteLine("      Leaves atoms, concepts and semantic types untouched. Exits 4 if the")
+        System.Console.WriteLine("      result is implausibly small. MRREL.RRF is ~6 GB and is read in full.")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli backfill-semantic-types [--batch-size N] [--dry-run]")
         System.Console.WriteLine("      Fill public.eligibility.semantic_type_tuis (and rewrite semantic_type into")

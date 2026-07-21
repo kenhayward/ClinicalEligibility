@@ -541,6 +541,141 @@ Public Class UmlsMetathesaurusIntegrationTests
         Assert.Equal(1L, Await store.CountUnmappableEligibilityRowsAsync(CancellationToken.None))
     End Function
 
+    ' ============ LoadConceptHierarchyAsync ============
+
+    Private Shared Function Edge(child As String, parent As String) As ConceptEdgeRow
+        Return New ConceptEdgeRow With {.ChildCui = child, .ParentCui = parent}
+    End Function
+
+    Private Async Function AncestorDistanceAsync(descendant As String, ancestor As String) As Task(Of Integer)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT min_distance FROM umls.concept_ancestor
+                                    WHERE descendant_cui = @d AND ancestor_cui = @a"
+                cmd.Parameters.AddWithValue("d", descendant)
+                cmd.Parameters.AddWithValue("a", ancestor)
+                Dim v = Await cmd.ExecuteScalarAsync()
+                Return If(v Is Nothing, -1, Convert.ToInt32(v))
+            End Using
+        End Using
+    End Function
+
+    ' THE ORIENTATION TEST. An inverted hierarchy does not error - it rolls
+    ' concepts up to MORE SPECIFIC terms and reads as merely odd. This asserts a
+    ' real, checkable fact: Type 2 Diabetes is a kind of Diabetes Mellitus, not
+    ' the other way round.
+    <SkippableFact>
+    Public Async Function LoadConceptHierarchy_puts_the_specific_concept_under_the_general_one() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        ' C0011860 = Type 2 Diabetes Mellitus, C0011849 = Diabetes Mellitus
+        Await store.LoadConceptHierarchyAsync({Edge("C0011860", "C0011849")}, 5, CancellationToken.None)
+
+        Assert.Equal(1, Await AncestorDistanceAsync("C0011860", "C0011849"))
+        Assert.Equal(-1, Await AncestorDistanceAsync("C0011849", "C0011860"))
+    End Function
+
+    <SkippableFact>
+    Public Async Function LoadConceptHierarchy_computes_transitive_closure() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        ' A -> B -> C -> D (each child under its parent)
+        Await store.LoadConceptHierarchyAsync({
+            Edge("C0000001", "C0000002"),
+            Edge("C0000002", "C0000003"),
+            Edge("C0000003", "C0000004")}, 5, CancellationToken.None)
+
+        Assert.Equal(1, Await AncestorDistanceAsync("C0000001", "C0000002"))
+        Assert.Equal(2, Await AncestorDistanceAsync("C0000001", "C0000003"))
+        Assert.Equal(3, Await AncestorDistanceAsync("C0000001", "C0000004"))
+    End Function
+
+    ' A DAG gives several paths between the same pair. "Roll up at most N levels"
+    ' is measured against the SHORTEST, so the minimum is what gets stored.
+    <SkippableFact>
+    Public Async Function LoadConceptHierarchy_keeps_the_minimum_distance() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        ' A reaches D directly (1) and via B, C (3).
+        Await store.LoadConceptHierarchyAsync({
+            Edge("C0000001", "C0000004"),
+            Edge("C0000001", "C0000002"),
+            Edge("C0000002", "C0000003"),
+            Edge("C0000003", "C0000004")}, 5, CancellationToken.None)
+
+        Assert.Equal(1, Await AncestorDistanceAsync("C0000001", "C0000004"))
+    End Function
+
+    <SkippableFact>
+    Public Async Function LoadConceptHierarchy_stops_at_max_depth() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        ' A six-link chain, loaded with maxDepth 5.
+        Await store.LoadConceptHierarchyAsync({
+            Edge("C0000001", "C0000002"), Edge("C0000002", "C0000003"),
+            Edge("C0000003", "C0000004"), Edge("C0000004", "C0000005"),
+            Edge("C0000005", "C0000006"), Edge("C0000006", "C0000007")}, 5, CancellationToken.None)
+
+        Assert.Equal(5, Await AncestorDistanceAsync("C0000001", "C0000006"))
+        Assert.Equal(-1, Await AncestorDistanceAsync("C0000001", "C0000007"))
+    End Function
+
+    ' UMLS stores each edge twice (PAR and its CHD inverse), so the reader emits
+    ' duplicates by design. Loading must converge, not fail on the PK.
+    <SkippableFact>
+    Public Async Function LoadConceptHierarchy_tolerates_duplicate_edges() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Dim rows = Await store.LoadConceptHierarchyAsync({
+            Edge("C0011860", "C0011849"),
+            Edge("C0011860", "C0011849")}, 5, CancellationToken.None)
+
+        Assert.Equal(1L, rows)
+    End Function
+
+    ' A full reload must replace, not accumulate - otherwise a retired edge from
+    ' last year's release survives forever.
+    <SkippableFact>
+    Public Async Function LoadConceptHierarchy_replaces_previous_contents() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.LoadConceptHierarchyAsync({Edge("C0000001", "C0000002")}, 5, CancellationToken.None)
+        Await store.LoadConceptHierarchyAsync({Edge("C0000003", "C0000004")}, 5, CancellationToken.None)
+
+        Assert.Equal(-1, Await AncestorDistanceAsync("C0000001", "C0000002"))
+        Assert.Equal(1, Await AncestorDistanceAsync("C0000003", "C0000004"))
+    End Function
+
+    <SkippableFact>
+    Public Async Function HierarchyStats_report_rows_descendants_and_depth() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+
+        Await store.LoadConceptHierarchyAsync({
+            Edge("C0000001", "C0000002"),
+            Edge("C0000002", "C0000003")}, 5, CancellationToken.None)
+
+        Dim stats = Await store.GetHierarchyStatsAsync(CancellationToken.None)
+
+        Assert.Equal(3L, stats.ClosureRows)          ' 1->2, 2->3, 1->3
+        Assert.Equal(2L, stats.DistinctDescendants)  ' C0000001, C0000002
+        Assert.Equal(2, stats.MaxDistance)
+        Assert.Contains("3", stats.Describe())
+    End Function
+
     Private Shared Function Atom(cui As String, str As String, sab As String, tty As String, pref As Boolean) As AtomRow
         Return New AtomRow With {
             .Cui = cui, .Str = str, .StrNorm = UmlsMetathesaurusStore.NormalizeConcept(str),

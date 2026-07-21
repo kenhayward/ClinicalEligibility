@@ -19,10 +19,11 @@ release.
 - A **UTS / UMLS license** (the same account whose API key backs the `rest`
   backend). Required to download the Metathesaurus.
 - Download the **UMLS Full Release** for the target version from the NLM and
-  unpack it. You only need two files from the `META` directory:
-  `MRCONSO.RRF` (atoms) and `MRSTY.RRF` (semantic types). The loader filters by
-  source vocabulary itself (`Umls:SourceVocabularies`), so you can point it at
-  the full `MRCONSO.RRF` — no MetamorphoSys subsetting required.
+  unpack it. Three files from the `META` directory are used:
+  `MRCONSO.RRF` (atoms), `MRSTY.RRF` (semantic types), and `MRREL.RRF`
+  (relationships, for the concept hierarchy - **~6 GB**, read in full). The
+  loader filters by source vocabulary itself (`Umls:SourceVocabularies`), so you
+  can point it at the full `MRCONSO.RRF` — no MetamorphoSys subsetting required.
 - `pg_dump` / `pg_restore` (Postgres client tools) on the build box.
 
 ---
@@ -165,3 +166,41 @@ schema in place. Nothing else changes.
 
 `--semantic-types-only` is the exception: it repairs `umls.semantic_type` in
 place without touching atoms or concepts, and is not part of a release refresh.
+
+### Concept hierarchy (umls.concept_ancestor)
+
+Separate from atoms/concepts/semantic types, built from `MRREL.RRF`:
+
+```powershell
+dotnet run --project contexts/eligibility/src/EligibilityProcessing.Cli -- `
+  load-umls --rrf-dir D:\umls\2025AB\META --hierarchy-only --max-depth 2
+```
+
+Keeps SNOMEDCT_US is-a edges (`REL IN ('PAR','CHD')`) and computes the transitive
+closure to `--max-depth` levels. Measured on 2025AB (2026-07-20):
+
+| Depth | Closure rows | Wall clock |
+|---|---|---|
+| 1 | 1,147,513 | 47s |
+| **2 (shipped)** | **3,919,516** | **285s** |
+| 3 | 8,486,869 | 583s |
+
+**Depth 2 is the shipped default.** Depth 3 runs at 97% of the 600s
+`Postgres:OutputCommandTimeoutSeconds` budget - too close to reload safely - and
+rollups above level 2 tend toward "Disease" anyway. Coverage: 53.4% of the
+corpus's distinct CUIs have at least one ancestor (65% of resolved rows).
+
+Leaves atoms, concepts and semantic types untouched, so it is safe against a live
+system. Exits 4 if the closure is implausibly small (MRREL not read, SAB filter
+matched nothing, or a truncated file).
+
+Verify orientation after loading - an inverted hierarchy does not error, it rolls
+concepts up to *more specific* terms:
+
+```sql
+-- Type 2 Diabetes should be UNDER Diabetes Mellitus (small integer), not above (0).
+SELECT min_distance FROM umls.concept_ancestor
+ WHERE descendant_cui='C0011860' AND ancestor_cui='C0011849';
+SELECT count(*) FROM umls.concept_ancestor
+ WHERE descendant_cui='C0011849' AND ancestor_cui='C0011860';
+```

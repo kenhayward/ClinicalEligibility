@@ -3471,6 +3471,32 @@ ON CONFLICT (tui) DO NOTHING"
         Assert.Equal(0L, page.TotalRows)
     End Function
 
+    ' ============ V23 schema ============
+
+    <SkippableFact>
+    Public Async Function V23_adds_concept_ancestor_table() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+SELECT (SELECT count(*) FROM information_schema.tables
+         WHERE table_schema='umls' AND table_name='concept_ancestor')            AS has_table,
+       (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema='umls' AND table_name='concept_ancestor'
+           AND column_name='min_distance' AND data_type='integer')               AS has_distance,
+       (SELECT count(*) FROM pg_indexes
+         WHERE schemaname='umls' AND indexname='ix_umls_concept_ancestor_ancestor') AS has_ancestor_ix"
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Await reader.ReadAsync()
+                    Assert.Equal(1L, reader.GetInt64(0))
+                    Assert.Equal(1L, reader.GetInt64(1))
+                    Assert.Equal(1L, reader.GetInt64(2))
+                End Using
+            End Using
+        End Using
+    End Function
+
     ' ============ V22 schema ============
 
     <SkippableFact>

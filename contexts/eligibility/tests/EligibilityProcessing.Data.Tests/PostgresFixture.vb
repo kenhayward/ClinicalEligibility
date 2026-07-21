@@ -81,6 +81,7 @@ Public NotInheritable Class PostgresFixture
                     umls.concept,
                     umls.semantic_type,
                     umls.semantic_type_dim,
+                    umls.concept_ancestor,
                     umls.concept_normalization,
                     ctgov.eligibilities,
                     ctgov.studies,

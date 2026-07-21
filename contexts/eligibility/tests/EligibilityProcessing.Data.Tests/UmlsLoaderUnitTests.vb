@@ -102,6 +102,101 @@ Public Class UmlsLoaderUnitTests
         End Try
     End Sub
 
+    ' ============ ReadRelations (MRREL) ============
+    '
+    ' MRREL.REL describes the relationship of the SECOND concept to the first:
+    ' (CUI1, 'PAR', CUI2) means CUI2 is the parent of CUI1. 'CHD' is the inverse.
+    ' Both are normalised to a single (child, parent) orientation here.
+    '
+    ' Getting this backwards does not error - it produces a hierarchy that rolls
+    ' concepts up to MORE SPECIFIC terms, which reads as merely odd. These tests
+    ' pin the mapping against a real, checkable fact.
+
+    <Fact>
+    Public Sub ReadRelations_maps_PAR_with_cui2_as_parent()
+        ' C0011860 (Type 2 Diabetes) PAR C0011849 (Diabetes Mellitus)
+        Dim path = WriteTempRrf({
+            "C0011860|A1|SCUI|PAR|C0011849|A2|SCUI||R1||SNOMEDCT_US|SNOMEDCT_US|||N||"})
+        Try
+            Dim rows = UmlsRrfReader.ReadRelations(path).ToList()
+            Assert.Single(rows)
+            Assert.Equal("C0011860", rows(0).ChildCui)
+            Assert.Equal("C0011849", rows(0).ParentCui)
+        Finally
+            File.Delete(path)
+        End Try
+    End Sub
+
+    <Fact>
+    Public Sub ReadRelations_maps_CHD_as_the_inverse()
+        ' (CUI1, 'CHD', CUI2) means CUI2 is the CHILD of CUI1.
+        Dim path = WriteTempRrf({
+            "C0011849|A1|SCUI|CHD|C0011860|A2|SCUI||R1||SNOMEDCT_US|SNOMEDCT_US|||N||"})
+        Try
+            Dim rows = UmlsRrfReader.ReadRelations(path).ToList()
+            Assert.Single(rows)
+            Assert.Equal("C0011860", rows(0).ChildCui)
+            Assert.Equal("C0011849", rows(0).ParentCui)
+        Finally
+            File.Delete(path)
+        End Try
+    End Sub
+
+    ' Only SNOMED edges. UMLS asserts no cross-source hierarchy, so mixing
+    ' vocabularies produces incoherent ancestry and can introduce cycles.
+    <Fact>
+    Public Sub ReadRelations_skips_other_source_vocabularies()
+        Dim path = WriteTempRrf({
+            "C0000005|A1|SCUI|PAR|C0036775|A2|SCUI||R1||MSH|MSH|||N||",
+            "C0011860|A1|SCUI|PAR|C0011849|A2|SCUI||R1||SNOMEDCT_US|SNOMEDCT_US|||N||"})
+        Try
+            Dim rows = UmlsRrfReader.ReadRelations(path).ToList()
+            Assert.Single(rows)
+            Assert.Equal("C0011860", rows(0).ChildCui)
+        Finally
+            File.Delete(path)
+        End Try
+    End Sub
+
+    ' RB/RN (broader/narrower) are not the is-a hierarchy and must not be treated
+    ' as one - the very first line of the real MRREL.RRF is an RB row.
+    <Fact>
+    Public Sub ReadRelations_skips_non_hierarchical_relationships()
+        Dim path = WriteTempRrf({
+            "C0000005|A13433185|SCUI|RB|C0036775|A7466261|SCUI||R86000559||SNOMEDCT_US|SNOMEDCT_US|||N||",
+            "C0000005|A1|SCUI|SY|C0036775|A2|SCUI||R2||SNOMEDCT_US|SNOMEDCT_US|||N||"})
+        Try
+            Assert.Empty(UmlsRrfReader.ReadRelations(path).ToList())
+        Finally
+            File.Delete(path)
+        End Try
+    End Sub
+
+    ' A concept is not its own parent. Self-edges would make the closure loop.
+    <Fact>
+    Public Sub ReadRelations_skips_self_relationships()
+        Dim path = WriteTempRrf({
+            "C0011860|A1|SCUI|PAR|C0011860|A2|SCUI||R1||SNOMEDCT_US|SNOMEDCT_US|||N||"})
+        Try
+            Assert.Empty(UmlsRrfReader.ReadRelations(path).ToList())
+        Finally
+            File.Delete(path)
+        End Try
+    End Sub
+
+    <Fact>
+    Public Sub ReadRelations_skips_malformed_and_blank_rows()
+        Dim path = WriteTempRrf({
+            "too|few|fields",
+            "|A1|SCUI|PAR|C0011849|A2|SCUI||R1||SNOMEDCT_US|SNOMEDCT_US|||N||",
+            "C0011860|A1|SCUI|PAR||A2|SCUI||R1||SNOMEDCT_US|SNOMEDCT_US|||N||"})
+        Try
+            Assert.Empty(UmlsRrfReader.ReadRelations(path).ToList())
+        Finally
+            File.Delete(path)
+        End Try
+    End Sub
+
     Private Shared Function WriteTempRrf(lines As IEnumerable(Of String)) As String
         Dim tempPath = Path.GetTempFileName()
         File.WriteAllLines(tempPath, lines)

@@ -445,6 +445,7 @@ ORDER BY cui,
             Case "umls.atom" : safe = "umls.atom"
             Case "umls.concept" : safe = "umls.concept"
             Case "umls.semantic_type" : safe = "umls.semantic_type"
+            Case "umls.concept_ancestor" : safe = "umls.concept_ancestor"
             Case Else : Throw New ArgumentException($"Unknown umls table: {qualifiedTable}", NameOf(qualifiedTable))
         End Select
         Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
@@ -452,6 +453,114 @@ ORDER BY cui,
                 cmd.CommandText = $"SELECT count(*) FROM {safe}"
                 Dim scalar = Await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(False)
                 Return Convert.ToInt64(scalar)
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' Replaces umls.concept_ancestor from the given is-a edges, computing the
+    ''' transitive closure up to <paramref name="maxDepth"/> levels. Returns the
+    ''' final row count.
+    ''' </summary>
+    ''' <remarks>
+    ''' Closure is computed IN POSTGRES with a recursive CTE, not in .NET: the
+    ''' edge set is large and the intermediate result larger, so materialising it
+    ''' client-side would be pointless traffic.
+    '''
+    ''' Precomputed rather than walked at query time because criteria clustering
+    ''' runs interactively over the criteria of up to 200 studies - a recursive
+    ''' walk per cluster would be felt. This is also OMOP's own design, which is
+    ''' what keeps a later swap to CONCEPT_ANCESTOR cheap.
+    '''
+    ''' TRUNCATE, not upsert: a vocabulary release retires edges, and an additive
+    ''' load would keep them forever.
+    ''' </remarks>
+    Public Async Function LoadConceptHierarchyAsync(
+            rows As IEnumerable(Of ConceptEdgeRow),
+            maxDepth As Integer,
+            cancellationToken As CancellationToken) As Task(Of Long)
+
+        If maxDepth < 1 Then Throw New ArgumentOutOfRangeException(NameOf(maxDepth), "maxDepth must be >= 1")
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "DROP TABLE IF EXISTS pg_temp.mrrel_stage;
+CREATE TEMP TABLE mrrel_stage (child_cui text, parent_cui text)"
+                Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+
+            Using writer = Await conn.BeginBinaryImportAsync(
+                    "COPY pg_temp.mrrel_stage (child_cui, parent_cui) FROM STDIN (FORMAT BINARY)",
+                    cancellationToken).ConfigureAwait(False)
+                For Each r In rows
+                    cancellationToken.ThrowIfCancellationRequested()
+                    Await writer.StartRowAsync(cancellationToken).ConfigureAwait(False)
+                    Await writer.WriteAsync(r.ChildCui, NpgsqlDbType.Text, cancellationToken).ConfigureAwait(False)
+                    Await writer.WriteAsync(r.ParentCui, NpgsqlDbType.Text, cancellationToken).ConfigureAwait(False)
+                Next
+                Await writer.CompleteAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+
+            ' Dedupe into a distinct edge set first. UMLS stores every edge twice
+            ' (PAR and its CHD inverse), so the raw stage is ~2x, and feeding
+            ' duplicates into the recursion multiplies work at every level.
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+DROP TABLE IF EXISTS pg_temp.edges;
+CREATE TEMP TABLE edges AS
+SELECT DISTINCT child_cui, parent_cui FROM pg_temp.mrrel_stage
+ WHERE child_cui <> parent_cui;
+CREATE INDEX ON pg_temp.edges (child_cui);"
+                Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+
+            Using cmd = conn.CreateCommand()
+                ' UNION (not UNION ALL) prunes paths already seen, which is what
+                ' stops a DAG with many routes between two concepts from
+                ' exploding. min(dist) then collapses remaining duplicates to the
+                ' shortest path.
+                cmd.CommandText = "
+TRUNCATE umls.concept_ancestor;
+
+WITH RECURSIVE closure AS (
+    SELECT child_cui AS descendant_cui, parent_cui AS ancestor_cui, 1 AS dist
+      FROM pg_temp.edges
+    UNION
+    SELECT c.descendant_cui, e.parent_cui, c.dist + 1
+      FROM closure c
+      JOIN pg_temp.edges e ON e.child_cui = c.ancestor_cui
+     WHERE c.dist < @max_depth
+)
+INSERT INTO umls.concept_ancestor (descendant_cui, ancestor_cui, min_distance)
+SELECT descendant_cui, ancestor_cui, min(dist)
+  FROM closure
+ WHERE descendant_cui <> ancestor_cui
+ GROUP BY descendant_cui, ancestor_cui"
+                cmd.Parameters.Add(New NpgsqlParameter("max_depth", NpgsqlDbType.Integer) With {.Value = maxDepth})
+                Await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(False)
+            End Using
+        End Using
+
+        Return Await CountAsync("umls.concept_ancestor", cancellationToken).ConfigureAwait(False)
+    End Function
+
+    ''' <summary>Shape of the loaded hierarchy, for the load-completeness guard.</summary>
+    Public Async Function GetHierarchyStatsAsync(
+            cancellationToken As CancellationToken) As Task(Of UmlsHierarchyStats)
+
+        Const Sql As String = "
+SELECT count(*),
+       count(DISTINCT descendant_cui),
+       COALESCE(max(min_distance), 0)
+  FROM umls.concept_ancestor"
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = Sql
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                    Return New UmlsHierarchyStats(reader.GetInt64(0), reader.GetInt64(1), reader.GetInt32(2))
+                End Using
             End Using
         End Using
     End Function
@@ -605,6 +714,33 @@ Public Structure SemanticTypeRow
     Public Property Tui As String
     Public Property Sty As String
 End Structure
+
+''' <summary>One is-a edge for bulk loading the concept hierarchy.
+''' ChildCui is always the more specific concept.</summary>
+Public Structure ConceptEdgeRow
+    Public Property ChildCui As String
+    Public Property ParentCui As String
+End Structure
+
+''' <summary>Outcome of <see cref="UmlsMetathesaurusStore.GetHierarchyStatsAsync"/>.</summary>
+Public NotInheritable Class UmlsHierarchyStats
+
+    Public Sub New(closureRows As Long, distinctDescendants As Long, maxDistance As Integer)
+        Me.ClosureRows = closureRows
+        Me.DistinctDescendants = distinctDescendants
+        Me.MaxDistance = maxDistance
+    End Sub
+
+    Public ReadOnly Property ClosureRows As Long
+    Public ReadOnly Property DistinctDescendants As Long
+    Public ReadOnly Property MaxDistance As Integer
+
+    Public Function Describe() As String
+        Return $"umls.concept_ancestor holds {ClosureRows:N0} rows over " &
+               $"{DistinctDescendants:N0} descendant concepts, max depth {MaxDistance}."
+    End Function
+
+End Class
 
 ''' <summary>
 ''' Outcome of <see cref="UmlsMetathesaurusStore.GetLoadCompletenessAsync"/>.
