@@ -263,10 +263,12 @@ ORDER BY yr.y"
     ''' Everything the concept lookup view shows about one CUI, or Nothing when
     ''' the code is unrecognised in umls.concept - a user can type anything
     ''' into the URL, so this must return a clean absence rather than throw.
-    ''' Runs four statements on one connection: the summary row (2.5ms), the
-    ''' phase breakdown (88ms), the example criteria, and finally the corpus
-    ''' trial-count denominator (reusing GetCorpusTrialCountAsync so the "share
-    ''' of corpus" figure is computed identically to the rest of the tab).
+    ''' Runs three statements on one connection: the summary row (2.5ms), the
+    ''' phase breakdown (88ms), and the example criteria. The corpus
+    ''' trial-count denominator is then obtained by calling
+    ''' GetCorpusTrialCountAsync, which opens its own separate connection -
+    ''' only the computation is reused, so the "share of corpus" figure is
+    ''' computed identically to the rest of the tab.
     ''' </summary>
     Public Async Function GetConceptSummaryAsync(conceptCode As String,
                                                  cancellationToken As CancellationToken) _

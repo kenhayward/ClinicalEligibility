@@ -61,7 +61,16 @@ else
 
                 <dl class="row mb-0 small">
                     <dt class="col-sm-3 text-muted">Semantic type</dt>
-                    <dd class="col-sm-9">@(string.IsNullOrEmpty(summary.SemanticTypes) ? "—" : summary.SemanticTypes)</dd>
+                    <dd class="col-sm-9">
+                        @if (string.IsNullOrEmpty(summary.SemanticTypes))
+                        {
+                            <text>&mdash;</text>
+                        }
+                        else
+                        {
+                            @summary.SemanticTypes
+                        }
+                    </dd>
 
                     <dt class="col-sm-3 text-muted">Ancestors</dt>
                     <dd class="col-sm-9">

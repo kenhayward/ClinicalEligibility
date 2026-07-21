@@ -458,9 +458,13 @@ VALUES ('NCT001', 'PHASE3', DATE '2023-05-01', ARRAY['Thing'])"
         Await _fixture.ResetAsync()
         Await SeedConceptAsync("C_SUM", "Type 2 Diabetes Mellitus")
         Await SeedSemanticTypeAsync("C_SUM", "T047", "Disease or Syndrome")
-        ' One ancestor (C_SUM is the descendant) and one descendant (C_SUM is
-        ' the ancestor) - the two concept_ancestor counts must not be swapped.
+        ' Asymmetric counts on purpose: two ancestors (C_SUM is the
+        ' descendant in both rows) and one descendant (C_SUM is the
+        ' ancestor) - if AncestorCount/DescendantCount were ever swapped in
+        ' production, these two distinct values (2 vs 1) would catch it,
+        ' whereas equal counts would not.
         Await SeedAncestorAsync("C_SUM", "C_BROADER")
+        Await SeedAncestorAsync("C_SUM", "C_BROADER2")
         Await SeedAncestorAsync("C_NARROWER", "C_SUM")
         Await SeedRowAsync("NCT001", "Inclusion", "C_SUM", "diabetes")
         Await SeedRowAsync("NCT002", "Inclusion", "C_SUM", "type 2 diabetes")
@@ -475,7 +479,7 @@ VALUES ('NCT001', 'PHASE3', DATE '2023-05-01', ARRAY['Thing'])"
         Assert.Equal("Type 2 Diabetes Mellitus", summary.PrefName)
         Assert.Equal("SNOMEDCT_US", summary.RootSource)
         Assert.Equal("Disease or Syndrome", summary.SemanticTypes)
-        Assert.Equal(1, summary.AncestorCount)
+        Assert.Equal(2, summary.AncestorCount)
         Assert.Equal(1, summary.DescendantCount)
         Assert.Equal(2, summary.Trials)
     End Function

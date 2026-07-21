@@ -303,6 +303,39 @@ public class WebTests : IClassFixture<WebTests.Factory>
     }
 
     [Fact]
+    public async Task Analytics_concept_returns_200_with_empty_form_chrome()
+    {
+        // No code: AnalyticsController.Concept returns the empty form without
+        // touching IAnalyticsGateway, so this stays a clean 200 even with the
+        // factory's unreachable Postgres connection strings - same shape as
+        // Analytics_index_returns_200_with_empty_form_chrome above. This is
+        // also the only automated coverage that actually renders
+        // Concept.cshtml through Razor - the controller-level tests never
+        // execute the view.
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Analytics/Concept");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Analytics - Concept", body);
+        Assert.Contains("Concept code (CUI)", body);
+    }
+
+    [Fact]
+    public async Task Analytics_concept_renders_inline_error_when_gateway_unavailable()
+    {
+        // With a code supplied, the controller queries the gateway - it hits
+        // placeholder Postgres and throws; the controller must catch and
+        // surface inline rather than 500, same shape as Trend above.
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Analytics/Concept?code=C0011849");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Backend unavailable", body);
+    }
+
+    [Fact]
     public async Task Analysis_with_nctId_renders_inline_error_when_gateway_unavailable()
     {
         // With an nctId the controller queries the gateway — first the new
