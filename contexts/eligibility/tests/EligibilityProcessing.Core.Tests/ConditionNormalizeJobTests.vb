@@ -102,6 +102,11 @@ Public Class ConditionNormalizeJobTests
 
         Assert.Equal(1, counters.Resolved)
         Assert.Empty(store.Upserted)
+        ' Dry-run must not write ANYTHING, including the seed. SeedFromCorpusAsync
+        ' inserts missing rows and rewrites raw_form/study_count on existing ones,
+        ' so it counts as a write and must be skipped entirely, not just gated at
+        ' the per-row upsert.
+        Assert.Equal(0, store.SeedCalls)
     End Function
 
     <Fact>

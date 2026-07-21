@@ -39,8 +39,17 @@ Public NotInheritable Class ConditionNormalizeJob
             As Task(Of ConditionCounters) Implements IConditionNormalizeJob.RunAsync
 
         ' Seed first so newly processed trials' conditions are present, and so
-        ' raw_form / study_count reflect the current corpus before we order by them.
-        Await _store.SeedFromCorpusAsync(cancellationToken).ConfigureAwait(False)
+        ' raw_form / study_count reflect the current corpus before we order by
+        ' them. Skipped entirely on --dry-run: dry-run must not write ANYTHING,
+        ' and SeedFromCorpusAsync inserts missing dictionary rows and rewrites
+        ' raw_form/study_count on existing ones - that is itself a write, even
+        ' though it happens before the per-row DryRun guard further down.
+        ' Consequence: on a never-seeded public.condition_concept, a dry run
+        ' reports nothing to do (GetPendingAsync sees an empty table) rather than
+        ' previewing what a real run would seed and resolve.
+        If Not options.DryRun Then
+            Await _store.SeedFromCorpusAsync(cancellationToken).ConfigureAwait(False)
+        End If
 
         Dim limit = If(options.Count > 0, options.Count, AllPending)
         Dim pending = Await _store.GetPendingAsync(limit, options.Force, cancellationToken).ConfigureAwait(False)

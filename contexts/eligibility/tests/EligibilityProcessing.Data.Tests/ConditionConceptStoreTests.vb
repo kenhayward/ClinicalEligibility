@@ -196,6 +196,89 @@ ON CONFLICT (cui) DO UPDATE SET pref_name = excluded.pref_name"
     End Function
 
     <SkippableFact>
+    Public Async Function SeedFromCorpus_counts_a_study_once_even_when_it_lists_two_casings() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' A single trial listing two casings of the same condition in its own
+        ' conditions array - exactly the duplication this feature exists to
+        ' eliminate - must not double-count that trial toward study_count.
+        ' study_count is corpus frequency (count(DISTINCT nct_id) per normalized
+        ' condition), not a count of (study, raw-form) pairs.
+        Await SeedStudyAsync("NCT001", {"COPD", "Copd"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT study_count FROM public.condition_concept WHERE condition_norm = 'copd'"
+                Assert.Equal(1, CInt(Await cmd.ExecuteScalarAsync()))
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function SeedFromCorpus_clears_resolved_at_when_raw_form_casing_changes() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' First seed with only a casing the scorer's acronym term does not fire
+        ' on ("Nsclc" rather than "NSCLC"). Simulate the per-trial hook resolving
+        ' it (as-is) and stamping resolved_at - unresolved, because the acronym
+        ' term never fired on "Nsclc".
+        Await SeedStudyAsync("NCT001", {"Nsclc"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+        Await store.UpsertAsync(New ConditionConceptEntry With {
+                .ConditionNorm = "nsclc", .RawForm = "Nsclc",
+                .MatchTier = ConditionMatchTier.Unresolved, .MatchScore = 0.0
+            }, CancellationToken.None)
+
+        ' Confirmed resolved (attempted) and not pending.
+        Assert.Empty(Await store.GetPendingAsync(10, force:=False, cancellationToken:=CancellationToken.None))
+
+        ' More trials mention the correct uppercase "NSCLC", enough to outrank
+        ' "Nsclc" for raw_form on the next seed.
+        Await SeedStudyAsync("NCT002", {"NSCLC"})
+        Await SeedStudyAsync("NCT003", {"NSCLC"})
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+
+        ' raw_form changed ("Nsclc" -> "NSCLC"), so resolved_at must be cleared -
+        ' the row is resolvable now (the acronym term will fire) and must not be
+        ' skipped forever without --force.
+        Dim pending = Await store.GetPendingAsync(10, force:=False, cancellationToken:=CancellationToken.None)
+        Assert.Single(pending)
+        Assert.Equal("nsclc", pending(0).ConditionNorm)
+        Assert.Equal("NSCLC", pending(0).RawForm)
+    End Function
+
+    <SkippableFact>
+    Public Async Function SeedFromCorpus_does_not_clear_resolved_at_when_raw_form_is_unchanged() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' Otherwise every seed would re-open the whole corpus for resolution,
+        ' making --force meaningless and re-doing UMLS lookups on every run.
+        Await SeedStudyAsync("NCT001", {"COPD"})
+        Await SeedStudyAsync("NCT002", {"COPD"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+        Await store.UpsertAsync(New ConditionConceptEntry With {
+                .ConditionNorm = "copd", .RawForm = "COPD",
+                .ConceptCode = "C0024117", .UmlsName = "COPD",
+                .MatchTier = ConditionMatchTier.Exact, .MatchScore = 1.0
+            }, CancellationToken.None)
+
+        Assert.Empty(Await store.GetPendingAsync(10, force:=False, cancellationToken:=CancellationToken.None))
+
+        ' Re-seed with more mentions of the SAME casing - raw_form stays "COPD".
+        Await SeedStudyAsync("NCT003", {"COPD"})
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+
+        Assert.Empty(Await store.GetPendingAsync(10, force:=False, cancellationToken:=CancellationToken.None))
+    End Function
+
+    <SkippableFact>
     Public Async Function SeedFromCorpus_is_idempotent() As Task
         Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
         Await _fixture.ResetAsync()

@@ -150,19 +150,52 @@ per_form AS (
     WHERE btrim(cond) <> ''
     GROUP BY 1, 2
 ),
+-- Separate from per_form: a single trial can list two casings of the same
+-- condition in its own conditions array (e.g. ""COVID-19"" and ""Covid19""
+-- both normalizing the same way after case-folding) - exactly the
+-- duplication this table exists to eliminate. Summing per_form's per-(norm,
+-- raw) cnt per norm would count that one trial twice toward study_count.
+-- study_count is corpus frequency (see database_schema.md) - count each
+-- distinct nct_id once per norm, regardless of how many raw casings it used.
+per_norm_studies AS (
+    SELECT regexp_replace(btrim(lower(cond)), '\s+', ' ', 'g') AS norm,
+           count(DISTINCT nct_id) AS study_count
+    FROM mentions
+    WHERE btrim(cond) <> ''
+    GROUP BY 1
+),
 rolled AS (
     SELECT norm,
-           (array_agg(raw ORDER BY cnt DESC, raw COLLATE ""C"" ASC))[1] AS raw_form,
-           sum(cnt)::int AS study_count
+           (array_agg(raw ORDER BY cnt DESC, raw COLLATE ""C"" ASC))[1] AS raw_form
     FROM per_form
     GROUP BY norm
 ),
 ins AS (
     INSERT INTO public.condition_concept (condition_norm, raw_form, study_count, match_tier)
-    SELECT norm, raw_form, study_count, 'unresolved' FROM rolled
+    SELECT r.norm, r.raw_form, s.study_count, 'unresolved'
+    FROM rolled r
+    JOIN per_norm_studies s ON s.norm = r.norm
     ON CONFLICT (condition_norm) DO UPDATE SET
         raw_form    = excluded.raw_form,
-        study_count = excluded.study_count
+        study_count = excluded.study_count,
+        -- Clear resolved_at only when raw_form actually changed casing.
+        -- The per-trial hook (ConditionNormalizer.EnsureForStudyAsync, via
+        -- UpsertAsync) resolves using whatever casing THAT trial used, not the
+        -- most-frequent casing, and stamps resolved_at regardless of outcome.
+        -- If the first trial to mention a condition spells it in a casing the
+        -- scorer's acronym term does not fire on (e.g. ""Nsclc"" rather than
+        -- ""NSCLC""), the row is written unresolved with resolved_at set. A
+        -- later seed that promotes ""NSCLC"" to raw_form (because it becomes
+        -- the most frequent casing) must re-open the row for resolution, or
+        -- the backfill skips a now-resolvable row forever without --force.
+        -- IS DISTINCT FROM (not <>) so this also fires the first time a NULL
+        -- raw_form would be populated - not reachable today (raw_form is
+        -- NOT NULL) but keeps the CASE correct if that ever changes.
+        resolved_at = CASE
+            WHEN condition_concept.raw_form IS DISTINCT FROM excluded.raw_form
+            THEN NULL
+            ELSE condition_concept.resolved_at
+        END
     RETURNING (xmax = 0) AS inserted
 )
 SELECT count(*) FILTER (WHERE inserted) FROM ins"
