@@ -95,6 +95,7 @@ public class AnalyticsController : Controller
     /// inline-error view - there is no page for a file download to render
     /// into (same convention as <c>AuthoringController.ExportCriteria</c>).
     /// </summary>
+    [HttpGet]
     public async Task<IActionResult> ExportLift(
         CancellationToken cancellationToken,
         string? kind = null,
