@@ -259,23 +259,134 @@ ORDER BY yr.y"
         Return result
     End Function
 
-    ' --- Stubs below: declared on the interface now, implemented in Task 8.
-    ' Deliberately not NotImplementedException - this class is resolved from DI
-    ' at startup, and a premature call (including from an unrelated test) must
-    ' get a well-formed empty answer, not a crash.
-
-    Public Function GetConceptSummaryAsync(conceptCode As String,
-                                           cancellationToken As CancellationToken) _
+    ''' <summary>
+    ''' Everything the concept lookup view shows about one CUI, or Nothing when
+    ''' the code is unrecognised in umls.concept - a user can type anything
+    ''' into the URL, so this must return a clean absence rather than throw.
+    ''' Runs four statements on one connection: the summary row (2.5ms), the
+    ''' phase breakdown (88ms), the example criteria, and finally the corpus
+    ''' trial-count denominator (reusing GetCorpusTrialCountAsync so the "share
+    ''' of corpus" figure is computed identically to the rest of the tab).
+    ''' </summary>
+    Public Async Function GetConceptSummaryAsync(conceptCode As String,
+                                                 cancellationToken As CancellationToken) _
             As Task(Of ConceptSummary) Implements IAnalyticsGateway.GetConceptSummaryAsync
 
-        Return Task.FromResult(Of ConceptSummary)(Nothing)
+        If String.IsNullOrEmpty(conceptCode) Then Return Nothing
+
+        Dim cui As String = Nothing
+        Dim prefName As String = ""
+        Dim rootSource As String = ""
+        Dim semanticTypes As String = ""
+        Dim ancestorCount As Integer = 0
+        Dim descendantCount As Integer = 0
+        Dim trials As Integer = 0
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+SELECT c.cui, c.pref_name, c.root_source,
+       (SELECT string_agg(DISTINCT st.sty, '; ') FROM umls.semantic_type st WHERE st.cui = c.cui),
+       (SELECT count(*) FROM umls.concept_ancestor a WHERE a.descendant_cui = c.cui),
+       (SELECT count(*) FROM umls.concept_ancestor a WHERE a.ancestor_cui = c.cui),
+       (SELECT count(DISTINCT e.nct_id) FROM public.eligibility e WHERE e.concept_code = c.cui)
+FROM umls.concept c WHERE c.cui = @cui"
+                cmd.Parameters.Add(New NpgsqlParameter("cui", NpgsqlDbType.Text) With {.Value = conceptCode})
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    If Not Await reader.ReadAsync(cancellationToken).ConfigureAwait(False) Then
+                        ' Unknown CUI - clean absence, not an exception.
+                        Return Nothing
+                    End If
+                    cui = reader.GetString(0)
+                    prefName = If(reader.IsDBNull(1), "", reader.GetString(1))
+                    rootSource = If(reader.IsDBNull(2), "", reader.GetString(2))
+                    semanticTypes = If(reader.IsDBNull(3), "", reader.GetString(3))
+                    ' count(...) is bigint unless cast; GetInt32 throws on that
+                    ' column. Read as Int64 and narrow explicitly.
+                    ancestorCount = CInt(reader.GetInt64(4))
+                    descendantCount = CInt(reader.GetInt64(5))
+                    trials = CInt(reader.GetInt64(6))
+                End Using
+            End Using
+
+            Dim byPhase As New List(Of ConceptCount)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+SELECT COALESCE(NULLIF(d.phase, ''), '(none)'), count(DISTINCT e.nct_id)
+FROM public.eligibility e JOIN public.eligibility_study_detail d ON d.nct_id = e.nct_id
+WHERE e.concept_code = @cui GROUP BY 1 ORDER BY 2 DESC"
+                cmd.Parameters.Add(New NpgsqlParameter("cui", NpgsqlDbType.Text) With {.Value = cui})
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        ' ConceptCount.ConceptCode deliberately carries the phase
+                        ' label here - see the property doc on ConceptSummary.ByPhase.
+                        byPhase.Add(New ConceptCount(reader.GetString(0), CInt(reader.GetInt64(1))))
+                    End While
+                End Using
+            End Using
+
+            ' The ONE place raw eligibility.criterion text appears in this
+            ' feature - labelled as examples in the view, never as the concept
+            ' label (that is always pref_name; one CUI here carries 1,060
+            ' distinct extracted strings). LIMIT 5 caps it at the source.
+            Dim exampleCriteria As New List(Of String)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+SELECT DISTINCT e.criterion FROM public.eligibility e
+WHERE e.concept_code = @cui AND e.criterion <> '' LIMIT 5"
+                cmd.Parameters.Add(New NpgsqlParameter("cui", NpgsqlDbType.Text) With {.Value = cui})
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        exampleCriteria.Add(reader.GetString(0))
+                    End While
+                End Using
+            End Using
+
+            Dim corpusTrials = Await GetCorpusTrialCountAsync(cancellationToken).ConfigureAwait(False)
+
+            Return New ConceptSummary(cui, prefName, rootSource, semanticTypes,
+                                      ancestorCount, descendantCount, trials, corpusTrials,
+                                      byPhase, exampleCriteria)
+        End Using
     End Function
 
-    Public Function SearchConceptsAsync(term As String, limit As Integer,
-                                        cancellationToken As CancellationToken) _
+    ''' <summary>
+    ''' Name search over umls.concept.pref_name, most-used first. Each result
+    ''' carries only cui/prefName/trials - the rest of ConceptSummary's fields
+    ''' default to empty/zero, since the caller only ever shows these results
+    ''' as a pick-list before drilling into GetConceptSummaryAsync for the code
+    ''' the user actually selects.
+    ''' </summary>
+    Public Async Function SearchConceptsAsync(term As String, limit As Integer,
+                                              cancellationToken As CancellationToken) _
             As Task(Of IReadOnlyList(Of ConceptSummary)) Implements IAnalyticsGateway.SearchConceptsAsync
 
-        Return Task.FromResult(Of IReadOnlyList(Of ConceptSummary))(Array.Empty(Of ConceptSummary)())
+        Dim result As New List(Of ConceptSummary)
+        If String.IsNullOrEmpty(term) Then Return result
+
+        Using conn = Await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+SELECT c.cui, c.pref_name,
+       (SELECT count(DISTINCT e.nct_id) FROM public.eligibility e WHERE e.concept_code = c.cui) AS trials
+FROM umls.concept c WHERE c.pref_name ILIKE @term
+ORDER BY trials DESC LIMIT @limit"
+                ' Wildcards go onto the parameter VALUE, never concatenated into
+                ' the SQL text - @term is bound, not interpolated.
+                cmd.Parameters.Add(New NpgsqlParameter("term", NpgsqlDbType.Text) With {.Value = "%" & term & "%"})
+                cmd.Parameters.Add(New NpgsqlParameter("limit", NpgsqlDbType.Integer) With {.Value = limit})
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        Dim cui = reader.GetString(0)
+                        Dim prefName = If(reader.IsDBNull(1), "", reader.GetString(1))
+                        Dim trials = CInt(reader.GetInt64(2))
+                        result.Add(New ConceptSummary(cui, prefName, "", "", 0, 0, trials, 0,
+                                                      Array.Empty(Of ConceptCount)(), Array.Empty(Of String)()))
+                    End While
+                End Using
+            End Using
+        End Using
+        Return result
     End Function
 
 End Class

@@ -9,8 +9,8 @@ namespace EligibilityProcessing.Web.Controllers;
 /// The Analytics area (design spec "2026-07-21-analytics-tab"). Read-only
 /// queries over the processed corpus: what is distinctive about a cohort of
 /// trials (Index/lift action), how a concept's prevalence moves over time
-/// (this file's Trend action), and a single-concept lookup. Concept lands in
-/// a later task.
+/// (Trend), and a single-concept lookup (Concept) - everything known about
+/// one CUI, reachable from both the Results and Analysis views.
 /// </summary>
 [Authorize]
 public class AnalyticsController : Controller
@@ -169,6 +169,45 @@ public class AnalyticsController : Controller
             {
                 CodesInput = codes ?? "",
                 CurrentYear = currentYear,
+                ErrorMessage = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// The concept lookup view: everything known about one CUI. Renders the
+    /// empty form when no code is supplied (mirrors Index/Trend above), the
+    /// clean not-found state when the gateway returns Nothing for an
+    /// unrecognised code - never an exception, never a blank page, since a
+    /// user can type anything into the URL - and the inline "backend
+    /// unavailable" warning if the gateway itself throws.
+    /// </summary>
+    public async Task<IActionResult> Concept(
+        CancellationToken cancellationToken,
+        string? code = null)
+    {
+        var trimmedCode = code?.Trim() ?? "";
+
+        if (trimmedCode.Length == 0)
+        {
+            return View(new AnalyticsConceptViewModel());
+        }
+
+        try
+        {
+            var summary = await _analytics.GetConceptSummaryAsync(trimmedCode, cancellationToken);
+            return View(new AnalyticsConceptViewModel
+            {
+                Code = trimmedCode,
+                Summary = summary
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to look up analytics concept {Code}", trimmedCode);
+            return View(new AnalyticsConceptViewModel
+            {
+                Code = trimmedCode,
                 ErrorMessage = ex.Message
             });
         }

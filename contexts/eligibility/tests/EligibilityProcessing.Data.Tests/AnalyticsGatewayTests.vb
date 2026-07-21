@@ -84,6 +84,36 @@ VALUES (@d, @a, 1) ON CONFLICT DO NOTHING"
         End Using
     End Function
 
+    Private Async Function SeedSemanticTypeAsync(cui As String, tui As String, sty As String) As Task
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.semantic_type (cui, tui, sty) VALUES (@c, @t, @s)
+ON CONFLICT (cui, tui) DO NOTHING"
+                cmd.Parameters.AddWithValue("c", cui)
+                cmd.Parameters.AddWithValue("t", tui)
+                cmd.Parameters.AddWithValue("s", sty)
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' Seeds a public.eligibility_study_detail row carrying only nct_id and
+    ''' phase - used by the concept-summary phase-breakdown tests, which need
+    ''' rows joined on nct_id but do not care about the rest of the snapshot.
+    ''' </summary>
+    Private Async Function SeedStudyDetailPhaseAsync(nctId As String, phase As String) As Task
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "INSERT INTO public.eligibility_study_detail (nct_id, phase) VALUES (@n, @p)"
+                cmd.Parameters.AddWithValue("n", nctId)
+                cmd.Parameters.AddWithValue("p", phase)
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
     ''' <summary>
     ''' Seeds a public.condition_concept dictionary row. conditionNorm must
     ''' already be the NORMALIZED form (lower-cased, trimmed, internal
@@ -418,5 +448,132 @@ VALUES ('NCT001', 'PHASE3', DATE '2023-05-01', ARRAY['Thing'])"
         Assert.True(points.Single(Function(p) p.Year = 2023).IsPartial)
         Assert.False(points.Single(Function(p) p.Year = 2021).IsPartial)
         Assert.False(points.Single(Function(p) p.Year = 2022).IsPartial)
+    End Function
+
+    ' --- GetConceptSummaryAsync / SearchConceptsAsync (Task 8) ---
+
+    <SkippableFact>
+    Public Async Function GetConceptSummary_returns_pref_name_semantic_types_and_counts_for_a_seeded_concept() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedConceptAsync("C_SUM", "Type 2 Diabetes Mellitus")
+        Await SeedSemanticTypeAsync("C_SUM", "T047", "Disease or Syndrome")
+        ' One ancestor (C_SUM is the descendant) and one descendant (C_SUM is
+        ' the ancestor) - the two concept_ancestor counts must not be swapped.
+        Await SeedAncestorAsync("C_SUM", "C_BROADER")
+        Await SeedAncestorAsync("C_NARROWER", "C_SUM")
+        Await SeedRowAsync("NCT001", "Inclusion", "C_SUM", "diabetes")
+        Await SeedRowAsync("NCT002", "Inclusion", "C_SUM", "type 2 diabetes")
+        ' Same trial twice must still count once towards Trials.
+        Await SeedRowAsync("NCT002", "Exclusion", "C_SUM", "diabetes again")
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+        Dim summary = Await g.GetConceptSummaryAsync("C_SUM", CancellationToken.None)
+
+        Assert.NotNull(summary)
+        Assert.Equal("C_SUM", summary.ConceptCode)
+        Assert.Equal("Type 2 Diabetes Mellitus", summary.PrefName)
+        Assert.Equal("SNOMEDCT_US", summary.RootSource)
+        Assert.Equal("Disease or Syndrome", summary.SemanticTypes)
+        Assert.Equal(1, summary.AncestorCount)
+        Assert.Equal(1, summary.DescendantCount)
+        Assert.Equal(2, summary.Trials)
+    End Function
+
+    <SkippableFact>
+    Public Async Function GetConceptSummary_returns_nothing_for_an_unknown_cui() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+
+        ' A user can type anything into the URL - an unrecognised CUI must
+        ' come back as a clean absence, never an exception.
+        Dim summary = Await g.GetConceptSummaryAsync("C_DOES_NOT_EXIST", CancellationToken.None)
+
+        Assert.Null(summary)
+    End Function
+
+    <SkippableFact>
+    Public Async Function GetConceptSummary_caps_example_criteria_at_five() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedConceptAsync("C_MANY", "Many Examples")
+        For i = 1 To 7
+            Await SeedRowAsync($"NCT{i:000}", $"Inclusion criterion number {i}", "C_MANY", "many")
+        Next
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+        Dim summary = Await g.GetConceptSummaryAsync("C_MANY", CancellationToken.None)
+
+        Assert.NotNull(summary)
+        ' Seven distinct criterion texts exist for this CUI - the query's own
+        ' LIMIT 5 must cap the result, not just happen to return few.
+        Assert.Equal(5, summary.ExampleCriteria.Count)
+    End Function
+
+    <SkippableFact>
+    Public Async Function GetConceptSummary_breaks_down_trials_by_phase_using_none_for_blank() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedConceptAsync("C_PHASE", "Phased Concept")
+        Await SeedStudyDetailPhaseAsync("NCT001", "PHASE3")
+        Await SeedStudyDetailPhaseAsync("NCT002", "PHASE3")
+        Await SeedStudyDetailPhaseAsync("NCT003", "")
+        Await SeedRowAsync("NCT001", "Inclusion", "C_PHASE", "phase")
+        Await SeedRowAsync("NCT002", "Inclusion", "C_PHASE", "phase")
+        Await SeedRowAsync("NCT003", "Inclusion", "C_PHASE", "phase")
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+        Dim summary = Await g.GetConceptSummaryAsync("C_PHASE", CancellationToken.None)
+
+        Assert.NotNull(summary)
+        Dim phase3 = summary.ByPhase.Single(Function(p) p.ConceptCode = "PHASE3")
+        Assert.Equal(2, phase3.Trials)
+        Dim none = summary.ByPhase.Single(Function(p) p.ConceptCode = "(none)")
+        Assert.Equal(1, none.Trials)
+    End Function
+
+    <SkippableFact>
+    Public Async Function SearchConcepts_matches_preferred_name_and_orders_by_trial_count_descending() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedConceptAsync("C_DIAB_LOW", "Diabetes Insipidus")
+        Await SeedConceptAsync("C_DIAB_HIGH", "Diabetes Mellitus")
+        Await SeedConceptAsync("C_OTHER", "Hypertension")
+        Await SeedRowAsync("NCT001", "Inclusion", "C_DIAB_LOW", "low")
+        Await SeedRowAsync("NCT002", "Inclusion", "C_DIAB_HIGH", "high")
+        Await SeedRowAsync("NCT003", "Inclusion", "C_DIAB_HIGH", "high")
+        Await SeedRowAsync("NCT004", "Inclusion", "C_DIAB_HIGH", "high")
+        Await SeedRowAsync("NCT005", "Inclusion", "C_OTHER", "other")
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+        Dim results = Await g.SearchConceptsAsync("diabetes", 10, CancellationToken.None)
+
+        Assert.Equal(2, results.Count)
+        Assert.DoesNotContain(results, Function(r) r.ConceptCode = "C_OTHER")
+        Assert.Equal("C_DIAB_HIGH", results(0).ConceptCode)
+        Assert.Equal(3, results(0).Trials)
+        Assert.Equal("C_DIAB_LOW", results(1).ConceptCode)
+        Assert.Equal(1, results(1).Trials)
+    End Function
+
+    <SkippableFact>
+    Public Async Function SearchConcepts_binds_a_term_containing_a_quote_as_a_parameter_rather_than_breaking_the_sql() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedConceptAsync("C_APOS", "Alzheimer's Disease")
+
+        Dim g As New AnalyticsGateway(_fixture.DataSource)
+
+        ' If @term were concatenated into the SQL text instead of bound, this
+        ' apostrophe would either break the query's syntax or open a SQL
+        ' injection path - either way SearchConceptsAsync would throw or
+        ' misbehave here. A properly bound parameter treats the apostrophe as
+        ' ordinary data and the search just works.
+        Dim results = Await g.SearchConceptsAsync("Alzheimer's", 10, CancellationToken.None)
+
+        Dim found = Assert.Single(results)
+        Assert.Equal("C_APOS", found.ConceptCode)
     End Function
 End Class

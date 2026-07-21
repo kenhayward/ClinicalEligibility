@@ -84,13 +84,30 @@ public sealed class AnalyticsTrendViewModel
 
 /// <summary>
 /// Backing model for the Analytics tab's concept lookup view
-/// (<c>/Analytics/Concept</c>). Minimal placeholder - see the remark on
-/// <see cref="AnalyticsTrendViewModel"/>; the Concept action and its view are
-/// built in a later task.
+/// (<c>/Analytics/Concept</c>). Everything known about one concept, or a
+/// clean not-found state when the code does not resolve in umls.concept - a
+/// user can type anything into the URL.
 /// </summary>
 public sealed class AnalyticsConceptViewModel
 {
+    /// <summary>The concept code (CUI) as submitted/resolved. Empty on the
+    /// initial, not-yet-submitted form.</summary>
+    public string Code { get; init; } = "";
+
+    /// <summary>Null when the code has not been looked up, or the gateway
+    /// found nothing for it - see <see cref="NotFound"/> to distinguish those.</summary>
+    public ConceptSummary? Summary { get; init; }
+
     public string? ErrorMessage { get; init; }
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+
+    /// <summary>True once a code has been submitted - distinguishes the
+    /// empty form from "the lookup ran and found nothing".</summary>
+    public bool HasSearched => !string.IsNullOrWhiteSpace(Code);
+
+    /// <summary>True when a code was searched, the gateway did not throw, and
+    /// it came back with no matching concept - the clean not-found state the
+    /// view must render instead of a blank page.</summary>
+    public bool NotFound => HasSearched && !HasError && Summary is null;
 }
