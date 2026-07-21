@@ -406,6 +406,13 @@ Public Module CompositionRoot
                     Dim outputDs = sp.GetRequiredKeyedService(Of NpgsqlDataSource)(OutputDataSourceKey)
                     Return New ConditionConceptStore(outputDs)
                 End Function)
+
+        ' Stateless over one data source, like ConditionConceptStore, so singleton.
+        services.AddSingleton(Of IAnalyticsGateway)(
+                Function(sp As IServiceProvider) As IAnalyticsGateway
+                    Dim outputDs = sp.GetRequiredKeyedService(Of NpgsqlDataSource)(OutputDataSourceKey)
+                    Return New AnalyticsGateway(outputDs)
+                End Function)
         services.AddScoped(Of ConditionNormalizer)(
                 Function(sp As IServiceProvider) As ConditionNormalizer
                     Return New ConditionNormalizer(
