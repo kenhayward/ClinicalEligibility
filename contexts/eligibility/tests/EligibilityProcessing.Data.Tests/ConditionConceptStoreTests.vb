@@ -275,4 +275,53 @@ ON CONFLICT (cui) DO UPDATE SET pref_name = excluded.pref_name"
         Assert.Single(unseen)
         Assert.Equal("Obesity", unseen(0))
     End Function
+
+    <SkippableFact>
+    Public Async Function Upsert_does_not_clobber_study_count() As Task
+        ' study_count is a corpus statistic maintained only in bulk by
+        ' SeedFromCorpusAsync, because the per-trial path cannot know whether
+        ' a given trial already contributed that string. If the ON CONFLICT SET
+        ' clause mistakenly included study_count = excluded.study_count, every
+        ' count in the dictionary would silently be zeroed on the next per-trial
+        ' upsert, since ConditionConceptEntry.StudyCount defaults to 0.
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        ' Seed the same condition across two different trials to get study_count > 1.
+        Await SeedStudyAsync("NCT001", {"Hypertension"})
+        Await SeedStudyAsync("NCT002", {"Hypertension"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Dim seeded = Await store.SeedFromCorpusAsync(CancellationToken.None)
+        Assert.Equal(1, seeded)
+
+        ' Verify the seeded study_count is 2.
+        Dim beforeCount As Integer
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT study_count FROM public.condition_concept WHERE condition_norm = 'hypertension'"
+                beforeCount = CInt(Await cmd.ExecuteScalarAsync())
+            End Using
+        End Using
+        Assert.Equal(2, beforeCount)
+
+        ' Call UpsertAsync with a matching condition but default StudyCount (0).
+        ' This is what the per-trial extraction path does: it passes the resolved
+        ' concept but does not know about study_count.
+        Await store.UpsertAsync(New ConditionConceptEntry With {
+                .ConditionNorm = "hypertension", .RawForm = "Hypertension",
+                .ConceptCode = "C0020538", .UmlsName = "Hypertension",
+                .MatchTier = ConditionMatchTier.Exact, .MatchScore = 1.0,
+                .StudyCount = 0}, CancellationToken.None)
+
+        ' Re-read study_count and assert it is STILL 2, not 0.
+        Dim afterCount As Integer
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT study_count FROM public.condition_concept WHERE condition_norm = 'hypertension'"
+                afterCount = CInt(Await cmd.ExecuteScalarAsync())
+            End Using
+        End Using
+        Assert.Equal(2, afterCount)
+    End Function
 End Class
