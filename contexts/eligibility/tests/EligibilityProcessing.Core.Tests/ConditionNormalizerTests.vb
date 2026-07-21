@@ -31,9 +31,11 @@ Public Class ConditionNormalizerTests
         Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of UmlsCandidate))
         Public Property Upserted As New List(Of ConditionConceptEntry)
         Public Property UnseenByStudy As New Dictionary(Of String, IReadOnlyList(Of String))
+        Public Property LookupCallCount As Integer
 
         Public Function LookupExactAsync(conditionNorm As String, cancellationToken As CancellationToken) _
                 As Task(Of IReadOnlyList(Of UmlsCandidate)) Implements IConditionConceptStore.LookupExactAsync
+            LookupCallCount += 1
             Dim hit As IReadOnlyList(Of UmlsCandidate) = Nothing
             If ExactByNorm.TryGetValue(conditionNorm, hit) Then Return Task.FromResult(hit)
             Return Task.FromResult(Of IReadOnlyList(Of UmlsCandidate))(Array.Empty(Of UmlsCandidate)())
@@ -179,7 +181,8 @@ Public Class ConditionNormalizerTests
     <Fact>
     Public Async Function Tier2_rejects_a_match_below_the_condition_threshold() As Task
         Dim store As New FakeStore()
-        ' "NSC762" is the real trigram best match for "nsclc" and scores ~0.30.
+        ' Unmatchable phrase scores below even the scorer's 0.45 floor, so PickBestMatch
+        ' returns unresolved and the tier-2 gate is never the deciding factor.
         Dim client As New FakeUmlsClient() With {
             .Candidates = {New UmlsCandidate("C0700294", "NSC762", "MSH")}}
 
@@ -202,9 +205,9 @@ Public Class ConditionNormalizerTests
     ' tier-2 test would still pass with the threshold left at the pipeline's
     ' 0.45, and the spec's central risk argument would be unverified.
     '
-    ' "advanced solid tumors" -> "Solid tumor" measured at 0.478 against the real
-    ' corpus: above the pipeline's cutoff, below the condition one. If the scorer
-    ' ever changes, the first assertion fails and says exactly why.
+    ' "advanced solid tumors" -> "Solid tumor" scored at 0.524 by the composite scorer:
+    ' above the pipeline's cutoff, below the condition one. If the scorer ever changes,
+    ' the first assertion fails and says exactly why.
     <Fact>
     Public Async Function Tier2_rejects_a_score_between_the_pipeline_and_condition_thresholds() As Task
         Const Query As String = "advanced solid tumors"
@@ -239,11 +242,13 @@ Public Class ConditionNormalizerTests
 
     <Fact>
     Public Async Function Empty_input_resolves_to_unresolved_without_touching_the_store() As Task
+        Dim store As New FakeStore()
         Dim client As New FakeUmlsClient()
-        Dim result = Await NewNormalizer(New FakeStore(), client).ResolveAsync("   ", CancellationToken.None)
+        Dim result = Await NewNormalizer(store, client).ResolveAsync("   ", CancellationToken.None)
 
         Assert.False(result.IsResolved)
         Assert.Equal(0, client.SearchCallCount)
+        Assert.Equal(0, store.LookupCallCount)
     End Function
 
     ' ---------- per-study hook ----------
@@ -272,4 +277,39 @@ Public Class ConditionNormalizerTests
         Assert.Equal(0, written)
         Assert.Empty(store.Upserted)
     End Function
+
+    ' ---------- constructor guards ----------
+
+    <Fact>
+    Public Sub Constructor_throws_ArgumentNullException_for_null_store()
+        Dim client As New FakeUmlsClient()
+        Dim scorer As New UmlsMatchScorer()
+
+        Dim testAction As Action = Sub()
+            Dim normalizer = New ConditionNormalizer(Nothing, client, scorer)
+        End Sub
+        Assert.Throws(Of ArgumentNullException)(testAction)
+    End Sub
+
+    <Fact>
+    Public Sub Constructor_throws_ArgumentNullException_for_null_client()
+        Dim store As New FakeStore()
+        Dim scorer As New UmlsMatchScorer()
+
+        Dim testAction As Action = Sub()
+            Dim normalizer = New ConditionNormalizer(store, Nothing, scorer)
+        End Sub
+        Assert.Throws(Of ArgumentNullException)(testAction)
+    End Sub
+
+    <Fact>
+    Public Sub Constructor_throws_ArgumentNullException_for_null_scorer()
+        Dim store As New FakeStore()
+        Dim client As New FakeUmlsClient()
+
+        Dim testAction As Action = Sub()
+            Dim normalizer = New ConditionNormalizer(store, client, Nothing)
+        End Sub
+        Assert.Throws(Of ArgumentNullException)(testAction)
+    End Sub
 End Class
