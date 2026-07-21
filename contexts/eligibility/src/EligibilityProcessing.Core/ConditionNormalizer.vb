@@ -60,8 +60,12 @@ Public NotInheritable Class ConditionNormalizer
         If exactCandidates IsNot Nothing AndAlso exactCandidates.Count = 1 Then
             ' Tier 1a. No scoring - see the class comment.
             Dim only = exactCandidates(0)
+            ' An empty Ui would otherwise produce match_tier='exact' with a NULL
+            ' concept_code - a state no downstream consumer expects (every other
+            ' unresolved outcome is tier='unresolved'). Treat it as unresolved.
+            If String.IsNullOrEmpty(only.Ui) Then Return ConditionResolution.Unresolved
             Return New ConditionResolution(
-                    conceptCode:=If(only.Ui, ""),
+                    conceptCode:=only.Ui,
                     umlsName:=If(only.Name, ""),
                     tier:=ConditionMatchTier.Exact,
                     score:=1.0)
@@ -70,6 +74,12 @@ Public NotInheritable Class ConditionNormalizer
         If exactCandidates IsNot Nothing AndAlso exactCandidates.Count > 1 Then
             ' Tier 1b.
             Dim picked = PickAmbiguous(rawForm, norm, exactCandidates)
+            ' PickAmbiguous returns Nothing only when every candidate in the list
+            ' was itself Nothing - unreachable from ConditionConceptStore today
+            ' (its SQL never yields a null UmlsCandidate), but IConditionConceptStore
+            ' is a public port any implementation can satisfy. Fall back to
+            ' unresolved rather than dereferencing a null candidate below.
+            If picked Is Nothing Then Return ConditionResolution.Unresolved
             Return New ConditionResolution(
                     conceptCode:=If(picked.Ui, ""),
                     umlsName:=If(picked.Name, ""),
@@ -80,6 +90,16 @@ Public NotInheritable Class ConditionNormalizer
         ' Tier 2. Pass the RAW form, not the normalized key: the scorer's acronym
         ' term requires ^[A-Z0-9]{2,6}$ on the raw query, so lowercasing here
         ' would silently disable acronym matching for NSCLC, COPD, HIV and the rest.
+        '
+        ' Known behaviour worth knowing about when tier-2 yield looks lower than
+        ' expected: when Umls:Backend=postgres, PostgresUmlsClient only runs its
+        ' (slower) trigram fallback arm when NOTHING from the fast path clears the
+        ' scorer's own 0.45 match threshold. A candidate that scores between 0.45
+        ' and this class's stricter 0.60 FuzzyThreshold therefore suppresses the
+        ' trigram arm even though it will go on to be rejected here - the trigram
+        ' arm might otherwise have surfaced a better candidate that clears 0.60.
+        ' This costs some tier-2 resolution yield but never produces a WRONG
+        ' answer (the 0.45-0.60 candidate is still correctly rejected).
         Dim candidates = Await _umlsClient.SearchAsync(rawForm, cancellationToken).ConfigureAwait(False)
         Dim match = _scorer.PickBestMatch(rawForm, candidates)
         If Not match.IsResolved OrElse match.MatchScore < FuzzyThreshold Then
@@ -112,10 +132,13 @@ Public NotInheritable Class ConditionNormalizer
                 FirstOrDefault()
         If exactName IsNot Nothing Then Return exactName
 
+        ' FirstOrDefault, not First: if candidates held only Nothing entries,
+        ' usable is empty here and First() would throw InvalidOperationException.
+        ' Returns Nothing in that case; ResolveAsync treats that as unresolved.
         Return usable.
                 OrderByDescending(Function(c) _scorer.Score(rawForm, If(c.Name, ""))).
                 ThenBy(Function(c) If(c.Ui, ""), StringComparer.Ordinal).
-                First()
+                FirstOrDefault()
     End Function
 
     ''' <summary>

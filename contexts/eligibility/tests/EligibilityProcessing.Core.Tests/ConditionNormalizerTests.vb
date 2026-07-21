@@ -116,6 +116,21 @@ Public Class ConditionNormalizerTests
         Assert.Equal(0, client.SearchCallCount)
     End Function
 
+    ' An empty Ui on the sole exact candidate must not produce match_tier='exact'
+    ' with a NULL concept_code - a state no downstream consumer expects (every
+    ' other unresolved outcome is tier='unresolved').
+    <Fact>
+    Public Async Function Tier1a_resolves_to_unresolved_when_the_only_candidate_has_an_empty_ui() As Task
+        Dim store As New FakeStore()
+        store.ExactByNorm("stroke") = {New UmlsCandidate("", "CVA - Cerebrovascular accident", "SNOMEDCT_US")}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Stroke", CancellationToken.None)
+
+        Assert.False(result.IsResolved)
+        Assert.Equal(ConditionMatchTier.Unresolved, result.Tier)
+        Assert.Equal("", result.ConceptCode)
+    End Function
+
     ' ---------- tier 1b ----------
 
     <Fact>
@@ -130,6 +145,23 @@ Public Class ConditionNormalizerTests
         Assert.Equal("C0011570", result.ConceptCode)
         Assert.Equal(ConditionMatchTier.ExactAmbiguous, result.Tier)
         Assert.Equal(1.0, result.Score)
+    End Function
+
+    ' Regression test: PickAmbiguous used to end its fallback ranking with
+    ' .First(), which throws InvalidOperationException when every candidate in
+    ' the list is Nothing. ConditionConceptStore never hands back a list like
+    ' that, but IConditionConceptStore is a public port - any implementation
+    ' could. ResolveAsync must degrade to unresolved, not throw.
+    <Fact>
+    Public Async Function Tier1b_resolves_to_unresolved_when_every_candidate_is_null() As Task
+        Dim store As New FakeStore()
+        store.ExactByNorm("ambiguous term") = {Nothing, Nothing}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Ambiguous Term", CancellationToken.None)
+
+        Assert.False(result.IsResolved)
+        Assert.Equal(ConditionMatchTier.Unresolved, result.Tier)
+        Assert.Equal("", result.ConceptCode)
     End Function
 
     <Fact>

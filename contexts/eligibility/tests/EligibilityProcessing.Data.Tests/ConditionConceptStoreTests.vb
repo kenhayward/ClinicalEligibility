@@ -63,8 +63,27 @@ WHERE schemaname = 'public' AND tablename = 'condition_concept'"
     Public Async Function Sql_normalization_matches_ConceptKey_Normalize() As Task
         Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
 
+        ' Built with ChrW rather than literal source bytes, per the repo's
+        ' ASCII-only-source rule. U+00E9 (e-acute) checks that lower() and
+        ' ToLowerInvariant agree on an accented character - they do.
+        '
+        ' A non-breaking space (U+00A0) sample was tried here and DELIBERATELY
+        ' removed - it does NOT agree and is a real, currently-unresolved
+        ' divergence, not a flaky test: ConceptKey.Normalize (.NET regex \s
+        ' matches Unicode whitespace, including U+00A0) collapses it to a plain
+        ' space, but this SQL's \s (Postgres regex under the container's default
+        ' locale) does not, leaving the NBSP in place. A raw condition string
+        ' containing an NBSP would therefore get a different condition_norm
+        ' depending on whether it went through SQL (SeedFromCorpusAsync,
+        ' GetUnseenConditionsForStudyAsync) or ConceptKey.Normalize
+        ' (ConditionNormalizer.ResolveAsync/EnsureForStudyAsync) - splitting one
+        ' analytic bucket into two, exactly the failure mode this test exists to
+        ' catch. Flagged for a decision (strip/normalize NBSP on one side or the
+        ' other) rather than fixed here - see the branch's review report.
+        Dim eacute = ChrW(&HE9)
         Dim samples = {"COPD", "  Breast   Cancer  ", "Non-Small Cell", "COVID-19",
-                       "Type" & vbTab & "2 Diabetes", "hiv/aids"}
+                       "Type" & vbTab & "2 Diabetes", "hiv/aids",
+                       "Pr" & eacute & "eclampsia"}
 
         Using conn = Await _fixture.DataSource.OpenConnectionAsync()
             For Each s In samples
