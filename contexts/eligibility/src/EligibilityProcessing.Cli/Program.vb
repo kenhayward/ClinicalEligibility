@@ -39,6 +39,9 @@ Imports Microsoft.Extensions.Options
 '                                          Idempotent - only fills gaps. Requests
 '                                          run in parallel at --concurrency
 '                                          (default Pipeline:LlmConcurrencyCap).
+'   normalize-conditions [--count N] [--dry-run] [--force]
+'                                        - map AACT condition strings to UMLS
+'                                          CUIs for the analytics condition slice
 '   load-umls --rrf-dir <path>           - load a curated UMLS subset into the
 '                                          umls.* schema from an unpacked release
 '                                          (MRCONSO.RRF + MRSTY.RRF). Full rebuild
@@ -166,6 +169,8 @@ Module Program
                     Return Await RunBackfillDetailsAsync(appHost, cancellationToken).ConfigureAwait(False)
                 Case "embed-studies"
                     Return Await RunEmbedStudiesAsync(appHost, args, cancellationToken).ConfigureAwait(False)
+                Case "normalize-conditions"
+                    Return Await RunNormalizeConditionsAsync(appHost, args, cancellationToken).ConfigureAwait(False)
                 Case "load-umls"
                     Return Await RunLoadUmlsAsync(appHost, args, cancellationToken).ConfigureAwait(False)
                 Case "backfill-semantic-types"
@@ -493,6 +498,74 @@ Module Program
 
             System.Console.WriteLine($"Done. Embedded {counters.Processed}, failed {counters.Failed} in {FormatHms(sw.Elapsed)}.")
             Return If(counters.Failed > 0, 2, 0)
+        End Using
+    End Function
+
+    ' normalize-conditions - map AACT condition strings to UMLS CUIs in
+    ' public.condition_concept, so analytics can slice by condition. Seeds the
+    ' dictionary from the corpus first, then resolves pending rows highest
+    ' study_count first. Safe to re-run (only unresolved rows are touched unless
+    ' --force). See docs/superpowers/specs/2026-07-21-condition-normalizer-design.md.
+    Private Async Function RunNormalizeConditionsAsync(
+            appHost As IHost,
+            args As String(),
+            cancellationToken As CancellationToken) As Task(Of Integer)
+
+        Dim count = ParseOptionInt(args, "--count", 0)
+        Dim dryRun = args.Any(Function(a) String.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase))
+        Dim force = args.Any(Function(a) String.Equals(a, "--force", StringComparison.OrdinalIgnoreCase))
+
+        ' The normalize loop lives in EligibilityProcessing.Core (ConditionNormalizeJob)
+        ' so the CLI and the web Tools tab run identical code. The job is scoped, so
+        ' resolve it inside a scope (like the orchestrator). We keep the CLI's own
+        ' single-line progress renderer, fed from the job's snapshots.
+        Using scope = appHost.Services.CreateScope()
+            Dim job = scope.ServiceProvider.GetRequiredService(Of IConditionNormalizeJob)()
+            Dim total = Await job.CountRemainingAsync(force, cancellationToken).ConfigureAwait(False)
+            System.Console.WriteLine(
+                    $"Normalizing {If(count > 0, Math.Min(count, total), total)} condition string(s)" &
+                    If(dryRun, " (dry-run)", "") & If(force, " (force)", "") & "...")
+
+            Dim latest As ToolJobSnapshot = Nothing
+            Dim sink As New SnapshotSink(Sub(s) latest = s)
+            Dim sw = Stopwatch.StartNew()
+            Dim progressCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+            Dim progressTask = ReportProgressAsync(
+                    total,
+                    Function() If(latest Is Nothing, 0, latest.Processed),
+                    Function() $"conditions - {MetricValue(latest, "Resolved")} resolved, {MetricValue(latest, "Unresolved")} unresolved",
+                    sw, progressCts.Token)
+            Dim caught As Exception = Nothing
+            Dim counters As ConditionCounters = Nothing
+
+            Try
+                counters = Await job.RunAsync(
+                        New NormalizeConditionsOptions With {
+                            .Count = count, .DryRun = dryRun, .Force = force},
+                        sink, cancellationToken).ConfigureAwait(False)
+            Catch ex As Exception
+                caught = ex
+            End Try
+
+            ' Stop + drain the progress reporter, then end the in-place line.
+            progressCts.Cancel()
+            Try
+                Await progressTask.ConfigureAwait(False)
+            Catch ex As OperationCanceledException
+            End Try
+            If Not System.Console.IsOutputRedirected Then System.Console.WriteLine()
+
+            ' Unlike the other maintenance verbs, a failure here reports on stderr
+            ' and returns 1 rather than re-throwing to exit code 2 - the job has no
+            ' per-item error counter, so any caught exception here is a hard stop.
+            If caught IsNot Nothing Then
+                System.Console.Error.WriteLine($"normalize-conditions failed: {caught.Message}")
+                Return 1
+            End If
+
+            System.Console.WriteLine(
+                    $"Done. {counters.Done} processed, {counters.Resolved} resolved, {counters.Unresolved} unresolved in {FormatHms(sw.Elapsed)}.")
+            Return 0
         End Using
     End Function
 
@@ -1081,6 +1154,12 @@ Module Program
         System.Console.WriteLine("      Embeds every processed study with a snapshot but no embedding")
         System.Console.WriteLine("      under the configured model. Safe to re-run; requests run in parallel")
         System.Console.WriteLine("      at --concurrency (default Pipeline:LlmConcurrencyCap).")
+        System.Console.WriteLine()
+        System.Console.WriteLine("  EligibilityProcessing.Cli normalize-conditions [--count N] [--dry-run] [--force]")
+        System.Console.WriteLine("      Map AACT condition strings to UMLS CUIs for the analytics condition slice.")
+        System.Console.WriteLine("      Seeds the dictionary from the corpus, then resolves pending rows highest")
+        System.Console.WriteLine("      study_count first. Safe to re-run; --dry-run reports without writing;")
+        System.Console.WriteLine("      --force re-attempts already-resolved rows.")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli load-umls --rrf-dir <path> [--semantic-types-only]")
         System.Console.WriteLine("                                       [--hierarchy-only] [--max-depth N]")
