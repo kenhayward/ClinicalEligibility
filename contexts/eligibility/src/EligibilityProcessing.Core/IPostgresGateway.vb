@@ -621,8 +621,15 @@ Public Interface IPostgresGateway
     ''' specification §3.4). Inclusion and Exclusion clusters are both returned;
     ''' the caller splits on <see cref="CriterionCluster.Criterion"/>.
     ''' </summary>
+    ''' <param name="rollupLevel">
+    ''' 0 groups by exact concept identity - the original behaviour. Above 0,
+    ''' concepts are grouped under a shared broader concept from
+    ''' umls.concept_ancestor, reachable within that many levels. Only 1 and 2
+    ''' are meaningful: the hierarchy is loaded to depth 2.
+    ''' </param>
     Function ClusterCommonCriteriaAsync(
             nctIds As IReadOnlyList(Of String),
+            rollupLevel As Integer,
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of CriterionCluster))
 
     ''' <summary>
@@ -630,10 +637,17 @@ Public Interface IPostgresGateway
     ''' rows for the given studies whose criterion and concept identity match
     ''' <paramref name="criterion"/> / <paramref name="groupKey"/>.
     ''' </summary>
+    ''' <param name="memberCodes">
+    ''' The concept codes merged into a rolled-up cluster. When non-empty these
+    ''' select the rows, because the cluster's group key is then an ancestor CUI
+    ''' that matches no row's concept_code. Empty for level-0 clusters, which
+    ''' match on the group key as before.
+    ''' </param>
     Function GetClusterRecordsAsync(
             nctIds As IReadOnlyList(Of String),
             criterion As String,
             groupKey As String,
+            memberCodes As IReadOnlyList(Of String),
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of EligibilityRow))
 
     ''' <summary>

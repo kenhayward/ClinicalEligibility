@@ -95,7 +95,7 @@ Public Class AuthoringAnalysisGatewayTests
         Await _fixture.InsertEligibilityRowAsync("NCT1", "Inclusion", "Adult", conceptCode:="")
 
         Dim ids As IReadOnlyList(Of String) = {"NCT1", "NCT2", "NCT3"}
-        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(ids, CancellationToken.None)
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(ids, 0, CancellationToken.None)
 
         ' Highest commonality first.
         Assert.Equal("C001", clusters(0).ConceptCode)
@@ -131,7 +131,7 @@ Public Class AuthoringAnalysisGatewayTests
 
         Dim ids As IReadOnlyList(Of String) = {"NCT1", "NCT2"}
         Dim records = Await _fixture.Gateway.GetClusterRecordsAsync(
-                ids, "Inclusion", "C001", CancellationToken.None)
+                ids, "Inclusion", "C001", Array.Empty(Of String)(), CancellationToken.None)
 
         Assert.Equal(2, records.Count)
         Assert.All(records, Sub(r) Assert.Equal("Diabetes", r.Concept))
@@ -147,7 +147,7 @@ Public Class AuthoringAnalysisGatewayTests
 
         Dim ids As IReadOnlyList(Of String) = {"NCT1", "NCT2"}
         Dim records = Await _fixture.Gateway.GetClusterRecordsAsync(
-                ids, "Inclusion", "concept:adult", CancellationToken.None)
+                ids, "Inclusion", "concept:adult", Array.Empty(Of String)(), CancellationToken.None)
 
         Assert.Equal(2, records.Count)
     End Function

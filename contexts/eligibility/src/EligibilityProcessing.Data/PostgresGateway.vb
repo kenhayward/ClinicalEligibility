@@ -3447,11 +3447,144 @@ LIMIT @limit"
 
     Public Async Function ClusterCommonCriteriaAsync(
             nctIds As IReadOnlyList(Of String),
+            rollupLevel As Integer,
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of CriterionCluster)) _
             Implements IPostgresGateway.ClusterCommonCriteriaAsync
         If nctIds Is Nothing OrElse nctIds.Count = 0 Then
             Return Array.Empty(Of CriterionCluster)()
         End If
+
+        ' Level 0 keeps its own method with the original SQL untouched, rather
+        ' than one query trying to serve both. The no-regression guarantee is
+        ' then something a reviewer can see rather than infer.
+        If rollupLevel <= 0 Then
+            Return Await ClusterExactAsync(nctIds, cancellationToken).ConfigureAwait(False)
+        End If
+        Return Await ClusterRolledUpAsync(nctIds, rollupLevel, cancellationToken).ConfigureAwait(False)
+    End Function
+
+    ''' <summary>
+    ''' Rollup grouping. The winning ancestor is chosen ONCE across the whole
+    ''' clustered set, not per concept - that is what stops two siblings picking
+    ''' different distant ancestors and failing to merge.
+    ''' </summary>
+    ''' <remarks>
+    ''' The obvious alternative - "the furthest ancestor within N levels" - was
+    ''' tried and disproved against real data. SNOMED is multi-parent, so a
+    ''' concept has many ancestors at a given distance; picking the furthest
+    ''' resolves to an arbitrary choice among ties. Measured: Type 1 diabetes
+    ''' selected "Digestive system disease" and Type 2 selected "Endocrinopathy",
+    ''' so the two failed to merge at level 2 despite merging at level 1. See the
+    ''' spec's rollup-rule section.
+    ''' </remarks>
+    Private Async Function ClusterRolledUpAsync(
+            nctIds As IReadOnlyList(Of String),
+            rollupLevel As Integer,
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of CriterionCluster))
+
+        Const RollupSql As String = "
+WITH base AS (
+    SELECT criterion,
+           COALESCE(NULLIF(concept_code, ''), 'concept:' || lower(concept)) AS leaf_key,
+           NULLIF(concept_code, '') AS cui,
+           concept, concept_code, semantic_type, nct_id
+      FROM public.eligibility
+     WHERE nct_id = ANY(@ids)
+),
+concepts AS (
+    SELECT DISTINCT cui FROM base WHERE cui IS NOT NULL
+),
+-- Candidate ancestors, ranked by how many of the clustered concepts each one
+-- covers. HAVING > 1 discards ancestors that merge nothing: rolling a lone
+-- concept up to a parent only makes its label vaguer.
+cand AS (
+    SELECT a.ancestor_cui,
+           count(DISTINCT a.descendant_cui) AS covered
+      FROM umls.concept_ancestor a
+      JOIN concepts c ON c.cui = a.descendant_cui
+     WHERE a.min_distance <= @rollup_level
+     GROUP BY a.ancestor_cui
+    HAVING count(DISTINCT a.descendant_cui) > 1
+),
+-- Specificity: total descendants across the whole hierarchy. Fewer = tighter.
+spec AS (
+    SELECT cd.ancestor_cui, cd.covered,
+           (SELECT count(*) FROM umls.concept_ancestor g
+             WHERE g.ancestor_cui = cd.ancestor_cui) AS breadth
+      FROM cand cd
+),
+-- Each concept adopts the best-ranked ancestor that covers it. DISTINCT ON with
+-- this ORDER BY is the whole rule: coverage, then specificity, then CUI for
+-- determinism.
+pick AS (
+    SELECT DISTINCT ON (a.descendant_cui)
+           a.descendant_cui AS cui,
+           s.ancestor_cui
+      FROM umls.concept_ancestor a
+      -- REQUIRED. Without this join the CTE picks an ancestor for every
+      -- descendant in the whole 3.9M-row hierarchy sitting under a candidate.
+      JOIN concepts c2 ON c2.cui = a.descendant_cui
+      JOIN spec s ON s.ancestor_cui = a.ancestor_cui
+     WHERE a.min_distance <= @rollup_level
+     ORDER BY a.descendant_cui, s.covered DESC, s.breadth ASC, s.ancestor_cui
+)
+SELECT b.criterion,
+       COALESCE(p.ancestor_cui, b.leaf_key)                             AS group_key,
+       bool_or(b.cui IS NOT NULL)                                       AS resolved,
+       COALESCE(max(anc.pref_name), max(b.concept))                     AS concept,
+       COALESCE(max(p.ancestor_cui), max(COALESCE(b.concept_code, ''))) AS concept_code,
+       COALESCE((SELECT string_agg(DISTINCT s2, ', ' ORDER BY s2)
+                   FROM unnest(array_agg(b.semantic_type)) AS s2
+                  WHERE s2 IS NOT NULL AND s2 <> ''), '')               AS semantic_type,
+       count(DISTINCT b.nct_id)                                         AS study_count,
+       count(*)                                                         AS record_count,
+       COALESCE(max(p.ancestor_cui), '')                                AS ancestor_code,
+       COALESCE(max(anc.pref_name), '')                                 AS ancestor_concept,
+       COALESCE(array_agg(DISTINCT b.cui) FILTER (WHERE b.cui IS NOT NULL),
+                ARRAY[]::text[])                                        AS member_codes
+  FROM base b
+  LEFT JOIN pick p ON p.cui = b.cui
+  LEFT JOIN umls.concept anc ON anc.cui = p.ancestor_cui
+ GROUP BY b.criterion, COALESCE(p.ancestor_cui, b.leaf_key)
+ ORDER BY study_count DESC, record_count DESC"
+
+        Dim result As New List(Of CriterionCluster)
+        Using conn = Await _outputDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(False)
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = RollupSql
+                cmd.Parameters.Add(New NpgsqlParameter("ids", NpgsqlDbType.Array Or NpgsqlDbType.Text) With {
+                        .Value = nctIds.ToArray()})
+                cmd.Parameters.Add(New NpgsqlParameter("rollup_level", NpgsqlDbType.Integer) With {
+                        .Value = rollupLevel})
+                Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
+                    While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
+                        Dim members As String() = If(reader.IsDBNull(10),
+                                                     Array.Empty(Of String)(),
+                                                     reader.GetFieldValue(Of String())(10))
+                        result.Add(New CriterionCluster(
+                                criterion:=ReadOutputString(reader, 0),
+                                groupKey:=ReadOutputString(reader, 1),
+                                resolved:=Not reader.IsDBNull(2) AndAlso reader.GetBoolean(2),
+                                concept:=ReadOutputString(reader, 3),
+                                conceptCode:=ReadOutputString(reader, 4),
+                                semanticType:=ReadOutputString(reader, 5),
+                                studyCount:=CInt(reader.GetInt64(6)),
+                                recordCount:=CInt(reader.GetInt64(7)),
+                                ancestorCode:=ReadOutputString(reader, 8),
+                                ancestorConcept:=ReadOutputString(reader, 9),
+                                memberCodes:=members,
+                                rollupLevel:=rollupLevel))
+                    End While
+                End Using
+            End Using
+        End Using
+        Return result
+    End Function
+
+    ''' <summary>Level-0 clustering: exact concept identity, unchanged since V6.</summary>
+    Private Async Function ClusterExactAsync(
+            nctIds As IReadOnlyList(Of String),
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of CriterionCluster))
 
         ' Concept identity: the UMLS concept_code when resolved, else a
         ' 'concept:<lowercased text>' fallback so unresolved criteria still
@@ -3495,7 +3628,13 @@ ORDER BY study_count DESC, record_count DESC"
                                 conceptCode:=ReadOutputString(reader, 4),
                                 semanticType:=ReadOutputString(reader, 5),
                                 studyCount:=CInt(reader.GetInt64(6)),
-                                recordCount:=CInt(reader.GetInt64(7))))
+                                recordCount:=CInt(reader.GetInt64(7)),
+                                ancestorCode:="",
+                                ancestorConcept:="",
+                                memberCodes:=If(String.IsNullOrEmpty(ReadOutputString(reader, 4)),
+                                                Array.Empty(Of String)(),
+                                                New String() {ReadOutputString(reader, 4)}),
+                                rollupLevel:=0))
                     End While
                 End Using
             End Using
@@ -3507,18 +3646,27 @@ ORDER BY study_count DESC, record_count DESC"
             nctIds As IReadOnlyList(Of String),
             criterion As String,
             groupKey As String,
+            memberCodes As IReadOnlyList(Of String),
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of EligibilityRow)) _
             Implements IPostgresGateway.GetClusterRecordsAsync
         If nctIds Is Nothing OrElse nctIds.Count = 0 Then
             Return Array.Empty(Of EligibilityRow)()
         End If
 
+        ' A rolled-up cluster's group key is an ANCESTOR CUI, which is not any
+        ' row's concept_code - so matching on the group key alone would return
+        ' nothing, and the Records expander and Normalize would both silently
+        ' produce empty output. Member codes select those rows instead.
         Const Sql As String = "
 SELECT id, nct_id, criterion, domain, concept, concept_code, semantic_type,
        qualifier, time_window, original_text, umls_name, match_score, match_source, created_at
 FROM public.eligibility
 WHERE nct_id = ANY(@ids) AND criterion = @criterion
-  AND COALESCE(NULLIF(concept_code, ''), 'concept:' || lower(concept)) = @group_key
+  AND (
+        (@members IS NOT NULL AND concept_code = ANY(@members))
+     OR (@members IS NULL
+         AND COALESCE(NULLIF(concept_code, ''), 'concept:' || lower(concept)) = @group_key)
+      )
 ORDER BY nct_id, id"
 
         Dim result As New List(Of EligibilityRow)
@@ -3529,6 +3677,12 @@ ORDER BY nct_id, id"
                         .Value = nctIds.ToArray()})
                 cmd.Parameters.Add(New NpgsqlParameter("criterion", NpgsqlDbType.Text) With {.Value = If(criterion, "")})
                 cmd.Parameters.Add(New NpgsqlParameter("group_key", NpgsqlDbType.Text) With {.Value = If(groupKey, "")})
+                ' DBNull, not an empty array: the predicate branches on IS NULL,
+                ' and an empty array would match nothing on the members arm while
+                ' also suppressing the group-key arm.
+                cmd.Parameters.Add(New NpgsqlParameter("members", NpgsqlDbType.Array Or NpgsqlDbType.Text) With {
+                        .Value = If(memberCodes Is Nothing OrElse memberCodes.Count = 0,
+                                    CObj(DBNull.Value), CObj(memberCodes.ToArray()))})
                 Using reader = Await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(False)
                     While Await reader.ReadAsync(cancellationToken).ConfigureAwait(False)
                         result.Add(New EligibilityRow(

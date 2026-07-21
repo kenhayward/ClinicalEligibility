@@ -298,6 +298,16 @@
                                 <input id="cluster-topn" type="number" min="1" max="200" value="20"
                                        class="form-control" style="width: 8rem;" disabled />
                             </div>
+                            @* Only 0-2: the concept hierarchy is loaded to depth 2,
+                               so a deeper level would silently fail to merge. *@
+                            <div>
+                                <label for="cluster-rollup" class="form-label small text-muted mb-1">Group by</label>
+                                <select id="cluster-rollup" class="form-select" style="width: 12rem;" disabled>
+                                    <option value="0" selected>Exact concept</option>
+                                    <option value="1">Broader (1 level)</option>
+                                    <option value="2">Broader (2 levels)</option>
+                                </select>
+                            </div>
                             <button id="cluster-btn" type="button" class="btn btn-outline-primary" disabled>
                                 Cluster criteria
                             </button>
@@ -529,8 +539,11 @@
             const clusterTopNInput = document.getElementById("cluster-topn");
             const clusterBtnRef = document.getElementById("cluster-btn");
 
+            const clusterRollupInput = document.getElementById("cluster-rollup");
+
             function setClusterControlsEnabled(enabled) {
                 if (clusterTopNInput) { clusterTopNInput.disabled = !enabled; }
+                if (clusterRollupInput) { clusterRollupInput.disabled = !enabled; }
                 if (clusterBtnRef) { clusterBtnRef.disabled = !enabled; }
             }
 
@@ -633,7 +646,10 @@
                 clusterBtn.disabled = true;
                 clusterStatus.textContent = "Clustering…";
                 clusterResults.innerHTML = "";
-                const r = await postForm("/Authoring/Cluster", { nctIds: picks });
+                const rollupEl = document.getElementById("cluster-rollup");
+                const rollupLevel = (rollupEl && rollupEl.value) || "0";
+                const r = await postForm("/Authoring/Cluster",
+                                         { nctIds: picks, rollupLevel: rollupLevel });
                 clusterBtn.disabled = false;
                 if (!r.ok) {
                     clusterStatus.textContent = (r.body && r.body.error) ? r.body.error : "Clustering failed.";
@@ -665,6 +681,7 @@
                 if (clusters.length === 0) { return html + '<p class="text-muted small">None.</p>'; }
                 html += '<div class="table-responsive"><table class="table table-sm align-middle">';
                 html += '<thead><tr><th>Concept</th><th>Code</th>'
+                    + '<th style="width: 12rem;">Rolled up to</th>'
                     + '<th style="width: 9rem;">Semantic type</th>'
                     + '<th style="min-width: 28rem;">Normalized</th>'
                     + '<th style="width: 5rem;"></th>'
@@ -675,9 +692,22 @@
                     + '</tr></thead><tbody>';
                 clusters.forEach(function (c, i) {
                     const rowId = label.toLowerCase() + "-" + i;
+                    // Member codes ride on the buttons so Records and Normalize
+                    // can fetch a rolled-up cluster's rows - its group key is an
+                    // ancestor CUI that matches no row directly.
+                    const members = (c.memberCodes || []).join(",");
+                    // Blank when this concept did not roll up. Roughly half the
+                    // corpus has no SNOMED edges, so blanks are expected and
+                    // normal - showing the column is what makes that read as
+                    // incomplete rather than inconsistent.
+                    const rolled = c.ancestorCode
+                        ? esc(c.ancestorConcept || c.ancestorCode)
+                          + ' <span class="text-muted">(' + (c.memberCodes || []).length + ')</span>'
+                        : '<span class="text-muted">—</span>';
                     html += '<tr>'
                         + '<td>' + esc(c.concept) + (c.resolved ? '' : ' <span class="badge bg-secondary">unresolved</span>') + '</td>'
                         + '<td>' + (c.conceptCode ? '<code>' + esc(c.conceptCode) + '</code>' : '<span class="text-muted">—</span>') + '</td>'
+                        + '<td><small>' + rolled + '</small></td>'
                         + '<td><small>' + esc(c.semanticType) + '</small></td>'
                         + '<td class="cluster-normalized"></td>'
                         + '<td class="cluster-add-cell text-nowrap"></td>'
@@ -685,17 +715,22 @@
                         + '<td class="text-nowrap">'
                           + '<button type="button" class="btn btn-sm btn-outline-secondary cluster-expand" '
                           + 'data-criterion="' + esc(c.criterion) + '" data-groupkey="' + esc(c.groupKey) + '" '
+                          + 'data-members="' + esc(members) + '" '
                           + 'data-row="' + rowId + '">Records</button> '
                           + '<button type="button" class="btn btn-sm btn-outline-primary cluster-normalize" '
                           + 'data-criterion="' + esc(c.criterion) + '" data-groupkey="' + esc(c.groupKey) + '" '
+                          + 'data-members="' + esc(members) + '" '
                           + 'data-row="' + rowId + '" data-concept="' + esc(c.concept) + '" '
                           + 'data-conceptcode="' + esc(c.conceptCode) + '" '
+                          + 'data-ancestorcode="' + esc(c.ancestorCode || "") + '" '
+                          + 'data-ancestorconcept="' + esc(c.ancestorConcept || "") + '" '
+                          + 'data-membercount="' + (c.memberCodes || []).length + '" '
                           + 'data-semantictype="' + esc(c.semanticType) + '" '
                           + 'data-studycount="' + c.studyCount + '">Normalize</button>'
                           + '</td>'
                         + '</tr>';
                     html += '<tr id="detail-' + rowId + '" style="display:none;">'
-                        + '<td colspan="7" class="bg-body-tertiary"><div class="cluster-detail small">…</div></td></tr>';
+                        + '<td colspan="8" class="bg-body-tertiary"><div class="cluster-detail small">…</div></td></tr>';
                 });
                 html += '</tbody></table></div>';
                 return html;
@@ -718,6 +753,11 @@
                         selectedNctIds.forEach(function (id) { params.append("nctIds", id); });
                         params.append("criterion", btn.dataset.criterion);
                         params.append("groupKey", btn.dataset.groupkey);
+                        // Rolled-up clusters need their members: the group key is
+                        // an ancestor CUI and matches no row's concept_code.
+                        (btn.dataset.members || "").split(",")
+                            .filter(function (m) { return m.length > 0; })
+                            .forEach(function (m) { params.append("memberCodes", m); });
                         const resp = await fetch("/Authoring/ClusterRecords?" + params.toString(),
                             { headers: { "Accept": "application/json" } });
                         let body = {};
@@ -791,7 +831,11 @@
                     const r = await postForm("/Authoring/Normalize", {
                         nctIds: selectedNctIds,
                         criterion: btn.dataset.criterion,
-                        groupKey: btn.dataset.groupkey
+                        groupKey: btn.dataset.groupkey,
+                        // Without these a rolled-up cluster sends zero texts to
+                        // the LLM and the result reads as "nothing found".
+                        memberCodes: (btn.dataset.members || "").split(",")
+                            .filter(function (m) { return m.length > 0; })
                     });
                     if (!r.ok) {
                         cell.textContent = (r.body && r.body.error) ? r.body.error : "Normalization failed.";
@@ -852,15 +896,26 @@
                 addBtn.textContent = "Add";
                 addBtn.addEventListener("click", function () {
                     if (typeof window.authoringAddCriterion !== "function") { return; }
+                    // A rolled-up cluster records the ANCESTOR's code, because
+                    // that is the level of description the user accepted -
+                    // "Diabetes Mellitus", not one arbitrary member. Lineage is
+                    // not lost: authoring_criterion_source snapshots every
+                    // underlying leaf row with its own code.
+                    const rolledUp = !!btn.dataset.ancestorcode;
+                    const label = rolledUp
+                        ? (btn.dataset.ancestorconcept || btn.dataset.ancestorcode)
+                        : (btn.dataset.concept || btn.dataset.groupkey);
                     window.authoringAddCriterion({
                         criterion: btn.dataset.criterion,
                         normalizedText: box.value,
-                        concept: btn.dataset.concept || "",
-                        conceptCode: btn.dataset.conceptcode || "",
+                        concept: rolledUp ? label : (btn.dataset.concept || ""),
+                        conceptCode: rolledUp ? btn.dataset.ancestorcode : (btn.dataset.conceptcode || ""),
                         semanticType: btn.dataset.semantictype || "",
                         domain: "",
-                        sourceNote: "From cluster: " + (btn.dataset.concept || btn.dataset.groupkey)
-                            + " (" + btn.dataset.studycount + " studies)",
+                        sourceNote: "From cluster: " + label + (rolledUp
+                            ? " (rolled up from " + btn.dataset.membercount + " concepts, "
+                              + btn.dataset.studycount + " studies)"
+                            : " (" + btn.dataset.studycount + " studies)"),
                         sources: records || []
                     });
                     addBtn.textContent = "Added ✓";
@@ -891,7 +946,9 @@
                     const r = cn.closest("tr");
                     const addBtn = r ? r.querySelector(".cluster-add-cell button") : null;
                     if (!addBtn) { return; }
-                    const code = cn.dataset.conceptcode || "";
+                    // A rolled-up cluster is identified by its ancestor, which is
+                    // what Add persists as the concept code.
+                    const code = cn.dataset.ancestorcode || cn.dataset.conceptcode || "";
                     if (!code) { return; }
                     const type = cn.dataset.criterion || "Inclusion";
                     if (existing.has(type + "|" + code)) {

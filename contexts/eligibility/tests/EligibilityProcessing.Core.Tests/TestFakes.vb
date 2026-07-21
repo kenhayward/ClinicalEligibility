@@ -535,6 +535,7 @@ Friend NotInheritable Class FakeGateway
 
     Public Function ClusterCommonCriteriaAsync(
             nctIds As IReadOnlyList(Of String),
+            rollupLevel As Integer,
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of CriterionCluster)) _
             Implements IPostgresGateway.ClusterCommonCriteriaAsync
         Return Task.FromResult(CType(Array.Empty(Of CriterionCluster)(), IReadOnlyList(Of CriterionCluster)))
@@ -542,6 +543,7 @@ Friend NotInheritable Class FakeGateway
 
     Public Function GetClusterRecordsAsync(
             nctIds As IReadOnlyList(Of String), criterion As String, groupKey As String,
+            memberCodes As IReadOnlyList(Of String),
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of EligibilityRow)) _
             Implements IPostgresGateway.GetClusterRecordsAsync
         Return Task.FromResult(CType(Array.Empty(Of EligibilityRow)(), IReadOnlyList(Of EligibilityRow)))

@@ -3333,7 +3333,7 @@ Public Class PostgresGatewayIntegrationTests
                 conceptCode:="", semanticType:="Finding")
 
         Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
-                {"NCT00000001", "NCT00000002"}, CancellationToken.None)
+                {"NCT00000001", "NCT00000002"}, 0, CancellationToken.None)
 
         Dim cluster = clusters.Single(Function(c) c.Concept = "anaemia")
         ' Both present, in a stable order - previously this returned "Finding"
@@ -3469,6 +3469,214 @@ ON CONFLICT (tui) DO NOTHING"
                 New EligibilityFilter(semanticTypeTuis:={"T121"}), "", 1, 50, CancellationToken.None)
 
         Assert.Equal(0L, page.TotalRows)
+    End Function
+
+    ' ============ ClusterCommonCriteria rollup ============
+
+    Private Async Function SeedHierarchyAsync(edges As (Child As String, Parent As String)()) As Task
+        Dim store As New UmlsMetathesaurusStore(_fixture.DataSource)
+        Await store.LoadConceptHierarchyAsync(
+                edges.Select(Function(e) New ConceptEdgeRow With {.ChildCui = e.Child, .ParentCui = e.Parent}),
+                2, CancellationToken.None)
+    End Function
+
+    ' Level 0 is the default and the no-regression path: it must behave exactly
+    ' as it did before rollup existed.
+    <SkippableFact>
+    Public Async Function Cluster_level_zero_groups_by_exact_concept_identity() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "type 2 diabetes", conceptCode:="C0011860")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "type 1 diabetes", conceptCode:="C0011854")
+        Await SeedHierarchyAsync({("C0011860", "C0011849"), ("C0011854", "C0011849")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, 0, CancellationToken.None)
+
+        Assert.Equal(2, clusters.Count)
+        Assert.All(clusters, Sub(c) Assert.Equal(0, c.RollupLevel))
+        Assert.All(clusters, Sub(c) Assert.Equal("", c.AncestorCode))
+    End Function
+
+    <SkippableFact>
+    Public Async Function Cluster_level_one_merges_siblings_under_their_parent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "type 2 diabetes", conceptCode:="C0011860")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "type 1 diabetes", conceptCode:="C0011854")
+        Await SeedHierarchyAsync({("C0011860", "C0011849"), ("C0011854", "C0011849")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, 1, CancellationToken.None)
+
+        Dim merged = Assert.Single(clusters)
+        Assert.Equal("C0011849", merged.AncestorCode)
+        Assert.Equal(2, merged.StudyCount)
+        Assert.Equal({"C0011854", "C0011860"}, merged.MemberCodes.OrderBy(Function(m) m).ToArray())
+    End Function
+
+    ' THE REGRESSION TEST for the rule that was wrong. Both concepts share
+    ' C0011849 at distance 1, but have DIFFERENT extra ancestors at distance 2.
+    ' The superseded "furthest ancestor within N" rule picked a different distant
+    ' ancestor for each and split them. Coverage ranking must keep them together.
+    <SkippableFact>
+    Public Async Function Cluster_level_two_still_merges_when_distant_ancestors_differ() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "type 2 diabetes", conceptCode:="C0011860")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "type 1 diabetes", conceptCode:="C0011854")
+        ' Shared parent, then divergent grandparents - the real SNOMED shape.
+        Await SeedHierarchyAsync({
+            ("C0011860", "C0011849"), ("C0011854", "C0011849"),
+            ("C0011849", "C0014130"),
+            ("C0011854", "C0012242")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, 2, CancellationToken.None)
+
+        Dim merged = Assert.Single(clusters)
+        Assert.Equal(2, merged.MemberCodes.Count)
+    End Function
+
+    ' Specificity tiebreak: when two ancestors cover the same concepts, the one
+    ' with fewer global descendants wins, so a cluster is not labelled with an
+    ' over-broad concept.
+    <SkippableFact>
+    Public Async Function Cluster_prefers_the_more_specific_of_two_equal_ancestors() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "concept a", conceptCode:="C0000001")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "concept b", conceptCode:="C0000002")
+        ' Both roll to NARROW and BROAD. BROAD also has many other descendants,
+        ' so it is less specific and must lose.
+        Await SeedHierarchyAsync({
+            ("C0000001", "C0000900"), ("C0000002", "C0000900"),
+            ("C0000900", "C0000999"),
+            ("C0000011", "C0000999"), ("C0000012", "C0000999"),
+            ("C0000013", "C0000999"), ("C0000014", "C0000999")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, 2, CancellationToken.None)
+
+        Dim merged = Assert.Single(clusters)
+        Assert.Equal("C0000900", merged.AncestorCode)
+    End Function
+
+    ' An ancestor covering only one clustered concept merges nothing, so rolling
+    ' up to it would only make the label vaguer. The concept keeps its own key.
+    <SkippableFact>
+    Public Async Function Cluster_does_not_roll_up_a_concept_with_no_shared_ancestor() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "lonely", conceptCode:="C0000001")
+        Await SeedHierarchyAsync({("C0000001", "C0000900")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001"}, 1, CancellationToken.None)
+
+        Dim only = Assert.Single(clusters)
+        Assert.Equal("", only.AncestorCode)
+        Assert.Equal("C0000001", only.ConceptCode)
+    End Function
+
+    ' Concepts with no SNOMED edges are ~47% of the corpus. They must still be
+    ' returned, unrolled, not dropped.
+    <SkippableFact>
+    Public Async Function Cluster_returns_concepts_absent_from_the_hierarchy() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "no edges", conceptCode:="C9999999")
+        Await SeedHierarchyAsync({("C0011860", "C0011849")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001"}, 2, CancellationToken.None)
+
+        Dim only = Assert.Single(clusters)
+        Assert.Equal("C9999999", only.ConceptCode)
+        Assert.Equal("", only.AncestorCode)
+    End Function
+
+    ' Unresolved criteria have no CUI, so the hierarchy cannot apply. They keep
+    ' the lowercased-text fallback at every level.
+    <SkippableFact>
+    Public Async Function Cluster_unresolved_criteria_group_by_text_at_every_level() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "Anaemia", conceptCode:="")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "anaemia", conceptCode:="")
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, 2, CancellationToken.None)
+
+        Dim only = Assert.Single(clusters)
+        Assert.False(only.Resolved)
+        Assert.Equal(2, only.StudyCount)
+    End Function
+
+    ' Inclusion and Exclusion are different criteria even for the same concept -
+    ' rollup must not merge across them.
+    <SkippableFact>
+    Public Async Function Cluster_never_merges_inclusion_with_exclusion() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "type 2 diabetes", conceptCode:="C0011860")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Exclusion", "type 1 diabetes", conceptCode:="C0011854")
+        Await SeedHierarchyAsync({("C0011860", "C0011849"), ("C0011854", "C0011849")})
+
+        Dim clusters = Await _fixture.Gateway.ClusterCommonCriteriaAsync(
+                {"NCT00000001", "NCT00000002"}, 1, CancellationToken.None)
+
+        Assert.Equal(2, clusters.Count)
+    End Function
+
+    ' ============ GetClusterRecords for a rolled-up cluster ============
+    '
+    ' A rolled-up cluster's group key is an ANCESTOR CUI, which matches no row's
+    ' concept_code. Without member codes the Records expander would be empty and
+    ' Normalize would send zero texts to the LLM - and a Normalize button that
+    ' silently produces nothing reads as "no common phrasing found", not as a bug.
+
+    <SkippableFact>
+    Public Async Function ClusterRecords_returns_all_members_of_a_rolled_up_cluster() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "type 2 diabetes", conceptCode:="C0011860")
+        Await _fixture.InsertEligibilityRowAsync("NCT00000002", "Inclusion", "type 1 diabetes", conceptCode:="C0011854")
+
+        Dim rows = Await _fixture.Gateway.GetClusterRecordsAsync(
+                {"NCT00000001", "NCT00000002"}, "Inclusion", "C0011849",
+                {"C0011860", "C0011854"}, CancellationToken.None)
+
+        Assert.Equal(2, rows.Count)
+    End Function
+
+    ' Level 0 passes no members and must still match on the group key alone.
+    <SkippableFact>
+    Public Async Function ClusterRecords_falls_back_to_group_key_when_no_members_given() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "type 2 diabetes", conceptCode:="C0011860")
+
+        Dim rows = Await _fixture.Gateway.GetClusterRecordsAsync(
+                {"NCT00000001"}, "Inclusion", "C0011860",
+                Array.Empty(Of String)(), CancellationToken.None)
+
+        Assert.Single(rows)
+    End Function
+
+    ' Unresolved clusters roll up to nothing, so their group key stays the
+    ' 'concept:<text>' form and members are empty.
+    <SkippableFact>
+    Public Async Function ClusterRecords_still_matches_unresolved_text_group_keys() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await _fixture.InsertEligibilityRowAsync("NCT00000001", "Inclusion", "Anaemia", conceptCode:="")
+
+        Dim rows = Await _fixture.Gateway.GetClusterRecordsAsync(
+                {"NCT00000001"}, "Inclusion", "concept:anaemia",
+                Array.Empty(Of String)(), CancellationToken.None)
+
+        Assert.Single(rows)
     End Function
 
     ' ============ V23 schema ============
