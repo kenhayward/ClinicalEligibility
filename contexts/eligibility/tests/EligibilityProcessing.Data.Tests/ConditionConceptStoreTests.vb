@@ -1,5 +1,6 @@
 Imports System.Threading
 Imports System.Threading.Tasks
+Imports EligibilityProcessing.Core
 Imports Npgsql
 Imports Xunit
 
@@ -55,6 +56,26 @@ WHERE schemaname = 'public' AND tablename = 'condition_concept'"
                 Assert.Contains("ix_condition_concept_code", indexes)
                 Assert.Contains("ix_condition_concept_pending", indexes)
             End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function Sql_normalization_matches_ConceptKey_Normalize() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+
+        Dim samples = {"COPD", "  Breast   Cancer  ", "Non-Small Cell", "COVID-19",
+                       "Type" & vbTab & "2 Diabetes", "hiv/aids"}
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            For Each s In samples
+                Using cmd = conn.CreateCommand()
+                    cmd.CommandText =
+                        "SELECT regexp_replace(btrim(lower(@raw)), '\s+', ' ', 'g')"
+                    cmd.Parameters.AddWithValue("raw", s)
+                    Dim fromSql = CStr(Await cmd.ExecuteScalarAsync())
+                    Assert.Equal(ConceptKey.Normalize(s), fromSql)
+                End Using
+            Next
         End Using
     End Function
 End Class

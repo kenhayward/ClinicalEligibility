@@ -20,7 +20,6 @@ Imports NpgsqlTypes
 
 Public NotInheritable Class UmlsMetathesaurusStore
 
-    Private Shared ReadOnly WhitespaceRegex As New Regex("\s+", RegexOptions.Compiled)
     Private Shared ReadOnly NonWordRegex As New Regex("\W+", RegexOptions.Compiled)
 
     Private ReadOnly _dataSource As NpgsqlDataSource
@@ -36,8 +35,7 @@ Public NotInheritable Class UmlsMetathesaurusStore
     ''' Deterministic so the loader and the query agree.
     ''' </summary>
     Public Shared Function NormalizeConcept(value As String) As String
-        If String.IsNullOrWhiteSpace(value) Then Return ""
-        Return WhitespaceRegex.Replace(value.Trim().ToLowerInvariant(), " ")
+        Return ConceptKey.Normalize(value)
     End Function
 
     ' ============ runtime reads (PostgresUmlsClient) ============
