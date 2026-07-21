@@ -1,7 +1,16 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 3, "build": 0, "releaseDate": "2026-07-20" },
+  "current": { "major": 0, "minor": 3, "build": 1, "releaseDate": "2026-07-21" },
   "releases": [
+    {
+      "version": "0.3.1",
+      "releaseDate": "2026-07-21",
+      "enhancements": [
+        "Analysis tab: criteria clustering gained a Group by control. At Broader (1 or 2 levels) related criteria are grouped under a shared broader concept, so Type 1 and Type 2 diabetes appear as one line rather than two. Exact concept remains the default and is unchanged.",
+        "A rolled-up cluster shows what it was grouped under and how many concepts it merged. Concepts with no hierarchy entry are left ungrouped and marked as such."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.3.0",
       "releaseDate": "2026-07-20",

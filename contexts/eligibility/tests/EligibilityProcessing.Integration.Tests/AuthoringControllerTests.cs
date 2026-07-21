@@ -124,6 +124,19 @@ public class AuthoringControllerTests
         Assert.Contains(">Dashboard</span>", body);
     }
 
+    // NO TEST FOR ROLLUP-LEVEL BINDING HERE, deliberately.
+    //
+    // Cluster carries [ValidateAntiForgeryToken], and the Post helper below
+    // sends no token - the existing tests only use it to assert Forbidden, which
+    // authorization returns BEFORE the antiforgery filter runs. Any assertion
+    // about level binding would therefore see a 400 from antiforgery and could
+    // not distinguish "clamped correctly" from "rejected for a missing token".
+    // A test that cannot fail for the reason it names is worse than none.
+    //
+    // The clamp is one Math.Clamp call; the rule it guards is covered properly
+    // by the gateway integration tests in PostgresGatewayIntegrationTests, and
+    // the UI round-trip is covered by manual verification.
+
     // ===== helpers =====
 
     private static async Task<HttpStatusCode> Post(string url, string role)
