@@ -15,6 +15,7 @@ Public Class ConditionNormalizeJobTests
         Public Property Upserted As New List(Of ConditionConceptEntry)
         Public Property SeedCalls As Integer
         Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of UmlsCandidate))
+        Public Property LastForce As Boolean?
 
         Public Function LookupExactAsync(conditionNorm As String, cancellationToken As CancellationToken) _
                 As Task(Of IReadOnlyList(Of UmlsCandidate)) Implements IConditionConceptStore.LookupExactAsync
@@ -47,6 +48,7 @@ Public Class ConditionNormalizeJobTests
 
         Public Function CountPendingAsync(force As Boolean, cancellationToken As CancellationToken) _
                 As Task(Of Integer) Implements IConditionConceptStore.CountPendingAsync
+            LastForce = force
             Return Task.FromResult(Pending.Count)
         End Function
     End Class
@@ -111,5 +113,26 @@ Public Class ConditionNormalizeJobTests
         Await NewJob(store).RunAsync(New NormalizeConditionsOptions(), Nothing, CancellationToken.None)
 
         Assert.Equal(42, store.Upserted.Single().StudyCount)
+    End Function
+
+    <Fact>
+    Public Async Function CountRemaining_delegates_to_store_and_passes_force() As Task
+        Dim store As New JobStore()
+        store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = "stroke", .RawForm = "Stroke", .StudyCount = 9})
+        store.Pending.Add(New ConditionConceptEntry With {.ConditionNorm = "diabetes", .RawForm = "Diabetes", .StudyCount = 5})
+
+        Dim job = NewJob(store)
+
+        ' Test with force = True
+        Dim result = Await job.CountRemainingAsync(True, CancellationToken.None)
+        Assert.Equal(2, result)
+        Assert.True(store.LastForce.HasValue)
+        Assert.True(store.LastForce.Value)
+
+        ' Test with force = False
+        result = Await job.CountRemainingAsync(False, CancellationToken.None)
+        Assert.Equal(2, result)
+        Assert.True(store.LastForce.HasValue)
+        Assert.False(store.LastForce.Value)
     End Function
 End Class
