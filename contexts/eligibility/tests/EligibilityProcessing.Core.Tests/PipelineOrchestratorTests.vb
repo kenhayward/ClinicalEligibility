@@ -1603,7 +1603,7 @@ Friend NotInheritable Class ThrowingConditionConceptStore
     End Function
 
     Public Function LookupExactAsync(
-            conditionNorm As String, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of UmlsCandidate)) _
+            conditionNorm As String, cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConditionCandidate)) _
             Implements IConditionConceptStore.LookupExactAsync
         Throw New NotImplementedException()
     End Function

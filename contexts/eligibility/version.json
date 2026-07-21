@@ -1,7 +1,15 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 4, "build": 0, "releaseDate": "2026-07-21" },
+  "current": { "major": 0, "minor": 4, "build": 1, "releaseDate": "2026-07-21" },
   "releases": [
+    {
+      "version": "0.4.1",
+      "releaseDate": "2026-07-21",
+      "enhancements": [],
+      "fixes": [
+        "Condition normalizer: when several exact-match CUIs tied for a condition string, the tie-break preferred the CUI whose preferred name literally matched the query text, even when that CUI could never roll up to a broader concept (no umls.concept_ancestor entry) - the whole point of the hierarchy feature. Measured on production, 34% of ambiguous condition strings in a 200-string sample picked a hierarchy-less CUI over a hierarchy-bearing alternative (12,526 affected study mentions), including stroke resolving to a LOINC 'Finding' code instead of the SNOMED disease concept. The tie-break now checks hierarchy-eligibility first, falling back to preferred-name match, then match score, then CUI order only when no candidate has hierarchy - unchanged behaviour in that case."
+      ]
+    },
     {
       "version": "0.4.0",
       "releaseDate": "2026-07-21",

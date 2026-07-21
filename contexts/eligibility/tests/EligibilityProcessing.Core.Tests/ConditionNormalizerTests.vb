@@ -28,17 +28,17 @@ Public Class ConditionNormalizerTests
     Private NotInheritable Class FakeStore
         Implements IConditionConceptStore
 
-        Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of UmlsCandidate))
+        Public Property ExactByNorm As New Dictionary(Of String, IReadOnlyList(Of ConditionCandidate))
         Public Property Upserted As New List(Of ConditionConceptEntry)
         Public Property UnseenByStudy As New Dictionary(Of String, IReadOnlyList(Of String))
         Public Property LookupCallCount As Integer
 
         Public Function LookupExactAsync(conditionNorm As String, cancellationToken As CancellationToken) _
-                As Task(Of IReadOnlyList(Of UmlsCandidate)) Implements IConditionConceptStore.LookupExactAsync
+                As Task(Of IReadOnlyList(Of ConditionCandidate)) Implements IConditionConceptStore.LookupExactAsync
             LookupCallCount += 1
-            Dim hit As IReadOnlyList(Of UmlsCandidate) = Nothing
+            Dim hit As IReadOnlyList(Of ConditionCandidate) = Nothing
             If ExactByNorm.TryGetValue(conditionNorm, hit) Then Return Task.FromResult(hit)
-            Return Task.FromResult(Of IReadOnlyList(Of UmlsCandidate))(Array.Empty(Of UmlsCandidate)())
+            Return Task.FromResult(Of IReadOnlyList(Of ConditionCandidate))(Array.Empty(Of ConditionCandidate)())
         End Function
 
         Public Function UpsertAsync(entry As ConditionConceptEntry, cancellationToken As CancellationToken) _
@@ -103,7 +103,7 @@ Public Class ConditionNormalizerTests
     <Fact>
     Public Async Function Tier1a_accepts_exact_match_without_consulting_the_scorer() As Task
         Dim store As New FakeStore()
-        store.ExactByNorm("stroke") = {New UmlsCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US")}
+        store.ExactByNorm("stroke") = {New ConditionCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US", hasHierarchy:=False)}
         Dim client As New FakeUmlsClient()
 
         Dim result = Await NewNormalizer(store, client).ResolveAsync("Stroke", CancellationToken.None)
@@ -122,7 +122,7 @@ Public Class ConditionNormalizerTests
     <Fact>
     Public Async Function Tier1a_resolves_to_unresolved_when_the_only_candidate_has_an_empty_ui() As Task
         Dim store As New FakeStore()
-        store.ExactByNorm("stroke") = {New UmlsCandidate("", "CVA - Cerebrovascular accident", "SNOMEDCT_US")}
+        store.ExactByNorm("stroke") = {New ConditionCandidate("", "CVA - Cerebrovascular accident", "SNOMEDCT_US", hasHierarchy:=False)}
 
         Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Stroke", CancellationToken.None)
 
@@ -137,14 +137,81 @@ Public Class ConditionNormalizerTests
     Public Async Function Tier1b_prefers_the_cui_whose_pref_name_equals_the_query() As Task
         Dim store As New FakeStore()
         store.ExactByNorm("depression") = {
-            New UmlsCandidate("C9999999", "Depressive disorder", "MSH"),
-            New UmlsCandidate("C0011570", "Depression", "SNOMEDCT_US")}
+            New ConditionCandidate("C9999999", "Depressive disorder", "MSH", hasHierarchy:=False),
+            New ConditionCandidate("C0011570", "Depression", "SNOMEDCT_US", hasHierarchy:=False)}
 
         Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Depression", CancellationToken.None)
 
         Assert.Equal("C0011570", result.ConceptCode)
         Assert.Equal(ConditionMatchTier.ExactAmbiguous, result.Tier)
         Assert.Equal(1.0, result.Score)
+    End Function
+
+    ' THE regression test for this defect (design defect fixed 2026-07-21):
+    ' a hierarchy-bearing candidate must beat a candidate whose preferred name
+    ' literally equals the query but which cannot roll up (no
+    ' umls.concept_ancestor entry). Modeled on production "stroke": C0038454
+    ' (SNOMED "CVA - Cerebrovascular accident", has hierarchy) vs C5977286
+    ' (LOINC "Stroke", a Finding with no hierarchy). This test FAILS against the
+    ' old rule order, which put preferred-name equality first and picked the
+    ' hierarchy-less LOINC concept.
+    <Fact>
+    Public Async Function Tier1b_prefers_hierarchy_bearing_candidate_over_exact_pref_name_match() As Task
+        Dim store As New FakeStore()
+        store.ExactByNorm("stroke") = {
+            New ConditionCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US", hasHierarchy:=True),
+            New ConditionCandidate("C5977286", "Stroke", "LNC", hasHierarchy:=False)}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Stroke", CancellationToken.None)
+
+        Assert.Equal("C0038454", result.ConceptCode)
+        Assert.Equal(ConditionMatchTier.ExactAmbiguous, result.Tier)
+    End Function
+
+    ' When no candidate has hierarchy, rule 1 does not discriminate and the
+    ' preferred-name-equality rule still decides - no regression on that path.
+    <Fact>
+    Public Async Function Tier1b_when_no_candidate_has_hierarchy_pref_name_equality_still_decides() As Task
+        Dim store As New FakeStore()
+        store.ExactByNorm("depression") = {
+            New ConditionCandidate("C9999999", "Depressive disorder", "MSH", hasHierarchy:=False),
+            New ConditionCandidate("C0011570", "Depression", "SNOMEDCT_US", hasHierarchy:=False)}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Depression", CancellationToken.None)
+
+        Assert.Equal("C0011570", result.ConceptCode)
+        Assert.Equal(ConditionMatchTier.ExactAmbiguous, result.Tier)
+    End Function
+
+    ' Several candidates have hierarchy (rule 1 does not discriminate) and none
+    ' has a preferred name matching the query (rule 2 does not discriminate
+    ' either) - the highest scorer value (rule 3) decides.
+    <Fact>
+    Public Async Function Tier1b_when_multiple_have_hierarchy_and_none_match_name_highest_scorer_wins() As Task
+        Dim store As New FakeStore()
+        store.ExactByNorm("ambiguous term") = {
+            New ConditionCandidate("C0000300", "Ambiguous Term Match", "SNOMEDCT_US", hasHierarchy:=True),
+            New ConditionCandidate("C0000200", "Something Else", "MSH", hasHierarchy:=True),
+            New ConditionCandidate("C0000100", "Something Else", "MSH", hasHierarchy:=True)}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Ambiguous Term", CancellationToken.None)
+
+        Assert.Equal("C0000300", result.ConceptCode)
+    End Function
+
+    ' Same set-up, but with a genuine score tie between two hierarchy-bearing
+    ' candidates (identical preferred name) - rule 4, the lexicographically
+    ' lowest CUI, breaks it deterministically.
+    <Fact>
+    Public Async Function Tier1b_hierarchy_candidates_with_equal_scores_break_ties_by_lowest_cui() As Task
+        Dim store As New FakeStore()
+        store.ExactByNorm("ambiguous term") = {
+            New ConditionCandidate("C0000200", "Something Else", "MSH", hasHierarchy:=True),
+            New ConditionCandidate("C0000100", "Something Else", "MSH", hasHierarchy:=True)}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Ambiguous Term", CancellationToken.None)
+
+        Assert.Equal("C0000100", result.ConceptCode)
     End Function
 
     ' Regression test: PickAmbiguous used to end its fallback ranking with
@@ -173,8 +240,8 @@ Public Class ConditionNormalizerTests
         ' "Stroke" normalizes to the query, so PickAmbiguous's exact-name rule
         ' picks this candidate over the other - and it has an empty Ui.
         store.ExactByNorm("stroke") = {
-            New UmlsCandidate("", "Stroke", "SNOMEDCT_US"),
-            New UmlsCandidate("C9999999", "Something Else", "MSH")}
+            New ConditionCandidate("", "Stroke", "SNOMEDCT_US", hasHierarchy:=False),
+            New ConditionCandidate("C9999999", "Something Else", "MSH", hasHierarchy:=False)}
 
         Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Stroke", CancellationToken.None)
 
@@ -189,8 +256,8 @@ Public Class ConditionNormalizerTests
         ' Two candidates, neither equal to the query, both scoring identically
         ' because the names are the same string.
         store.ExactByNorm("ambiguous term") = {
-            New UmlsCandidate("C0000200", "Something Else", "MSH"),
-            New UmlsCandidate("C0000100", "Something Else", "MSH")}
+            New ConditionCandidate("C0000200", "Something Else", "MSH", hasHierarchy:=False),
+            New ConditionCandidate("C0000100", "Something Else", "MSH", hasHierarchy:=False)}
 
         Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Ambiguous Term", CancellationToken.None)
 
@@ -202,8 +269,8 @@ Public Class ConditionNormalizerTests
     Public Async Function Tier1b_accepts_even_when_every_score_is_below_the_fuzzy_threshold() As Task
         Dim store As New FakeStore()
         store.ExactByNorm("cancer") = {
-            New UmlsCandidate("C0006826", "Blastoma", "MSH"),
-            New UmlsCandidate("C0998888", "Neoplasm unspecified morphology", "MSH")}
+            New ConditionCandidate("C0006826", "Blastoma", "MSH", hasHierarchy:=False),
+            New ConditionCandidate("C0998888", "Neoplasm unspecified morphology", "MSH", hasHierarchy:=False)}
 
         Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Cancer", CancellationToken.None)
 
@@ -308,8 +375,8 @@ Public Class ConditionNormalizerTests
     Public Async Function EnsureForStudy_upserts_only_unseen_strings() As Task
         Dim store As New FakeStore()
         store.UnseenByStudy("NCT001") = {"Stroke", "COPD"}
-        store.ExactByNorm("stroke") = {New UmlsCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US")}
-        store.ExactByNorm("copd") = {New UmlsCandidate("C0024117", "COPD", "SNOMEDCT_US")}
+        store.ExactByNorm("stroke") = {New ConditionCandidate("C0038454", "CVA - Cerebrovascular accident", "SNOMEDCT_US", hasHierarchy:=False)}
+        store.ExactByNorm("copd") = {New ConditionCandidate("C0024117", "COPD", "SNOMEDCT_US", hasHierarchy:=False)}
 
         Dim written = Await NewNormalizer(store, New FakeUmlsClient()).EnsureForStudyAsync("NCT001", CancellationToken.None)
 
