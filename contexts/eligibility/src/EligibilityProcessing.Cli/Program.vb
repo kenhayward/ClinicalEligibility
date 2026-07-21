@@ -470,7 +470,7 @@ Module Program
             Dim sw = Stopwatch.StartNew()
             Dim progressCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
             Dim progressTask = ReportProgressAsync(
-                    total,
+                    Function() total,
                     Function() If(latest Is Nothing, 0, latest.Processed),
                     Function() $"studies - {MetricValue(latest, "Embedded")} embedded, {MetricValue(latest, "Failed")} failed",
                     sw, progressCts.Token)
@@ -521,19 +521,30 @@ Module Program
         ' single-line progress renderer, fed from the job's snapshots.
         Using scope = appHost.Services.CreateScope()
             Dim job = scope.ServiceProvider.GetRequiredService(Of IConditionNormalizeJob)()
-            Dim remaining = Await job.CountRemainingAsync(force, cancellationToken).ConfigureAwait(False)
-            Dim total = If(count > 0, Math.Min(count, remaining), remaining)
+
+            ' Deliberately NO zero-guard here, unlike embed-studies / normalize-umls.
+            ' CountRemainingAsync (-> CountPendingAsync) counts rows already in
+            ' public.condition_concept, which is EMPTY on a fresh corpus - a
+            ' pre-seed zero means "not seeded yet", not "nothing to do". RunAsync
+            ' always seeds the dictionary from the corpus before resolving
+            ' (except on --dry-run - see ConditionNormalizeJob.RunAsync), so
+            ' bailing out on a pre-seed zero would make this verb a permanent
+            ' no-op on first use. Do not reintroduce the guard.
+            '
+            ' For the same reason we do not print a pre-seed count here: any count
+            ' taken before seeding is stale the moment seeding runs. The progress
+            ' line's denominator instead comes from the job's own snapshots below,
+            ' which reflect the post-seed total once the first snapshot arrives.
             System.Console.WriteLine(
-                    $"Normalizing {total} condition string(s)" &
-                    If(dryRun, " (dry-run)", "") & If(force, " (force)", "") & "...")
-            If total = 0 Then Return 0
+                    "Seeding the condition dictionary and normalizing..." &
+                    If(dryRun, " (dry-run)", "") & If(force, " (force)", ""))
 
             Dim latest As ToolJobSnapshot = Nothing
             Dim sink As New SnapshotSink(Sub(s) latest = s)
             Dim sw = Stopwatch.StartNew()
             Dim progressCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
             Dim progressTask = ReportProgressAsync(
-                    total,
+                    Function() If(latest Is Nothing, 0, latest.Total),
                     Function() If(latest Is Nothing, 0, latest.Processed),
                     Function() $"conditions - {MetricValue(latest, "Resolved")} resolved, {MetricValue(latest, "Unresolved")} unresolved",
                     sw, progressCts.Token)
@@ -969,7 +980,7 @@ Module Program
             Dim sw = Stopwatch.StartNew()
             Dim progressCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
             Dim progressTask = ReportProgressAsync(
-                    total,
+                    Function() total,
                     Function() If(latest Is Nothing, 0, latest.Processed),
                     Function() $"concepts - {MetricValue(latest, "Resolved")} resolved, {MetricValue(latest, "Not a concept")} none, {MetricValue(latest, "Rows updated")} rows",
                     sw, progressCts.Token)
@@ -1007,15 +1018,20 @@ Module Program
     End Function
 
     ' Generic background progress reporter for long CLI batches. Periodically reads
-    ' the current count (getProcessed) + a caller-built detail string (getDetail) and
-    ' renders one line with elapsed wall-clock + a rate-based ETA + projected finish.
-    ' Rewrites a single line in place on a TTY (every ~0.75s); emits a periodic line
-    ' when output is redirected/piped (every ~5s) so captured logs aren't flooded with
-    ' carriage returns. Stops when the caller cancels the token after the batch ends.
+    ' the current total (getTotal) + count (getProcessed) + a caller-built detail
+    ' string (getDetail) and renders one line with elapsed wall-clock + a rate-based
+    ' ETA + projected finish. Rewrites a single line in place on a TTY (every
+    ' ~0.75s); emits a periodic line when output is redirected/piped (every ~5s) so
+    ' captured logs aren't flooded with carriage returns. Stops when the caller
+    ' cancels the token after the batch ends.
     ' The getters are read from a background thread while the workers update them;
     ' int reads are atomic and this is display-only, so no locking is needed.
+    ' getTotal is a callback (not a fixed Integer) so a caller whose denominator is
+    ' only known after the job starts (normalize-conditions - the total isn't known
+    ' until after the corpus seed) can update it once the first snapshot arrives;
+    ' callers with a fixed total up front just pass a constant lambda.
     Private Async Function ReportProgressAsync(
-            total As Integer,
+            getTotal As Func(Of Integer),
             getProcessed As Func(Of Integer),
             getDetail As Func(Of String),
             sw As Stopwatch,
@@ -1024,7 +1040,7 @@ Module Program
         Try
             Do
                 Await Task.Delay(If(redirected, 5000, 750), cancellationToken).ConfigureAwait(False)
-                WriteProgressLine(getProcessed(), total, getDetail(), sw, redirected)
+                WriteProgressLine(getProcessed(), getTotal(), getDetail(), sw, redirected)
             Loop
         Catch ex As OperationCanceledException
             ' Stopped by the caller once the batch completes.
@@ -1163,8 +1179,12 @@ Module Program
         System.Console.WriteLine("  EligibilityProcessing.Cli normalize-conditions [--count N] [--dry-run] [--force]")
         System.Console.WriteLine("      Map AACT condition strings to UMLS CUIs for the analytics condition slice.")
         System.Console.WriteLine("      Seeds the dictionary from the corpus, then resolves pending rows highest")
-        System.Console.WriteLine("      study_count first. Safe to re-run; --dry-run reports without writing;")
-        System.Console.WriteLine("      --force re-attempts already-resolved rows.")
+        System.Console.WriteLine("      study_count first. Safe to re-run. --dry-run reports without writing and")
+        System.Console.WriteLine("      does NOT seed the dictionary either, so on a never-seeded table a dry run")
+        System.Console.WriteLine("      reports nothing to do. --force re-attempts already-resolved rows. Each")
+        System.Console.WriteLine("      row is marked resolved as soon as it is attempted, even on failure - if a")
+        System.Console.WriteLine("      run fails partway, re-run with --force to revisit the rows it already")
+        System.Console.WriteLine("      touched.")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli load-umls --rrf-dir <path> [--semantic-types-only]")
         System.Console.WriteLine("                                       [--hierarchy-only] [--max-depth N]")
