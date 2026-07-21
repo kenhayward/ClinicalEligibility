@@ -399,7 +399,7 @@ git commit -m "Move concept normalization into Core so the condition key cannot 
 
 **Files:**
 - Create: `contexts/eligibility/src/EligibilityProcessing.Core/ConditionConcept.vb`
-- Test: none of its own (types are exercised by Task 4)
+- Test: `contexts/eligibility/tests/EligibilityProcessing.Core.Tests/ConditionConceptTypeTests.vb`
 
 **Interfaces:**
 - Produces: `ConditionMatchTier`, `ConditionResolution`, `ConditionConceptEntry`, `IConditionConceptStore` - all consumed by Tasks 4, 5, 6, 7, 8.
@@ -517,18 +517,69 @@ Public Interface IConditionConceptStore
 End Interface
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [ ] **Step 2: Write the test**
 
-```powershell
-dotnet build contexts/eligibility/src/EligibilityProcessing.Core
+Create `contexts/eligibility/tests/EligibilityProcessing.Core.Tests/ConditionConceptTypeTests.vb`. These types carry defaults that later tasks rely on, so pin them:
+
+```vb
+Imports EligibilityProcessing.Core
+Imports Xunit
+
+Public Class ConditionConceptTypeTests
+
+    <Fact>
+    Public Sub Tier_constants_match_the_values_persisted_in_match_tier()
+        ' These strings are written to public.condition_concept.match_tier and
+        ' read back by the analytics queries in sub-project 2. Changing one is a
+        ' data migration, not a rename.
+        Assert.Equal("exact", ConditionMatchTier.Exact)
+        Assert.Equal("exact_ambiguous", ConditionMatchTier.ExactAmbiguous)
+        Assert.Equal("fuzzy", ConditionMatchTier.Fuzzy)
+        Assert.Equal("unresolved", ConditionMatchTier.Unresolved)
+    End Sub
+
+    <Fact>
+    Public Sub Unresolved_resolution_is_empty_and_scores_zero()
+        Dim u = ConditionResolution.Unresolved
+        Assert.False(u.IsResolved)
+        Assert.Equal("", u.ConceptCode)
+        Assert.Equal("", u.UmlsName)
+        Assert.Equal(ConditionMatchTier.Unresolved, u.Tier)
+        Assert.Equal(0.0, u.Score)
+    End Sub
+
+    <Fact>
+    Public Sub IsResolved_is_driven_by_concept_code_presence()
+        Assert.True(New ConditionResolution("C0038454", "CVA", ConditionMatchTier.Exact, 1.0).IsResolved)
+        Assert.False(New ConditionResolution("", "CVA", ConditionMatchTier.Exact, 1.0).IsResolved)
+    End Sub
+
+    <Fact>
+    Public Sub New_entry_defaults_to_unresolved()
+        ' EnsureForStudyAsync and the job both construct entries with object
+        ' initialisers, so an un-set MatchTier must never be Nothing - the column
+        ' is NOT NULL.
+        Dim e As New ConditionConceptEntry()
+        Assert.Equal(ConditionMatchTier.Unresolved, e.MatchTier)
+        Assert.Equal("", e.ConceptCode)
+        Assert.Equal("", e.UmlsName)
+        Assert.Equal(0, e.StudyCount)
+    End Sub
+End Class
 ```
 
-Expected: build succeeds. (Build-only is acceptable here because this task adds no behaviour; the next task's tests cover it.)
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run the tests to verify they pass**
 
 ```powershell
-git add contexts/eligibility/src/EligibilityProcessing.Core/ConditionConcept.vb
+dotnet test contexts/eligibility/Eligibility.sln --filter "FullyQualifiedName~ConditionConceptTypeTests"
+```
+
+Expected: PASS. Verification is `dotnet test`, never `dotnet build` - no task is exempt.
+
+- [ ] **Step 4: Commit**
+
+```powershell
+git add contexts/eligibility/src/EligibilityProcessing.Core/ConditionConcept.vb contexts/eligibility/tests/EligibilityProcessing.Core.Tests/ConditionConceptTypeTests.vb
 git commit -m "Add condition dictionary types and store port"
 ```
 
@@ -1247,9 +1298,6 @@ Imports NpgsqlTypes
 Public NotInheritable Class ConditionConceptStore
     Implements IConditionConceptStore
 
-    ' Kept in one place so the three statements below cannot drift from each other.
-    Private Const NormalizeSql As String = "regexp_replace(btrim(lower({0})), '\s+', ' ', 'g')"
-
     Private ReadOnly _dataSource As NpgsqlDataSource
 
     Public Sub New(outputDataSource As NpgsqlDataSource)
@@ -1444,7 +1492,7 @@ WHERE @force OR resolved_at IS NULL"
 End Class
 ```
 
-Delete the unused `NormalizeSql` const if the compiler flags it - the expression is inlined in each statement for readability, and the const exists only as documentation. If `Option Strict` complains, remove it.
+The normalization expression `regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')` is written out in each statement that needs it rather than hoisted into a constant - Npgsql takes SQL as literal text, and a const holding a fragment would be dead code that a reader must assemble mentally. The class comment states the invariant, and Task 2's cross-language test is what actually enforces it.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
