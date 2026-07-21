@@ -168,7 +168,7 @@ CREATE TABLE public.condition_concept (
     study_count     integer     NOT NULL DEFAULT 0,
     concept_code    text        NULL,
     umls_name       text        NULL,
-    match_source    text        NOT NULL,
+    match_tier      text        NOT NULL,
     match_score     numeric(4,3) NOT NULL DEFAULT 0,
     resolved_at     timestamptz NULL,
     created_at      timestamptz NOT NULL DEFAULT now()
@@ -194,14 +194,21 @@ Column notes:
   4.2).
 - `study_count` - corpus frequency, used to order backfill work so the
   highest-value strings resolve first.
-- `match_source` - `exact` | `exact_ambiguous` | `fuzzy` | `unresolved`, one per
+- `match_tier` - `exact` | `exact_ambiguous` | `fuzzy` | `unresolved`, one per
   tier in section 5. Keeping `exact_ambiguous` distinct rather than folding it
   into `exact` costs nothing now and lets the Analytics tab exclude that 8.4% if
   it proves noisy.
+
+  **Named `match_tier`, not `match_source`, deliberately.** An earlier draft of
+  this spec called it `match_source`, which collides with an established meaning:
+  `public.eligibility.match_source` and `UmlsMatch.MatchSource` both hold the
+  **root source vocabulary** (`MSH`, `SNOMEDCT_US`), not a tier label. Two
+  adjacent tables using one column name for two different things is a trap for
+  whoever writes the analytics joins in sub-project 2.
 - `match_score` - `numeric(4,3)`, consistent with the criteria pipeline's
   end-to-end typing of match scores. `0` when unresolved.
 - `resolved_at` - NULL means never attempted. A row that was attempted and failed
-  has `resolved_at` set, `match_source = 'unresolved'`, and `concept_code` NULL,
+  has `resolved_at` set, `match_tier = 'unresolved'`, and `concept_code` NULL,
   so a re-run can skip it unless forced.
 
 Per the schema-doc rule, [docs/specs/database_schema.md](../../specs/database_schema.md)
@@ -241,7 +248,7 @@ only in tiers 1b and 2, where a genuine choice exists.
 **Tier 1a - exact and unambiguous (63.0% of mentions).**
 Look up `condition_norm` against `umls.atom.str_norm`. If every matching atom
 resolves to a single distinct CUI, accept it directly:
-`match_score = 1.000`, `match_source = 'exact'`. **The scorer is not consulted**,
+`match_score = 1.000`, `match_tier = 'exact'`. **The scorer is not consulted**,
 for the reason established in section 2.2. This is one indexed lookup on
 `ix_umls_atom_str_norm`, so it is far cheaper than the full three-arm search as
 well as more accurate.
@@ -255,7 +262,7 @@ The atoms resolve to more than one CUI, so pick one deterministically:
 
 Rule 3 exists purely so a re-run reproduces the same answer. Accept regardless of
 score - the string is still an exact atom match, so the only question was which
-concept, not whether. Record `match_source = 'exact_ambiguous'` and
+concept, not whether. Record `match_tier = 'exact_ambiguous'` and
 `match_score = 1.000`, so the Analytics tab can exclude this 8.4% if it ever
 proves problematic.
 
@@ -267,9 +274,9 @@ Only here does the existing search path apply, and no new matching code is neede
 2. `match = UmlsMatchScorer.PickBestMatch(raw_form, candidates)` - applies the
    hard-coded 0.45 floor and returns `UmlsMatch.Unresolved` below it.
 3. Accept only if `match.MatchScore >= ConditionMatchThreshold` (0.60);
-   `match_source = 'fuzzy'`.
+   `match_tier = 'fuzzy'`.
 
-Below threshold in tier 2: `match_source = 'unresolved'`, `concept_code` NULL,
+Below threshold in tier 2: `match_tier = 'unresolved'`, `concept_code` NULL,
 `match_score` 0, `resolved_at` set.
 
 Note that tier 2 inherits the pref_name-scoring behaviour described in section
