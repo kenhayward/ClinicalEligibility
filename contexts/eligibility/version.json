@@ -1,7 +1,16 @@
 {
   "app": "Eligibility Pipeline",
-  "current": { "major": 0, "minor": 4, "build": 1, "releaseDate": "2026-07-21" },
+  "current": { "major": 0, "minor": 4, "build": 2, "releaseDate": "2026-07-21" },
   "releases": [
+    {
+      "version": "0.4.2",
+      "releaseDate": "2026-07-21",
+      "enhancements": [
+        "normalize-conditions (CLI and the Tools tab) now resolves condition strings concurrently instead of one at a time, matching embed-studies. A full production backfill of ~90,000 strings measured 4h21m sequential; each string is independent, so this parallelises safely. New --concurrency flag (default 8), mirrored in the web card.",
+        "The Npgsql connection pool is now explicitly capped (Postgres:MaxPoolSize, default 20) on both the source and output data sources, so raising a job's concurrency queues for a pooled connection instead of risking the Postgres server's own max_connections."
+      ],
+      "fixes": []
+    },
     {
       "version": "0.4.1",
       "releaseDate": "2026-07-21",

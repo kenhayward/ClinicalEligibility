@@ -761,7 +761,9 @@ public class HomeController : Controller
     public async Task<IActionResult> RunNormalizeConditions(
         [FromServices] RunGate gate,
         [FromServices] Channel<ToolJobRequest> channel,
+        [FromServices] IOptions<OrchestratorOptions> orchestratorOptions,
         int? count,
+        int? concurrency,
         bool dryRun = false,
         bool force = false)
     {
@@ -771,9 +773,11 @@ public class HomeController : Controller
             return Conflict(new { current_run_id = gate.CurrentRunId, activity = gate.CurrentActivity });
         }
 
+        var cap = Math.Max(1, orchestratorOptions.Value.LlmConcurrencyCap);
         var options = new NormalizeConditionsOptions
         {
             Count = count is > 0 ? count.Value : 0,
+            Concurrency = concurrency is > 0 ? concurrency.Value : cap,
             DryRun = dryRun,
             Force = force
         };
@@ -784,7 +788,7 @@ public class HomeController : Controller
         }
 
         await _audit.WriteAsync("create", "tool_job", jobId.ToString(),
-            $"normalize-conditions count={options.Count}"
+            $"normalize-conditions count={options.Count} concurrency={options.Concurrency}"
                 + (options.DryRun ? " dry-run" : "") + (options.Force ? " force" : ""),
             HttpContext.RequestAborted);
         return Accepted(new { job_id = jobId, kind = "normalize-conditions" });

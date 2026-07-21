@@ -84,4 +84,18 @@ Public Class PostgresOptions
     ''' </summary>
     Public Property OutputCommandTimeoutSeconds As Integer = 600
 
+    ''' <summary>
+    ''' Upper bound on Npgsql's connection pool size, applied to BOTH the source
+    ''' and output data sources via NpgsqlConnectionStringBuilder.MaxPoolSize
+    ''' (same mechanism as the two CommandTimeout settings above). Npgsql's own
+    ''' default is 100; left uncapped, a concurrent maintenance job (e.g.
+    ''' normalize-conditions at a high --concurrency) could open enough
+    ''' connections to exceed the server's own max_connections, which fails
+    ''' every OTHER client on that Postgres instance, not just this job. Capping
+    ''' here means the job's Parallel.ForEachAsync simply queues for a free pooled
+    ''' connection instead of erroring if the concurrency setting is ever raised
+    ''' past what the server can host. Config: Postgres:MaxPoolSize.
+    ''' </summary>
+    Public Property MaxPoolSize As Integer = 20
+
 End Class

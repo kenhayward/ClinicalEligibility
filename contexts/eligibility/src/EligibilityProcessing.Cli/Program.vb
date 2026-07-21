@@ -39,9 +39,12 @@ Imports Microsoft.Extensions.Options
 '                                          Idempotent - only fills gaps. Requests
 '                                          run in parallel at --concurrency
 '                                          (default Pipeline:LlmConcurrencyCap).
-'   normalize-conditions [--count N] [--dry-run] [--force]
+'   normalize-conditions [--count N] [--concurrency N] [--dry-run] [--force]
 '                                        - map AACT condition strings to UMLS
-'                                          CUIs for the analytics condition slice
+'                                          CUIs for the analytics condition slice.
+'                                          Each string is resolved independently,
+'                                          so entries run in parallel at
+'                                          --concurrency (default 8).
 '   load-umls --rrf-dir <path>           - load a curated UMLS subset into the
 '                                          umls.* schema from an unpacked release
 '                                          (MRCONSO.RRF + MRSTY.RRF). Full rebuild
@@ -505,13 +508,17 @@ Module Program
     ' public.condition_concept, so analytics can slice by condition. Seeds the
     ' dictionary from the corpus first, then resolves pending rows highest
     ' study_count first. Safe to re-run (only unresolved rows are touched unless
-    ' --force). See docs/superpowers/specs/2026-07-21-condition-normalizer-design.md.
+    ' --force). Each string is resolved independently (a store lookup plus, for
+    ' the harder ones, a UMLS search), so entries run in parallel at
+    ' --concurrency (default 8) - see ConditionNormalizeJob.
+    ' See docs/superpowers/specs/2026-07-21-condition-normalizer-design.md.
     Private Async Function RunNormalizeConditionsAsync(
             appHost As IHost,
             args As String(),
             cancellationToken As CancellationToken) As Task(Of Integer)
 
         Dim count = ParseOptionInt(args, "--count", 0)
+        Dim concurrency = Math.Max(1, ParseOptionInt(args, "--concurrency", 8))
         Dim dryRun = args.Any(Function(a) String.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase))
         Dim force = args.Any(Function(a) String.Equals(a, "--force", StringComparison.OrdinalIgnoreCase))
 
@@ -539,7 +546,7 @@ Module Program
                     If(dryRun,
                        "Normalizing conditions (dry-run, no seeding)",
                        "Seeding the condition dictionary and normalizing") &
-                    "..." & If(force, " (force)", ""))
+                    $" (concurrency {concurrency})..." & If(force, " (force)", ""))
 
             Dim latest As ToolJobSnapshot = Nothing
             Dim sink As New SnapshotSink(Sub(s) latest = s)
@@ -556,7 +563,7 @@ Module Program
             Try
                 counters = Await job.RunAsync(
                         New NormalizeConditionsOptions With {
-                            .Count = count, .DryRun = dryRun, .Force = force},
+                            .Count = count, .Concurrency = concurrency, .DryRun = dryRun, .Force = force},
                         sink, cancellationToken).ConfigureAwait(False)
             Catch ex As Exception
                 caught = ex
@@ -1178,7 +1185,8 @@ Module Program
         System.Console.WriteLine("      under the configured model. Safe to re-run; requests run in parallel")
         System.Console.WriteLine("      at --concurrency (default Pipeline:LlmConcurrencyCap).")
         System.Console.WriteLine()
-        System.Console.WriteLine("  EligibilityProcessing.Cli normalize-conditions [--count N] [--dry-run] [--force]")
+        System.Console.WriteLine("  EligibilityProcessing.Cli normalize-conditions [--count N] [--concurrency N]")
+        System.Console.WriteLine("                                                 [--dry-run] [--force]")
         System.Console.WriteLine("      Map AACT condition strings to UMLS CUIs for the analytics condition slice.")
         System.Console.WriteLine("      Seeds the dictionary from the corpus, then resolves pending rows highest")
         System.Console.WriteLine("      study_count first. Safe to re-run. --dry-run reports without writing and")
@@ -1186,7 +1194,8 @@ Module Program
         System.Console.WriteLine("      reports nothing to do. --force re-attempts already-resolved rows. Each")
         System.Console.WriteLine("      row is marked resolved as soon as it is attempted, even on failure - if a")
         System.Console.WriteLine("      run fails partway, re-run with --force to revisit the rows it already")
-        System.Console.WriteLine("      touched.")
+        System.Console.WriteLine("      touched. Entries are independent, so rows resolve in parallel at")
+        System.Console.WriteLine("      --concurrency (default 8).")
         System.Console.WriteLine()
         System.Console.WriteLine("  EligibilityProcessing.Cli load-umls --rrf-dir <path> [--semantic-types-only]")
         System.Console.WriteLine("                                       [--hierarchy-only] [--max-depth N]")

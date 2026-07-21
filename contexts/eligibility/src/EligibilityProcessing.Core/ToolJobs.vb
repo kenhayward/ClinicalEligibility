@@ -48,6 +48,14 @@ Public NotInheritable Class NormalizeConditionsOptions
     Public Property Count As Integer = 0
     Public Property DryRun As Boolean
     Public Property Force As Boolean
+
+    ''' <summary>
+    ''' How many pending condition strings to resolve concurrently. Each is
+    ''' independent (a store lookup plus, for the harder ones, a UMLS search),
+    ''' so this parallelises safely; see ConditionNormalizeJob.RunAsync. Clamped
+    ''' to at least 1 by the job. Default 8 mirrors EmbedStudiesOptions.Concurrency.
+    ''' </summary>
+    Public Property Concurrency As Integer = 8
 End Class
 
 ''' <summary>One named metric value - a stat tile in the web UI, and a fragment of
