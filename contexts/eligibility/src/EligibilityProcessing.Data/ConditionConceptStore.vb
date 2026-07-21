@@ -10,9 +10,13 @@ Imports NpgsqlTypes
 ''' UMLS-CUI dictionary.
 '''
 ''' The SQL normalization expression regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')
-''' appears in several statements here and MUST stay identical to
-''' ConceptKey.Normalize - ConditionConceptStoreTests asserts they agree, because
-''' a divergence would silently stop exact matches aligning.
+''' appears in several statements here and agrees with ConceptKey.Normalize on
+''' ASCII input, which is all the corpus contains (zero Unicode-whitespace
+''' occurrences measured across 611,329 condition mentions). The two diverge on
+''' Unicode whitespace such as a non-breaking space, which .NET's \s collapses
+''' and Postgres's does not; ConceptKey.Normalize is authoritative because it
+''' also produced the persisted umls.atom.str_norm values.
+''' ConditionConceptStoreTests cross-checks the ASCII cases only.
 ''' </summary>
 Public NotInheritable Class ConditionConceptStore
     Implements IConditionConceptStore

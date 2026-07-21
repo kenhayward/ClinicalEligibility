@@ -264,7 +264,7 @@ pipeline run reuse every earlier resolution. *(V24.)*
 
 | Column | Type | Null | Default | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| `condition_norm` | `text` | no | | Primary key. `ConceptKey.Normalize(raw)`: lower-invariant, internal whitespace collapsed, trimmed; SQL mirror is `regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')`. |
+| `condition_norm` | `text` | no | | Primary key. `ConceptKey.Normalize(raw)`: lower-invariant, internal whitespace collapsed, trimmed; SQL mirror is `regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')`, which agrees on ASCII input (all the corpus contains) but does not collapse Unicode whitespace such as a non-breaking space the way .NET's `\s` does. `ConceptKey.Normalize` is authoritative - it also produced the persisted `umls.atom.str_norm` values. |
 | `raw_form` | `text` | no | | Most frequent ORIGINAL casing of this normalized string; the string handed to the matcher. Load-bearing for acronym matching (e.g. COPD vs Copd). |
 | `study_count` | `integer` | no | `0` | Corpus frequency; orders backfill work. Recomputed in bulk, not incrementally maintained. |
 | `concept_code` | `text` | yes | | UMLS CUI; NULL when unresolved. |

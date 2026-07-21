@@ -536,8 +536,10 @@ Module Program
             ' line's denominator instead comes from the job's own snapshots below,
             ' which reflect the post-seed total once the first snapshot arrives.
             System.Console.WriteLine(
-                    "Seeding the condition dictionary and normalizing..." &
-                    If(dryRun, " (dry-run)", "") & If(force, " (force)", ""))
+                    If(dryRun,
+                       "Normalizing conditions (dry-run, no seeding)",
+                       "Seeding the condition dictionary and normalizing") &
+                    "..." & If(force, " (force)", ""))
 
             Dim latest As ToolJobSnapshot = Nothing
             Dim sink As New SnapshotSink(Sub(s) latest = s)

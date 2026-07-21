@@ -80,8 +80,12 @@ Public NotInheritable Class ConditionNormalizer
             ' is a public port any implementation can satisfy. Fall back to
             ' unresolved rather than dereferencing a null candidate below.
             If picked Is Nothing Then Return ConditionResolution.Unresolved
+            ' Same hole as tier 1a above: an empty Ui on the picked candidate
+            ' would otherwise produce match_tier='exact_ambiguous' with a NULL
+            ' concept_code. Treat it as unresolved for consistency.
+            If String.IsNullOrEmpty(picked.Ui) Then Return ConditionResolution.Unresolved
             Return New ConditionResolution(
-                    conceptCode:=If(picked.Ui, ""),
+                    conceptCode:=picked.Ui,
                     umlsName:=If(picked.Name, ""),
                     tier:=ConditionMatchTier.ExactAmbiguous,
                     score:=1.0)

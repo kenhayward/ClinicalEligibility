@@ -164,6 +164,25 @@ Public Class ConditionNormalizerTests
         Assert.Equal("", result.ConceptCode)
     End Function
 
+    ' Same hole as the tier 1a empty-Ui guard, but on the ambiguous branch: the
+    ' picked candidate (via PickAmbiguous, not the sole candidate) must not
+    ' produce match_tier='exact_ambiguous' with a NULL concept_code either.
+    <Fact>
+    Public Async Function Tier1b_resolves_to_unresolved_when_the_picked_candidate_has_an_empty_ui() As Task
+        Dim store As New FakeStore()
+        ' "Stroke" normalizes to the query, so PickAmbiguous's exact-name rule
+        ' picks this candidate over the other - and it has an empty Ui.
+        store.ExactByNorm("stroke") = {
+            New UmlsCandidate("", "Stroke", "SNOMEDCT_US"),
+            New UmlsCandidate("C9999999", "Something Else", "MSH")}
+
+        Dim result = Await NewNormalizer(store, New FakeUmlsClient()).ResolveAsync("Stroke", CancellationToken.None)
+
+        Assert.False(result.IsResolved)
+        Assert.Equal(ConditionMatchTier.Unresolved, result.Tier)
+        Assert.Equal("", result.ConceptCode)
+    End Function
+
     <Fact>
     Public Async Function Tier1b_falls_back_to_lowest_cui_when_scores_tie() As Task
         Dim store As New FakeStore()

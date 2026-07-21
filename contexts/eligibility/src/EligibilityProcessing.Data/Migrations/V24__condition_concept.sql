@@ -22,9 +22,12 @@
 
 CREATE TABLE IF NOT EXISTS public.condition_concept (
     -- ConceptKey.Normalize(raw): lower-invariant, internal whitespace collapsed,
-    -- trimmed. The SQL mirror of that function is
-    -- regexp_replace(btrim(lower(x)), '\s+', ' ', 'g') and the two are asserted
-    -- to agree by ConditionConceptStoreTests.
+    -- trimmed. The SQL mirror is regexp_replace(btrim(lower(x)), '\s+', ' ', 'g'),
+    -- which agrees with it on ASCII input only (all the corpus contains); it
+    -- does not collapse Unicode whitespace such as a non-breaking space the way
+    -- .NET's \s does. ConceptKey.Normalize is authoritative - it also produced
+    -- the persisted umls.atom.str_norm values. ConditionConceptStoreTests
+    -- cross-checks the ASCII cases only.
     condition_norm text         NOT NULL PRIMARY KEY,
     -- The most frequent ORIGINAL casing of this normalized string, and the
     -- string handed to the matcher. Load-bearing: UmlsMatchScorer's acronym
