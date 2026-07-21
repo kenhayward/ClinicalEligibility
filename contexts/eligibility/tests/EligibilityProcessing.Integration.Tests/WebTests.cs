@@ -258,6 +258,22 @@ public class WebTests : IClassFixture<WebTests.Factory>
     }
 
     [Fact]
+    public async Task Analytics_index_returns_200_with_empty_form_chrome()
+    {
+        // No value: AnalyticsController.Index returns the empty form without
+        // touching IAnalyticsGateway or ICorpusReadCache, so this stays a clean
+        // 200 even with the factory's unreachable Postgres connection strings -
+        // same shape as Analysis_returns_200_with_form_chrome above.
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/Analytics/Index");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Analytics", body);
+        Assert.Contains("Choose a cohort", body);
+    }
+
+    [Fact]
     public async Task Analysis_with_nctId_renders_inline_error_when_gateway_unavailable()
     {
         // With an nctId the controller queries the gateway — first the new

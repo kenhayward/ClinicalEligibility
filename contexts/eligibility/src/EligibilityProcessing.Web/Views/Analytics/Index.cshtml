@@ -1,0 +1,161 @@
+@model EligibilityProcessing.Web.Models.AnalyticsLiftViewModel
+@{
+    ViewData["Title"] = "Analytics";
+
+    // Only real interventional phases are offered - NA and empty together are
+    // 71.6% of the corpus (design spec section 2.6) and are not phases, so
+    // offering them would imply a comparison that does not exist.
+    var phaseChoices = new[]
+    {
+        "EARLY_PHASE1", "PHASE1", "PHASE1/PHASE2", "PHASE2", "PHASE2/PHASE3", "PHASE3", "PHASE4"
+    };
+}
+
+<h1 class="h3 mb-1">Analytics</h1>
+<p class="text-muted mb-3">What is distinctive about a cohort of trials, compared with the whole processed corpus.</p>
+
+@if (Model.HasError)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Backend unavailable.</strong> @Model.ErrorMessage
+    </div>
+}
+else
+{
+    <form method="get" asp-action="Index" class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <label for="f-kind" class="form-label small text-muted mb-1">Cohort</label>
+                    <select id="f-kind" name="kind" class="form-select form-select-sm">
+                        <option value="Concept" selected="@(Model.Kind == "Concept")">Concept</option>
+                        <option value="Condition" selected="@(Model.Kind == "Condition")">Condition</option>
+                        <option value="Phase" selected="@(Model.Kind == "Phase")">Phase</option>
+                        <option value="Year" selected="@(Model.Kind == "Year")">Year</option>
+                    </select>
+                </div>
+                @* Two alternative inputs share the name "value"; only one is ever
+                   enabled at a time (script below), so the form always submits a
+                   single value= regardless of which cohort kind is selected. *@
+                <div class="col-md-4" id="f-value-text-wrap">
+                    <label for="f-value-text" class="form-label small text-muted mb-1">Value</label>
+                    <input id="f-value-text" name="value" value="@Model.Value" type="text"
+                           class="form-control form-control-sm"
+                           placeholder="Concept code (e.g. C0011849) or a year (e.g. 2023)" />
+                </div>
+                <div class="col-md-4 d-none" id="f-value-phase-wrap">
+                    <label for="f-value-phase" class="form-label small text-muted mb-1">Phase</label>
+                    <select id="f-value-phase" name="value" class="form-select form-select-sm" disabled>
+                        <option value="">(choose a phase)</option>
+                        @foreach (var p in phaseChoices)
+                        {
+                            <option value="@p" selected="@(p == Model.Value)">@p</option>
+                        }
+                    </select>
+                    <div class="form-text">
+                        Only about 28% of studies have a real interventional phase - the rest
+                        are recorded as <code>NA</code> or blank, which are not offered here.
+                    </div>
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <div class="form-check">
+                        @* No hidden "false" companion input: an unchecked box is simply
+                           omitted from the query string, and the action parameter's
+                           `= false` default covers that case - a companion hidden field
+                           would submit both values for one name and confuse binding. *@
+                        <input id="f-includeDescendants" name="includeDescendants" type="checkbox" value="true"
+                               class="form-check-input" checked="@Model.IncludeDescendants" />
+                        <label for="f-includeDescendants" class="form-check-label small">Descendants</label>
+                    </div>
+                </div>
+            </div>
+            <div class="row g-2 mt-1">
+                <div class="col-md-3">
+                    <label for="f-minSupport" class="form-label small text-muted mb-1">Minimum support (cohort trials)</label>
+                    <input id="f-minSupport" name="minSupport" value="@Model.MinimumSupport" type="number" min="1"
+                           class="form-control form-control-sm" />
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                <a asp-action="Index" class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </div>
+    </form>
+
+    @if (!Model.HasSearched)
+    {
+        <p class="text-muted">Choose a cohort and a value above to see what is distinctive about it.</p>
+    }
+    else if (Model.Rows.Count == 0)
+    {
+        <p class="text-muted">No concepts met the minimum support threshold for this cohort.</p>
+    }
+    else
+    {
+        <p class="text-muted small">
+            Cohort: @Model.CohortSize trial@(Model.CohortSize == 1 ? "" : "s")
+            of @Model.CorpusSize corpus trial@(Model.CorpusSize == 1 ? "" : "s").
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Concept</th>
+                        <th class="text-end">Cohort trials</th>
+                        <th class="text-end">% cohort</th>
+                        <th class="text-end">% corpus</th>
+                        <th class="text-end">Excess pp</th>
+                        <th class="text-end">Lift</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        <tr>
+                            <td>
+                                @row.PrefName
+                                @if (row.DefinesCohort)
+                                {
+                                    <span class="badge bg-secondary ms-1">defines cohort</span>
+                                }
+                            </td>
+                            <td class="text-end">@row.CohortTrials</td>
+                            <td class="text-end">@row.PctCohort.ToString("F1")</td>
+                            <td class="text-end">@row.PctCorpus.ToString("F1")</td>
+                            <td class="text-end">@row.ExcessPp.ToString("F1")</td>
+                            <td class="text-end">@row.Lift.ToString("F2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@section Scripts {
+    @* Toggle between the free-text value input and the Phase dropdown so the
+       form always submits exactly one value= regardless of which cohort kind
+       is selected - disabled inputs are excluded from a form submission. *@
+    <script>
+        (function () {
+            const kindSelect = document.getElementById("f-kind");
+            const textWrap = document.getElementById("f-value-text-wrap");
+            const textInput = document.getElementById("f-value-text");
+            const phaseWrap = document.getElementById("f-value-phase-wrap");
+            const phaseSelect = document.getElementById("f-value-phase");
+            if (!kindSelect || !textWrap || !textInput || !phaseWrap || !phaseSelect) return;
+
+            function apply() {
+                const isPhase = kindSelect.value === "Phase";
+                textWrap.classList.toggle("d-none", isPhase);
+                textInput.disabled = isPhase;
+                phaseWrap.classList.toggle("d-none", !isPhase);
+                phaseSelect.disabled = !isPhase;
+            }
+
+            kindSelect.addEventListener("change", apply);
+            apply();
+        })();
+    </script>
+}
