@@ -78,4 +78,201 @@ WHERE schemaname = 'public' AND tablename = 'condition_concept'"
             Next
         End Using
     End Function
+
+    Private Async Function SeedStudyAsync(nctId As String, conditions As String()) As Task
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO public.eligibility_study_detail (nct_id, conditions)
+VALUES (@n, @c)
+ON CONFLICT (nct_id) DO UPDATE SET conditions = excluded.conditions"
+                cmd.Parameters.AddWithValue("n", nctId)
+                cmd.Parameters.Add(New NpgsqlParameter("c", NpgsqlTypes.NpgsqlDbType.Array Or NpgsqlTypes.NpgsqlDbType.Text) With {.Value = conditions})
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
+    Private Async Function SeedAtomAsync(cui As String, str As String, prefName As String) As Task
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "
+INSERT INTO umls.atom (cui, str, str_norm, sab, tty, is_pref) VALUES (@cui, @s, @sn, 'SNOMEDCT_US', 'PT', true);
+INSERT INTO umls.concept (cui, pref_name, root_source) VALUES (@cui, @pn, 'SNOMEDCT_US')
+ON CONFLICT (cui) DO UPDATE SET pref_name = excluded.pref_name"
+                cmd.Parameters.AddWithValue("cui", cui)
+                cmd.Parameters.AddWithValue("s", str)
+                cmd.Parameters.AddWithValue("sn", ConceptKey.Normalize(str))
+                cmd.Parameters.AddWithValue("pn", prefName)
+                Await cmd.ExecuteNonQueryAsync()
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function LookupExact_returns_one_candidate_for_an_unambiguous_string() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedAtomAsync("C0038454", "Stroke", "CVA - Cerebrovascular accident")
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Dim hits = Await store.LookupExactAsync("stroke", CancellationToken.None)
+
+        Assert.Single(hits)
+        Assert.Equal("C0038454", hits(0).Ui)
+        ' The candidate carries the concept's PREFERRED name, not the atom string.
+        Assert.Equal("CVA - Cerebrovascular accident", hits(0).Name)
+    End Function
+
+    <SkippableFact>
+    Public Async Function LookupExact_returns_every_cui_for_an_ambiguous_string() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedAtomAsync("C0000100", "Cancer", "Blastoma")
+        Await SeedAtomAsync("C0000200", "Cancer", "Malignant Neoplasm")
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Dim hits = Await store.LookupExactAsync("cancer", CancellationToken.None)
+
+        Assert.Equal(2, hits.Count)
+    End Function
+
+    <SkippableFact>
+    Public Async Function SeedFromCorpus_picks_the_most_frequent_raw_form_and_counts_studies() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' COPD appears in 3 studies, Copd in 1 - the uppercase form must win,
+        ' because the scorer's acronym term needs it.
+        Await SeedStudyAsync("NCT001", {"COPD"})
+        Await SeedStudyAsync("NCT002", {"COPD"})
+        Await SeedStudyAsync("NCT003", {"COPD"})
+        Await SeedStudyAsync("NCT004", {"Copd"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Dim inserted = Await store.SeedFromCorpusAsync(CancellationToken.None)
+
+        Assert.Equal(1, inserted)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT raw_form, study_count FROM public.condition_concept WHERE condition_norm = 'copd'"
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Assert.True(Await reader.ReadAsync())
+                    Assert.Equal("COPD", reader.GetString(0))
+                    Assert.Equal(4, reader.GetInt32(1))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function SeedFromCorpus_breaks_raw_form_ties_lexicographically() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        ' One study each: the counts tie, so the ORDER BY cnt DESC, raw ASC
+        ' tiebreak decides. Without a deterministic tiebreak, array_agg ordering
+        ' is arbitrary and a re-seed could silently change which casing the
+        ' matcher sees - which for an acronym flips whether it resolves at all.
+        Await SeedStudyAsync("NCT001", {"HIV"})
+        Await SeedStudyAsync("NCT002", {"Hiv"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT raw_form FROM public.condition_concept WHERE condition_norm = 'hiv'"
+                Assert.Equal("HIV", CStr(Await cmd.ExecuteScalarAsync()))
+            End Using
+        End Using
+
+        ' And it stays the same on a re-seed.
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT raw_form FROM public.condition_concept WHERE condition_norm = 'hiv'"
+                Assert.Equal("HIV", CStr(Await cmd.ExecuteScalarAsync()))
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function SeedFromCorpus_is_idempotent() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedStudyAsync("NCT001", {"Stroke", "Obesity"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Assert.Equal(2, Await store.SeedFromCorpusAsync(CancellationToken.None))
+        Assert.Equal(0, Await store.SeedFromCorpusAsync(CancellationToken.None))
+    End Function
+
+    <SkippableFact>
+    Public Async Function GetPending_orders_by_study_count_descending_and_force_includes_resolved() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedStudyAsync("NCT001", {"Rare Thing"})
+        Await SeedStudyAsync("NCT002", {"Common Thing"})
+        Await SeedStudyAsync("NCT003", {"Common Thing"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Await store.SeedFromCorpusAsync(CancellationToken.None)
+
+        Dim pending = Await store.GetPendingAsync(10, force:=False, cancellationToken:=CancellationToken.None)
+        Assert.Equal(2, pending.Count)
+        Assert.Equal("common thing", pending(0).ConditionNorm)
+
+        ' Resolve one, then confirm it drops out unless forced.
+        Await store.UpsertAsync(New ConditionConceptEntry With {
+                .ConditionNorm = "common thing", .RawForm = "Common Thing",
+                .ConceptCode = "C0000001", .UmlsName = "Common Thing",
+                .MatchTier = ConditionMatchTier.Exact, .MatchScore = 1.0
+            }, CancellationToken.None)
+
+        Assert.Single(Await store.GetPendingAsync(10, force:=False, cancellationToken:=CancellationToken.None))
+        Assert.Equal(2, (Await store.GetPendingAsync(10, force:=True, cancellationToken:=CancellationToken.None)).Count)
+        Assert.Equal(1, Await store.CountPendingAsync(force:=False, cancellationToken:=CancellationToken.None))
+    End Function
+
+    <SkippableFact>
+    Public Async Function Upsert_is_idempotent_and_stamps_resolved_at() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Dim entry As New ConditionConceptEntry With {
+                .ConditionNorm = "stroke", .RawForm = "Stroke",
+                .ConceptCode = "C0038454", .UmlsName = "CVA - Cerebrovascular accident",
+                .MatchTier = ConditionMatchTier.Exact, .MatchScore = 1.0}
+
+        Await store.UpsertAsync(entry, CancellationToken.None)
+        Await store.UpsertAsync(entry, CancellationToken.None)
+
+        Using conn = Await _fixture.DataSource.OpenConnectionAsync()
+            Using cmd = conn.CreateCommand()
+                cmd.CommandText = "SELECT count(*), max(resolved_at) IS NOT NULL FROM public.condition_concept WHERE condition_norm = 'stroke'"
+                Using reader = Await cmd.ExecuteReaderAsync()
+                    Assert.True(Await reader.ReadAsync())
+                    Assert.Equal(1L, reader.GetInt64(0))
+                    Assert.True(reader.GetBoolean(1))
+                End Using
+            End Using
+        End Using
+    End Function
+
+    <SkippableFact>
+    Public Async Function GetUnseenConditionsForStudy_returns_only_strings_with_no_dictionary_row() As Task
+        Skip.If(_fixture.SkipReason IsNot Nothing, _fixture.SkipReason)
+        Await _fixture.ResetAsync()
+        Await SeedStudyAsync("NCT001", {"Stroke", "Obesity"})
+
+        Dim store As New ConditionConceptStore(_fixture.DataSource)
+        Await store.UpsertAsync(New ConditionConceptEntry With {
+                .ConditionNorm = "stroke", .RawForm = "Stroke",
+                .MatchTier = ConditionMatchTier.Unresolved}, CancellationToken.None)
+
+        Dim unseen = Await store.GetUnseenConditionsForStudyAsync("NCT001", CancellationToken.None)
+
+        Assert.Single(unseen)
+        Assert.Equal("Obesity", unseen(0))
+    End Function
 End Class
