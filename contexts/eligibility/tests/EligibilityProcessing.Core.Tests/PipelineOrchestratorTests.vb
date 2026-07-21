@@ -1436,6 +1436,7 @@ Friend NotInheritable Class ThrowingGateway
 
     Public Function ClusterCommonCriteriaAsync(
             nctIds As IReadOnlyList(Of String),
+            rollupLevel As Integer,
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of CriterionCluster)) _
             Implements IPostgresGateway.ClusterCommonCriteriaAsync
         Throw New NotImplementedException()
@@ -1443,6 +1444,7 @@ Friend NotInheritable Class ThrowingGateway
 
     Public Function GetClusterRecordsAsync(
             nctIds As IReadOnlyList(Of String), criterion As String, groupKey As String,
+            memberCodes As IReadOnlyList(Of String),
             cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of EligibilityRow)) _
             Implements IPostgresGateway.GetClusterRecordsAsync
         Throw New NotImplementedException()

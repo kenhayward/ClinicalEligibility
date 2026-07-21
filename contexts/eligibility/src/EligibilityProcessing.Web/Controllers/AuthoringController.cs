@@ -356,7 +356,8 @@ public class AuthoringController : Controller
     /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Cluster(CancellationToken cancellationToken, string[]? nctIds)
+    public async Task<IActionResult> Cluster(
+        CancellationToken cancellationToken, string[]? nctIds, int rollupLevel = 0)
     {
         var ids = (nctIds ?? Array.Empty<string>())
             .Select(x => x?.Trim() ?? "")
@@ -368,9 +369,14 @@ public class AuthoringController : Controller
             return BadRequest(new { error = "Select at least one similar study to cluster." });
         }
 
+        // Clamped, not rejected: a stale bookmark asking for level 5 should give
+        // the closest sensible answer rather than an error. Only 0-2 exist - the
+        // hierarchy is loaded to depth 2.
+        var level = Math.Clamp(rollupLevel, 0, 2);
+
         try
         {
-            var clusters = await _gateway.ClusterCommonCriteriaAsync(ids, cancellationToken);
+            var clusters = await _gateway.ClusterCommonCriteriaAsync(ids, level, cancellationToken);
             object Project(CriterionCluster c) => new
             {
                 criterion = c.Criterion,
@@ -380,7 +386,11 @@ public class AuthoringController : Controller
                 conceptCode = c.ConceptCode,
                 semanticType = c.SemanticType,
                 studyCount = c.StudyCount,
-                recordCount = c.RecordCount
+                recordCount = c.RecordCount,
+                ancestorCode = c.AncestorCode,
+                ancestorConcept = c.AncestorConcept,
+                memberCodes = c.MemberCodes,
+                rollupLevel = c.RollupLevel
             };
 
             return Json(new
@@ -409,7 +419,8 @@ public class AuthoringController : Controller
         CancellationToken cancellationToken,
         string[]? nctIds,
         string? criterion,
-        string? groupKey)
+        string? groupKey,
+        string[]? memberCodes = null)
     {
         var ids = (nctIds ?? Array.Empty<string>())
             .Select(x => x?.Trim() ?? "")
@@ -423,7 +434,14 @@ public class AuthoringController : Controller
 
         try
         {
-            var records = await _gateway.GetClusterRecordsAsync(ids, criterion, groupKey, cancellationToken);
+            // Present only for a rolled-up cluster, whose group key is an
+            // ancestor CUI matching no row directly.
+            var members = (memberCodes ?? Array.Empty<string>())
+                .Select(x => x?.Trim() ?? "")
+                .Where(x => x.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var records = await _gateway.GetClusterRecordsAsync(ids, criterion, groupKey, members, cancellationToken);
             return Json(new
             {
                 records = records.Select(r => new
@@ -455,7 +473,8 @@ public class AuthoringController : Controller
         CancellationToken cancellationToken,
         string[]? nctIds,
         string? criterion,
-        string? groupKey)
+        string? groupKey,
+        string[]? memberCodes = null)
     {
         var ids = (nctIds ?? Array.Empty<string>())
             .Select(x => x?.Trim() ?? "")
@@ -469,7 +488,14 @@ public class AuthoringController : Controller
 
         try
         {
-            var records = await _gateway.GetClusterRecordsAsync(ids, criterion, groupKey, cancellationToken);
+            // Present only for a rolled-up cluster, whose group key is an
+            // ancestor CUI matching no row directly.
+            var members = (memberCodes ?? Array.Empty<string>())
+                .Select(x => x?.Trim() ?? "")
+                .Where(x => x.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var records = await _gateway.GetClusterRecordsAsync(ids, criterion, groupKey, members, cancellationToken);
             var texts = records
                 .Select(r => r.OriginalText?.Trim() ?? "")
                 .Where(t => t.Length > 0)
