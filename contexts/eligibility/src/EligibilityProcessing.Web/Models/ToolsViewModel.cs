@@ -14,6 +14,9 @@ public sealed class ToolsViewModel
     public string EmbeddingModel { get; init; } = "";
     public int DefaultConcurrency { get; init; } = 1;
 
+    /// <summary>Condition strings with no UMLS resolution yet.</summary>
+    public int ConditionsRemaining { get; init; }
+
     /// <summary>Superseded eligibility_study attempt rows - every attempt that is
     /// not the latest for its NCT_ID. Unlike the other two counts this is not
     /// "work remaining"; it is how many audit rows the Remove superseded results

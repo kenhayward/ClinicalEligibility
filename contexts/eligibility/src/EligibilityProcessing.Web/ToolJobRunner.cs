@@ -9,8 +9,8 @@ namespace EligibilityProcessing.Web;
 
 /// <summary>
 /// Background worker that drains <see cref="ToolJobRequest"/> items and runs the
-/// shared Core tool jobs (<see cref="IUmlsNormalizeJob"/> / <see cref="IStudyEmbeddingJob"/>)
-/// off the request thread - so they survive the browser closing, exactly like
+/// shared Core tool jobs (<see cref="IUmlsNormalizeJob"/> / <see cref="IStudyEmbeddingJob"/> /
+/// <see cref="IConditionNormalizeJob"/>) off the request thread - so they survive the browser closing, exactly like
 /// <see cref="BatchRunner"/> does for the extraction pipeline. Each job gets its own
 /// DI scope (the scoped UMLS cache).
 ///
@@ -73,6 +73,11 @@ internal sealed class ToolJobRunner : BackgroundService
                 {
                     var job = scope.ServiceProvider.GetRequiredService<IUmlsNormalizeJob>();
                     await job.RunAsync(request.Normalize!, progress, linked.Token).ConfigureAwait(false);
+                }
+                else if (request.Kind == ToolJobKind.NormalizeConditions)
+                {
+                    var job = scope.ServiceProvider.GetRequiredService<IConditionNormalizeJob>();
+                    await job.RunAsync(request.Conditions!, progress, linked.Token).ConfigureAwait(false);
                 }
                 else
                 {
@@ -160,6 +165,12 @@ internal sealed class ToolJobRunner : BackgroundService
             return $"count {n.Count}, concurrency {n.Concurrency}"
                  + (n.DryRun ? ", dry-run" : "")
                  + (n.Force ? ", force" : "");
+        }
+        if (r.Kind == ToolJobKind.NormalizeConditions && r.Conditions is { } c)
+        {
+            return (c.Count > 0 ? $"count {c.Count}" : "all pending")
+                 + (c.DryRun ? ", dry-run" : "")
+                 + (c.Force ? ", force" : "");
         }
         if (r.Embed is { } e)
         {
