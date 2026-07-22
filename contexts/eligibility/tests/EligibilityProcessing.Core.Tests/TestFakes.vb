@@ -688,6 +688,90 @@ Friend NotInheritable Class FakeGateway
 
 End Class
 
+' ============ Fake IAnalyticsGateway ============
+
+' Used by CorpusReadCacheTests to prove GetCorpusConceptProfileAsync is cached
+' the same way the other two reads are - counters are the point, same as
+' FakeGateway's corpus-read knobs above.
+Friend NotInheritable Class FakeAnalyticsGateway
+    Implements IAnalyticsGateway
+
+    Public Property ProfileToReturn As IReadOnlyList(Of ConceptCount) = Array.Empty(Of ConceptCount)()
+    Public Property TrialCountToReturn As Integer = 0
+    Public Property CorpusReadError As Exception = Nothing
+
+    Private _profileCalls As Integer
+    Private _trialCountCalls As Integer
+
+    Public ReadOnly Property ProfileCalls As Integer
+        Get
+            Return Volatile.Read(_profileCalls)
+        End Get
+    End Property
+
+    Public ReadOnly Property TrialCountCalls As Integer
+        Get
+            Return Volatile.Read(_trialCountCalls)
+        End Get
+    End Property
+
+    Public Function GetCohortProfileAsync(cohort As AnalyticsCohort,
+                                          cancellationToken As CancellationToken) As Task(Of CohortProfile) _
+            Implements IAnalyticsGateway.GetCohortProfileAsync
+        Return Task.FromResult(New CohortProfile(0, Array.Empty(Of ConceptCount)()))
+    End Function
+
+    Public Function GetCorpusProfileAsync(
+            cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConceptCount)) _
+            Implements IAnalyticsGateway.GetCorpusProfileAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Interlocked.Increment(_profileCalls)
+        If CorpusReadError IsNot Nothing Then Return Task.FromException(Of IReadOnlyList(Of ConceptCount))(CorpusReadError)
+        Return Task.FromResult(ProfileToReturn)
+    End Function
+
+    Public Function GetCorpusTrialCountAsync(
+            cancellationToken As CancellationToken) As Task(Of Integer) _
+            Implements IAnalyticsGateway.GetCorpusTrialCountAsync
+        cancellationToken.ThrowIfCancellationRequested()
+        Interlocked.Increment(_trialCountCalls)
+        If CorpusReadError IsNot Nothing Then Return Task.FromException(Of Integer)(CorpusReadError)
+        Return Task.FromResult(TrialCountToReturn)
+    End Function
+
+    Public Function GetCohortDefiningCodesAsync(cohort As AnalyticsCohort,
+                                                cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of String)) _
+            Implements IAnalyticsGateway.GetCohortDefiningCodesAsync
+        Return Task.FromResult(CType(Array.Empty(Of String)(), IReadOnlyList(Of String)))
+    End Function
+
+    Public Function GetPrefNamesAsync(conceptCodes As IReadOnlyList(Of String),
+                                      cancellationToken As CancellationToken) As Task(Of IReadOnlyDictionary(Of String, String)) _
+            Implements IAnalyticsGateway.GetPrefNamesAsync
+        Return Task.FromResult(CType(New Dictionary(Of String, String)(), IReadOnlyDictionary(Of String, String)))
+    End Function
+
+    Public Function GetTrendAsync(conceptCode As String,
+                                  currentYear As Integer,
+                                  cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of TrendPoint)) _
+            Implements IAnalyticsGateway.GetTrendAsync
+        Return Task.FromResult(CType(Array.Empty(Of TrendPoint)(), IReadOnlyList(Of TrendPoint)))
+    End Function
+
+    Public Function GetConceptSummaryAsync(conceptCode As String,
+                                           cancellationToken As CancellationToken) As Task(Of ConceptSummary) _
+            Implements IAnalyticsGateway.GetConceptSummaryAsync
+        Return Task.FromResult(Of ConceptSummary)(Nothing)
+    End Function
+
+    Public Function SearchConceptsAsync(term As String, limit As Integer,
+                                        cancellationToken As CancellationToken) As Task(Of IReadOnlyList(Of ConceptSummary)) _
+            Implements IAnalyticsGateway.SearchConceptsAsync
+        Return Task.FromResult(CType(Array.Empty(Of ConceptSummary)(), IReadOnlyList(Of ConceptSummary)))
+    End Function
+
+End Class
+
 ' ============ Fake ILlmClient ============
 
 Friend NotInheritable Class FakeLlmClient

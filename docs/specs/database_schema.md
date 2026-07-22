@@ -105,7 +105,12 @@ Written per-trial as `DELETE WHERE nct_id = X; INSERT …` inside one transactio
 IS NULL OR concept_code = ''` — partial index backing the `retry-umls` trial
 selection (V19); `ix_eligibility_semantic_type_tuis` — GIN on
 `semantic_type_tuis`, backing containment queries
-(`semantic_type_tuis && ARRAY['T121']`) (V22).
+(`semantic_type_tuis && ARRAY['T121']`) (V22); `ix_eligibility_concept_nct
+(concept_code, nct_id)` - leads on `concept_code` so the Analytics cohort
+predicate seeks instead of scanning, and returns rows pre-ordered for the
+`count(DISTINCT nct_id)` group-by; `ix_eligibility_nct_concept (nct_id,
+concept_code)` - covers the join back from the cohort to the trial's other
+concepts without touching the heap (both V25).
 
 ### public.eligibility_run
 
@@ -657,6 +662,7 @@ case + spacing variants share one row. *(V20.)*
 | `V22__semantic_type_tuis.sql` | adds `public.eligibility.semantic_type_tuis text[]` + GIN index `ix_eligibility_semantic_type_tuis`; re-keys `umls.semantic_type` from `(cui, sty)` to `(cui, tui)` with `tui NOT NULL` and adds `ix_umls_semantic_type_sty`; adds `umls.semantic_type_dim` (TUI → name, ~132 rows) populated from existing data |
 | `V23__concept_hierarchy.sql` | adds `umls.concept_ancestor` (SNOMED-derived CUI hierarchy with precomputed transitive closure) + index `ix_umls_concept_ancestor_ancestor`. Shaped like OMOP `CONCEPT_ANCESTOR`. Populated by `load-umls --hierarchy-only`; empty until then |
 | `V24__condition_concept.sql` | adds `public.condition_concept` (condition -> UMLS CUI dictionary keyed on normalized condition string) + indexes `ix_condition_concept_code` and `ix_condition_concept_pending` |
+| `V25__analytics_indexes.sql` | adds composite indexes `ix_eligibility_concept_nct (concept_code, nct_id)` and `ix_eligibility_nct_concept (nct_id, concept_code)` on `public.eligibility`, backing the Analytics tab's cohort queries |
 
 ## Related specs
 

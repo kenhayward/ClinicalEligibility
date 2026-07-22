@@ -91,6 +91,9 @@ public class SignalRPipelineHooksTests
 
         public Task<EligibilityFilterOptions> GetEligibilityFilterOptionsAsync(int maxDropdownSize, CancellationToken ct)
             => Task.FromResult(EligibilityFilterOptions.Empty);
+
+        public Task<CorpusConceptProfile> GetCorpusConceptProfileAsync(CancellationToken ct)
+            => Task.FromResult(new CorpusConceptProfile(Array.Empty<ConceptCount>(), 0));
     }
 
     // Minimal IHubContext that records each SendAsync by method name. SendAsync is

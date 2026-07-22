@@ -217,7 +217,16 @@ else
                             <td>@row.Qualifier</td>
                             <td>@row.TimeWindow</td>
                             <td>@row.UmlsName</td>
-                            <td>@(string.IsNullOrEmpty(row.ConceptCode) ? "—" : row.ConceptCode)</td>
+                            <td>
+                                @if (string.IsNullOrEmpty(row.ConceptCode))
+                                {
+                                    <text>&mdash;</text>
+                                }
+                                else
+                                {
+                                    <a asp-action="Concept" asp-controller="Analytics" asp-route-code="@row.ConceptCode" class="text-decoration-none">@row.ConceptCode</a>
+                                }
+                            </td>
                             <td>@(string.IsNullOrEmpty(row.SemanticType) ? "—" : row.SemanticType)</td>
                             <td class="text-end">@row.MatchScore.ToString("F3")</td>
                             <td>@(string.IsNullOrEmpty(row.MatchSource) ? "—" : row.MatchSource)</td>

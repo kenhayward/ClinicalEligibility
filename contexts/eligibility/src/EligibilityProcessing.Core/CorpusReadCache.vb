@@ -4,7 +4,9 @@ Imports System.Threading.Tasks
 Imports Microsoft.Extensions.Caching.Memory
 
 ' IMemoryCache-backed ICorpusReadCache. See the interface for why only these
-' two reads are cached.
+' reads are cached: the dashboard aggregate, the Results filter options, and
+' the Analytics tab's corpus concept profile (the lift baseline, measured at
+' 2.0s and identical for every request).
 '
 ' In-memory rather than distributed (Redis) on purpose: the web host is a
 ' hard singleton - deploy/eligibility-pipeline/docker-compose.yml pins
@@ -36,18 +38,22 @@ Public NotInheritable Class CorpusReadCache
 
     Private Const MetricsKey As String = "corpus:dashboard-metrics"
     Private Const FilterOptionsKeyPrefix As String = "corpus:filter-options:"
+    Private Const CorpusProfileKey As String = "corpus:concept-profile"
 
     Private ReadOnly _inner As IPostgresGateway
+    Private ReadOnly _analytics As IAnalyticsGateway
     Private ReadOnly _cache As IMemoryCache
     Private ReadOnly _ttl As TimeSpan
 
     ' ttl <= TimeSpan.Zero disables caching entirely: every call goes straight
     ' to the gateway and nothing is stored. Kept as a supported mode so the
     ' behaviour can be switched off from config without a redeploy.
-    Public Sub New(inner As IPostgresGateway, cache As IMemoryCache, ttl As TimeSpan)
+    Public Sub New(inner As IPostgresGateway, analytics As IAnalyticsGateway, cache As IMemoryCache, ttl As TimeSpan)
         If inner Is Nothing Then Throw New ArgumentNullException(NameOf(inner))
+        If analytics Is Nothing Then Throw New ArgumentNullException(NameOf(analytics))
         If cache Is Nothing Then Throw New ArgumentNullException(NameOf(cache))
         _inner = inner
+        _analytics = analytics
         _cache = cache
         _ttl = ttl
     End Sub
@@ -102,6 +108,29 @@ Public NotInheritable Class CorpusReadCache
                 maxDropdownSize, cancellationToken).ConfigureAwait(False)
         _cache.Set(key, fresh, _ttl)
         Return fresh
+    End Function
+
+    Public Async Function GetCorpusConceptProfileAsync(
+            cancellationToken As CancellationToken) As Task(Of CorpusConceptProfile) _
+            Implements ICorpusReadCache.GetCorpusConceptProfileAsync
+
+        If Not IsEnabled Then
+            Return Await FetchCorpusConceptProfileAsync(cancellationToken).ConfigureAwait(False)
+        End If
+
+        Dim cached As CorpusConceptProfile = Nothing
+        If _cache.TryGetValue(CorpusProfileKey, cached) Then Return cached
+
+        Dim fresh = Await FetchCorpusConceptProfileAsync(cancellationToken).ConfigureAwait(False)
+        _cache.Set(CorpusProfileKey, fresh, _ttl)
+        Return fresh
+    End Function
+
+    Private Async Function FetchCorpusConceptProfileAsync(
+            cancellationToken As CancellationToken) As Task(Of CorpusConceptProfile)
+        Dim counts = Await _analytics.GetCorpusProfileAsync(cancellationToken).ConfigureAwait(False)
+        Dim trialCount = Await _analytics.GetCorpusTrialCountAsync(cancellationToken).ConfigureAwait(False)
+        Return New CorpusConceptProfile(counts, trialCount)
     End Function
 
 End Class
